@@ -11,10 +11,11 @@
 -- 7. Orders Table
 -- 8. Order Items Table
 -- 9. Payment Records Table
--- 10. Safe Atomic Inventory Deduction Function
--- 11. Profile Auto-Creation Trigger on Auth Signup
--- 12. Row Level Security (RLS) Policies for Public, Customers & Admins
--- 13. Comprehensive Seed Data (Categories, 14 Sample Products & Inventory)
+-- 10. Product Reviews Table
+-- 11. Safe Atomic Inventory Deduction Function
+-- 12. Profile Auto-Creation Trigger on Auth Signup
+-- 13. Row Level Security (RLS) Policies for Public, Customers & Admins
+-- 14. Comprehensive Seed Data (Categories, 14 Sample Products, Inventory & Reviews)
 -- ==============================================================================
 
 -- Enable UUID extension if not already enabled
@@ -229,7 +230,29 @@ CREATE TABLE IF NOT EXISTS public.payment_records (
 CREATE INDEX IF NOT EXISTS idx_payment_records_order ON public.payment_records(order_id);
 
 -- ==============================================================================
--- 10. SAFE INVENTORY DEDUCTION FUNCTION
+-- 10. PRODUCT REVIEWS TABLE
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.reviews (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id TEXT REFERENCES public.products(id) ON DELETE CASCADE NOT NULL,
+    user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    author_name TEXT NOT NULL,
+    author_email TEXT,
+    rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+    title TEXT,
+    comment TEXT NOT NULL,
+    verified_purchase BOOLEAN DEFAULT true NOT NULL,
+    helpful_votes INTEGER DEFAULT 0 CHECK (helpful_votes >= 0),
+    created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_reviews_product_id ON public.reviews(product_id);
+CREATE INDEX IF NOT EXISTS idx_reviews_user_id ON public.reviews(user_id);
+CREATE INDEX IF NOT EXISTS idx_reviews_created_at ON public.reviews(created_at DESC);
+
+-- ==============================================================================
+-- 11. SAFE INVENTORY DEDUCTION FUNCTION
 -- ==============================================================================
 CREATE OR REPLACE FUNCTION public.deduct_product_inventory(
     p_product_id TEXT,
@@ -265,7 +288,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- ==============================================================================
 -- 11. ROW LEVEL SECURITY (RLS) POLICIES
 -- ==============================================================================
--- Explicitly enable Row Level Security on all 10 public tables
+-- Explicitly enable Row Level Security on all 11 public tables
 ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.inventory ENABLE ROW LEVEL SECURITY;
@@ -276,6 +299,7 @@ ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.order_shipment_updates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payment_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.reviews ENABLE ROW LEVEL SECURITY;
 
 -- ------------------------------------------------------------------------------
 -- Admin Authorization Helper (Security Definer with isolated search_path)
@@ -597,6 +621,36 @@ CREATE POLICY "Admins can manage payment records" ON public.payment_records
     FOR ALL TO authenticated
     USING (public.is_admin())
     WITH CHECK (public.is_admin());
+
+-- ------------------------------------------------------------------------------
+-- 11. Product Reviews RLS: Public can view, Authenticated customers can submit
+-- ------------------------------------------------------------------------------
+DROP POLICY IF EXISTS "Public can view product reviews" ON public.reviews;
+CREATE POLICY "Public can view product reviews" ON public.reviews
+    FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Authenticated users can submit reviews" ON public.reviews;
+CREATE POLICY "Authenticated users can submit reviews" ON public.reviews
+    FOR INSERT TO authenticated
+    WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+
+DROP POLICY IF EXISTS "Users can update own reviews" ON public.reviews;
+CREATE POLICY "Users can update own reviews" ON public.reviews
+    FOR UPDATE TO authenticated
+    USING (auth.uid() = user_id OR public.is_admin())
+    WITH CHECK (auth.uid() = user_id OR public.is_admin());
+
+DROP POLICY IF EXISTS "Admins and authors can delete reviews" ON public.reviews;
+CREATE POLICY "Admins and authors can delete reviews" ON public.reviews
+    FOR DELETE TO authenticated
+    USING (auth.uid() = user_id OR public.is_admin());
+
+-- Allow helpful vote updates
+DROP POLICY IF EXISTS "Anyone can update review helpful votes" ON public.reviews;
+CREATE POLICY "Anyone can update review helpful votes" ON public.reviews
+    FOR UPDATE
+    USING (true)
+    WITH CHECK (true);
 
 -- ==============================================================================
 -- 12. SEED DATA: CATEGORIES
@@ -1064,3 +1118,17 @@ ON CONFLICT (product_id) DO UPDATE SET
     stock_count = EXCLUDED.stock_count,
     low_stock_threshold = EXCLUDED.low_stock_threshold,
     updated_at = timezone('utc'::text, now());
+
+-- ==============================================================================
+-- 14. SEED DATA: PRODUCT REVIEWS
+-- ==============================================================================
+INSERT INTO public.reviews (id, product_id, author_name, rating, title, comment, verified_purchase, helpful_votes, created_at)
+VALUES
+('a1111111-1111-4111-8111-111111111111', 'eko-prod-1', 'Rahul Sharma', 5, 'Unbelievable sound for this price!', 'The boAt Airdopes 141 Pro battery life is insane. I charged it once on Sunday and it lasted the entire week of office calls and workouts. ASAP charging is a lifesaver.', true, 18, NOW() - INTERVAL '4 days'),
+('a1111111-1111-4111-8111-111111111112', 'eko-prod-1', 'Ananya Gupta', 5, 'Crystal clear calling and instant pairing', 'The quad mics with ENx cancel out traffic noise effortlessly. Bluetooth 5.3 connection is instant the moment you flip open the lid.', true, 9, NOW() - INTERVAL '10 days'),
+('a1111111-1111-4111-8111-111111111113', 'eko-prod-2', 'Priya Patel', 5, 'Best smartwatch under ₹15,000', 'The rotating crown makes navigating through messages so smooth. Display is super crisp even in bright Indian afternoon sunlight. Calling quality is 10/10.', true, 24, NOW() - INTERVAL '6 days'),
+('a1111111-1111-4111-8111-111111111114', 'eko-prod-3', 'Amitabh Sen', 5, 'Solid build and perfect for daily commute', 'Carries my 15.6 inch Dell laptop, charger, umbrella, and water bottle comfortably. The shoulder padding is really thick and does not strain your back.', true, 15, NOW() - INTERVAL '12 days'),
+('a1111111-1111-4111-8111-111111111115', 'eko-prod-4', 'Vikram Rathore', 5, 'Extremely comfortable for morning running', 'The hyper-cushion sole absorbs impact very well on asphalt roads. Lightweight breathable mesh prevents sweat build up.', true, 11, NOW() - INTERVAL '15 days'),
+('a1111111-1111-4111-8111-111111111116', 'eko-prod-5', 'Meera Nambiar', 5, 'Induction base works like a charm', 'Heats evenly, does not burn lentils, and the safety valve gives great peace of mind. Genuine 304 food-grade steel.', true, 27, NOW() - INTERVAL '8 days')
+ON CONFLICT (id) DO NOTHING;
+

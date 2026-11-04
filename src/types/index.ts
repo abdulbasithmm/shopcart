@@ -77,6 +77,7 @@ export interface User {
 export interface Review {
   id: string;
   productId: string;
+  userId?: string;
   author: string;
   avatar?: string;
   rating: number;
@@ -84,6 +85,7 @@ export interface Review {
   title: string;
   comment: string;
   verified: boolean;
+  helpful?: number;
 }
 
 export type OrderStatus =
