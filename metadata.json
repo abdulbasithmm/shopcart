@@ -1,6 +1,6 @@
 {
-  "name": "Ekomart",
-  "description": "A modern, premium and responsive e-commerce shopping experience for electronics, fashion, home essentials, and lifestyle products.",
+  "name": "Shop Cart",
+  "description": "Shop Cart online shopping marketplace for electronics, fashion, home essentials, and lifestyle products.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

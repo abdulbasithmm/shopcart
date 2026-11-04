@@ -28,7 +28,7 @@ import { formatPrice } from '../../utils/format';
 
 interface HeaderProps {
   currentPage: PageView;
-  onNavigate: (page: PageView, params?: { productId?: string; category?: string; query?: string }) => void;
+  onNavigate: (page: PageView, params?: { productId?: string; category?: string; query?: string; tab?: string }) => void;
   onSearch: (query: string, category: string) => void;
   onOpenSupabaseModal?: () => void;
 }
@@ -39,7 +39,7 @@ export const Header: React.FC<HeaderProps> = ({
   onSearch,
   onOpenSupabaseModal,
 }) => {
-  const { cartCount, setIsCartDrawerOpen } = useCart();
+  const { cartCount, setIsCartDrawerOpen, wishlist } = useCart();
   const { user, isAuthenticated, logout } = useAuth();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -281,6 +281,23 @@ export const Header: React.FC<HeaderProps> = ({
                     <button
                       onClick={() => {
                         setIsUserMenuOpen(false);
+                        onNavigate('account', { tab: 'wishlist' });
+                      }}
+                      className="w-full text-left px-2 py-1.5 hover:bg-slate-50 rounded-md font-medium text-slate-700 hover:text-slate-900 flex items-center justify-between"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Heart className="w-3.5 h-3.5 text-rose-500 fill-rose-500" />
+                        <span>Your Wishlist</span>
+                      </span>
+                      {wishlist.length > 0 && (
+                        <span className="px-1.5 py-0.5 text-[10px] font-bold bg-rose-50 text-rose-600 rounded-full border border-rose-200">
+                          {wishlist.length}
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
                         onNavigate('admin-login');
                       }}
                       className="w-full text-left px-2 py-1.5 hover:bg-slate-50 rounded-md font-medium text-[#0b5c37] hover:text-[#08482b] flex items-center justify-between"
@@ -363,26 +380,26 @@ export const Header: React.FC<HeaderProps> = ({
           <button onClick={() => onNavigate('shop', { category: 'Groceries' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer">
             Fresh
           </button>
-          <button onClick={() => onNavigate('shop')} className="hover:text-[#0b5c37] transition-colors cursor-pointer">
+          <button onClick={() => onNavigate('shop', { category: 'Electronics' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer">
             Shop Cart TV
           </button>
           <button onClick={() => onNavigate('admin-login')} className="hover:text-[#0b5c37] transition-colors cursor-pointer font-semibold text-[#0b5c37]">
             Sell
           </button>
-          <button onClick={() => onNavigate('shop')} className="hover:text-[#0b5c37] transition-colors cursor-pointer">
+          <button onClick={() => onNavigate('shop', { query: 'bestseller' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer">
             Best Sellers
           </button>
           <button onClick={() => onNavigate('shop', { category: 'Mobiles' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer">
             Mobiles
           </button>
-          <button onClick={() => onNavigate('shop')} className="hover:text-[#0b5c37] transition-colors cursor-pointer font-semibold text-rose-600">
+          <button onClick={() => onNavigate('shop', { query: 'deal' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer font-semibold text-rose-600">
             Today&apos;s Deals
           </button>
           <button onClick={() => onNavigate('home')} className="hover:text-[#0b5c37] transition-colors cursor-pointer flex items-center gap-0.5">
             <span>Prime</span>
             <ChevronDown className="w-3 h-3 text-slate-400" />
           </button>
-          <button onClick={() => onNavigate('shop')} className="hover:text-[#0b5c37] transition-colors cursor-pointer">
+          <button onClick={() => onNavigate('shop', { query: 'new' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer">
             New Releases
           </button>
           <button onClick={() => onNavigate('contact')} className="hover:text-[#0b5c37] transition-colors cursor-pointer">

@@ -639,7 +639,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
             </div>
           </div>
 
-          {/* Primary Action Buttons: Add to Cart + Buy Now */}
+          {/* Primary Action Buttons: Add to Cart + Buy Now + Add to Wishlist */}
           <div className="space-y-3 pt-2">
             <button
               onClick={handleAddToCart}
@@ -656,6 +656,29 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
               <Zap className="w-4 h-4 fill-current" />
               <span>Buy Now — Instant Checkout</span>
             </button>
+
+            {/* Add to Wishlist Button */}
+            <button
+              onClick={() => toggleWishlist(product.id)}
+              className={`w-full py-3.5 px-6 text-xs sm:text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer border ${
+                isInWish
+                  ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200 shadow-2xs'
+                  : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-300 hover:border-slate-400 shadow-xs'
+              }`}
+            >
+              <Heart
+                className={`w-4 h-4 transition-transform ${
+                  isInWish ? 'fill-rose-500 text-rose-500 scale-110' : 'text-slate-600'
+                }`}
+              />
+              <span>{isInWish ? 'Saved in Your Wishlist (Remove)' : 'Add to Wishlist'}</span>
+            </button>
+
+            {/* Private Wishlist indicator */}
+            <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-500">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              <span>Private customer Wishlist synced with Supabase</span>
+            </div>
           </div>
 
           {/* Confidence & Delivery Guarantees */}

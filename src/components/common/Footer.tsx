@@ -61,7 +61,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenSupabaseModal 
                 <li>
                   <button
                     onClick={() => onNavigate('home')}
-                    className="hover:underline transition-colors text-left"
+                    className="hover:underline transition-colors text-left cursor-pointer"
                   >
                     About Shop Cart
                   </button>
@@ -69,16 +69,26 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenSupabaseModal 
                 <li>
                   <button
                     onClick={() => onNavigate('shop')}
-                    className="hover:underline transition-colors text-left"
+                    className="hover:underline transition-colors text-left cursor-pointer"
                   >
-                    Careers
+                    Careers &amp; Team
                   </button>
                 </li>
                 <li>
-                  <span className="hover:underline cursor-pointer">Press Releases</span>
+                  <button
+                    onClick={() => showToast('Shop Cart Press Centre: Eco-friendly packaging and carbon-neutral deliveries announced.', 'info')}
+                    className="hover:underline transition-colors text-left cursor-pointer"
+                  >
+                    Press Releases
+                  </button>
                 </li>
                 <li>
-                  <span className="hover:underline cursor-pointer">Shop Cart Innovation</span>
+                  <button
+                    onClick={() => showToast('Shop Cart Innovation: Exploring next-generation logistics and contactless returns.', 'info')}
+                    className="hover:underline transition-colors text-left cursor-pointer"
+                  >
+                    Shop Cart Innovation
+                  </button>
                 </li>
                 <li className="pt-2">
                   <button
@@ -86,7 +96,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenSupabaseModal 
                     className="text-[#38bdf8] hover:underline font-semibold flex items-center gap-1 cursor-pointer"
                   >
                     <Lock className="w-3 h-3" />
-                    <span>Staff & Admin Portal</span>
+                    <span>Staff &amp; Admin Portal</span>
                   </button>
                 </li>
               </ul>
@@ -96,9 +106,30 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenSupabaseModal 
             <div>
               <h4 className="font-bold text-white text-sm mb-3">Connect with Us</h4>
               <ul className="space-y-2 text-[#ccc]">
-                <li><span className="hover:underline cursor-pointer">Facebook</span></li>
-                <li><span className="hover:underline cursor-pointer">Twitter / X</span></li>
-                <li><span className="hover:underline cursor-pointer">Instagram</span></li>
+                <li>
+                  <button
+                    onClick={() => showToast('Connecting to Shop Cart Facebook Community...', 'info')}
+                    className="hover:underline transition-colors text-left cursor-pointer"
+                  >
+                    Facebook
+                  </button>
+                </li>
+                <li>
+                  <button
+                    onClick={() => showToast('Connecting to Shop Cart X / Twitter (@shopcart)...', 'info')}
+                    className="hover:underline transition-colors text-left cursor-pointer"
+                  >
+                    Twitter / X
+                  </button>
+                </li>
+                <li>
+                  <button
+                    onClick={() => showToast('Connecting to Shop Cart Instagram (@shopcart.in)...', 'info')}
+                    className="hover:underline transition-colors text-left cursor-pointer"
+                  >
+                    Instagram
+                  </button>
+                </li>
                 <li className="pt-2">
                   <span className="text-[11px] text-slate-400">Newsletter:</span>
                   {subscribed ? (
@@ -116,7 +147,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenSupabaseModal 
                       />
                       <button
                         type="submit"
-                        className="px-2.5 py-1 bg-[#0b5c37] hover:bg-[#08482b] text-white rounded text-xs font-bold shrink-0 transition-colors"
+                        className="px-2.5 py-1 bg-[#0b5c37] hover:bg-[#08482b] text-white rounded text-xs font-bold shrink-0 transition-colors cursor-pointer"
                       >
                         Join
                       </button>
@@ -130,12 +161,54 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenSupabaseModal 
             <div>
               <h4 className="font-bold text-white text-sm mb-3">Make Money with Us</h4>
               <ul className="space-y-2 text-[#ccc]">
-                <li><span className="hover:underline cursor-pointer">Sell on Shop Cart</span></li>
-                <li><span className="hover:underline cursor-pointer">Sell under Shop Cart Accelerator</span></li>
-                <li><span className="hover:underline cursor-pointer">Protect and Build Your Brand</span></li>
-                <li><span className="hover:underline cursor-pointer">Shop Cart Global Selling</span></li>
-                <li><span className="hover:underline cursor-pointer">Become an Affiliate</span></li>
-                <li><span className="hover:underline cursor-pointer">Fulfilment by Shop Cart</span></li>
+                <li>
+                  <button
+                    onClick={() => onNavigate('admin-login')}
+                    className="hover:underline transition-colors text-left cursor-pointer text-emerald-400 font-semibold"
+                  >
+                    Sell on Shop Cart
+                  </button>
+                </li>
+                <li>
+                  <button
+                    onClick={() => onNavigate('admin-login')}
+                    className="hover:underline transition-colors text-left cursor-pointer"
+                  >
+                    Sell under Brand Accelerator
+                  </button>
+                </li>
+                <li>
+                  <button
+                    onClick={() => onNavigate('contact')}
+                    className="hover:underline transition-colors text-left cursor-pointer"
+                  >
+                    Protect and Build Your Brand
+                  </button>
+                </li>
+                <li>
+                  <button
+                    onClick={() => onNavigate('contact')}
+                    className="hover:underline transition-colors text-left cursor-pointer"
+                  >
+                    Shop Cart Global Selling
+                  </button>
+                </li>
+                <li>
+                  <button
+                    onClick={() => onNavigate('contact')}
+                    className="hover:underline transition-colors text-left cursor-pointer"
+                  >
+                    Become an Affiliate
+                  </button>
+                </li>
+                <li>
+                  <button
+                    onClick={() => onNavigate('contact')}
+                    className="hover:underline transition-colors text-left cursor-pointer"
+                  >
+                    Fulfilment by Shop Cart
+                  </button>
+                </li>
               </ul>
             </div>
 
@@ -146,7 +219,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenSupabaseModal 
                 <li>
                   <button
                     onClick={() => onNavigate('account')}
-                    className="hover:underline transition-colors text-left"
+                    className="hover:underline transition-colors text-left cursor-pointer"
                   >
                     Your Account
                   </button>
@@ -154,20 +227,25 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenSupabaseModal 
                 <li>
                   <button
                     onClick={() => onNavigate('account')}
-                    className="hover:underline transition-colors text-left"
+                    className="hover:underline transition-colors text-left cursor-pointer"
                   >
                     Returns Centre
                   </button>
                 </li>
                 <li>
-                  <span className="hover:underline cursor-pointer">100% Purchase Protection</span>
+                  <button
+                    onClick={() => showToast('Shop Cart A-to-z Guarantee: 100% Purchase Protection on all products.', 'success')}
+                    className="hover:underline transition-colors text-left cursor-pointer text-amber-300"
+                  >
+                    100% Purchase Protection
+                  </button>
                 </li>
                 <li>
                   <button
                     onClick={() => onNavigate('contact')}
-                    className="hover:underline transition-colors text-left"
+                    className="hover:underline transition-colors text-left cursor-pointer"
                   >
-                    Help & Customer Service
+                    Help &amp; Customer Service
                   </button>
                 </li>
                 <li className="pt-2">
@@ -182,7 +260,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenSupabaseModal 
             </div>
           </div>
 
-          {/* Amazon Logo & Country/Language row */}
+          {/* Logo & Country/Language row */}
           <div className="mt-10 pt-8 border-t border-[#3a4553] flex flex-wrap items-center justify-center gap-6 text-xs text-[#ccc]">
             <div
               onClick={() => onNavigate('home')}
@@ -195,17 +273,19 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenSupabaseModal 
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                className="flex items-center gap-1.5 px-3 py-1.5 border border-[#848688] rounded text-xs text-white hover:border-white transition-colors"
+                onClick={() => showToast('Language: English (India)', 'info')}
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-[#848688] rounded text-xs text-white hover:border-white transition-colors cursor-pointer"
               >
                 <Globe className="w-3.5 h-3.5" />
                 <span>English</span>
               </button>
               <button
                 type="button"
-                className="flex items-center gap-1.5 px-3 py-1.5 border border-[#848688] rounded text-xs text-white hover:border-white transition-colors"
+                onClick={() => showToast('Country / Region: India (₹ INR)', 'info')}
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-[#848688] rounded text-xs text-white hover:border-white transition-colors cursor-pointer"
               >
                 <span>🇮🇳</span>
-                <span>India</span>
+                <span>India (₹)</span>
               </button>
             </div>
           </div>
@@ -216,47 +296,47 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenSupabaseModal 
       <div className="bg-[#131a22] text-[#999] py-8 text-[11px]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 mb-8 text-[#aaa]">
-            <div>
-              <p className="font-bold text-white hover:underline cursor-pointer">AbeBooks</p>
-              <p className="text-[#888]">Books, art & collectibles</p>
+            <div onClick={() => onNavigate('shop', { category: 'Books' })} className="cursor-pointer hover:text-white">
+              <p className="font-bold text-white hover:underline">AbeBooks</p>
+              <p className="text-[#888]">Books, art &amp; collectibles</p>
             </div>
-            <div>
-              <p className="font-bold text-white hover:underline cursor-pointer">Shop Cart Cloud</p>
+            <div onClick={() => onNavigate('contact')} className="cursor-pointer hover:text-white">
+              <p className="font-bold text-white hover:underline">Shop Cart Cloud</p>
               <p className="text-[#888]">Scalable Cloud Computing Services</p>
             </div>
-            <div>
-              <p className="font-bold text-white hover:underline cursor-pointer">Audible</p>
+            <div onClick={() => onNavigate('shop', { category: 'Electronics' })} className="cursor-pointer hover:text-white">
+              <p className="font-bold text-white hover:underline">Audible</p>
               <p className="text-[#888]">Download Audio Books</p>
             </div>
-            <div>
-              <p className="font-bold text-white hover:underline cursor-pointer">IMDb</p>
-              <p className="text-[#888]">Movies, TV & Celebrities</p>
+            <div onClick={() => onNavigate('home')} className="cursor-pointer hover:text-white">
+              <p className="font-bold text-white hover:underline">IMDb</p>
+              <p className="text-[#888]">Movies, TV &amp; Celebrities</p>
             </div>
-            <div>
-              <p className="font-bold text-white hover:underline cursor-pointer">Shopbop</p>
+            <div onClick={() => onNavigate('shop', { category: 'Fashion' })} className="cursor-pointer hover:text-white">
+              <p className="font-bold text-white hover:underline">Shopbop</p>
               <p className="text-[#888]">Designer Fashion Brands</p>
             </div>
-            <div>
-              <p className="font-bold text-white hover:underline cursor-pointer">Shop Cart Business</p>
+            <div onClick={() => onNavigate('admin-login')} className="cursor-pointer hover:text-white">
+              <p className="font-bold text-white hover:underline">Shop Cart Business</p>
               <p className="text-[#888]">Everything For Your Business</p>
             </div>
-            <div>
-              <p className="font-bold text-white hover:underline cursor-pointer">Prime Now</p>
+            <div onClick={() => onNavigate('shop')} className="cursor-pointer hover:text-white">
+              <p className="font-bold text-white hover:underline">Prime Now</p>
               <p className="text-[#888]">2-Hour Delivery on Everyday Items</p>
             </div>
-            <div>
-              <p className="font-bold text-white hover:underline cursor-pointer">Shop Cart Music</p>
+            <div onClick={() => onNavigate('shop', { category: 'Electronics' })} className="cursor-pointer hover:text-white">
+              <p className="font-bold text-white hover:underline">Shop Cart Music</p>
               <p className="text-[#888]">100 million songs, ad-free</p>
             </div>
           </div>
 
           <div className="pt-6 border-t border-[#232f3e] flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-[#888]">
             <div className="flex flex-wrap items-center justify-center gap-3">
-              <span className="hover:underline cursor-pointer">Conditions of Use & Sale</span>
+              <button onClick={() => showToast('Conditions of Use: All orders are subject to Shop Cart standard customer terms.', 'info')} className="hover:underline cursor-pointer">Conditions of Use &amp; Sale</button>
               <span>·</span>
-              <span className="hover:underline cursor-pointer">Privacy Notice</span>
+              <button onClick={() => showToast('Privacy Notice: Your personal information is encrypted and never shared.', 'info')} className="hover:underline cursor-pointer">Privacy Notice</button>
               <span>·</span>
-              <span className="hover:underline cursor-pointer">Interest-Based Ads</span>
+              <button onClick={() => showToast('Interest-Based Ads: You can customize your cookie preferences in account settings.', 'info')} className="hover:underline cursor-pointer">Interest-Based Ads</button>
             </div>
             <p>© 1996-2026, Shop Cart Inc. or its affiliates</p>
           </div>

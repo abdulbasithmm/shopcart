@@ -11,10 +11,12 @@ import {
   MessageSquare,
   HelpCircle,
   Building,
+  Loader2,
 } from 'lucide-react';
 import { PageView } from '../types';
 import { FAQ_ITEMS } from '../data/mockData';
 import { useToast } from '../context/ToastContext';
+import { ScrollReveal } from '../components/common/ScrollReveal';
 
 interface ContactPageProps {
   onNavigate: (page: PageView) => void;
@@ -31,6 +33,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
     message: '',
   });
 
+  const [isSending, setIsSending] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
 
@@ -41,8 +44,12 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
       return;
     }
 
-    setIsSubmitted(true);
-    showToast('Message sent! Our support team will reply within 4 hours.', 'success');
+    setIsSending(true);
+    setTimeout(() => {
+      setIsSending(false);
+      setIsSubmitted(true);
+      showToast('Message sent! Our support team will reply within 4 hours.', 'success');
+    }, 600);
   };
 
   const toggleFaq = (index: number) => {
@@ -53,15 +60,15 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-12">
       {/* Breadcrumb Navigation */}
       <nav className="flex items-center gap-2 text-xs text-slate-500">
-        <button onClick={() => onNavigate('home')} className="hover:text-[#0b5c37]">
+        <button onClick={() => onNavigate('home')} className="hover:text-[#0b5c37] cursor-pointer">
           Home
         </button>
         <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-        <span className="text-slate-900 font-semibold">Contact Concierge & FAQs</span>
+        <span className="text-slate-900 font-semibold">Contact Concierge &amp; FAQs</span>
       </nav>
 
       {/* Header Banner */}
-      <div className="text-center max-w-2xl mx-auto space-y-3">
+      <ScrollReveal animation="fade-up" className="text-center max-w-2xl mx-auto space-y-3">
         <span className="text-xs font-bold uppercase tracking-wider text-[#0b5c37]">
           Customer Concierge
         </span>
@@ -71,38 +78,38 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
         <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
           Whether you have an order question, need technical advice on acoustic headphones, or wish to explore commercial partnerships, we are here 24/7.
         </p>
-      </div>
+      </ScrollReveal>
 
       {/* Support Info Cards Strip */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="p-6 bg-white rounded-3xl border border-slate-200/90 shadow-2xs space-y-3">
+        <ScrollReveal animation="fade-up" delay={50} className="p-6 bg-white rounded-3xl border border-slate-200/90 shadow-2xs space-y-3">
           <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-[#0b5c37] flex items-center justify-center">
             <Phone className="w-5 h-5" />
           </div>
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">Toll-Free Phone</h3>
-          <p className="text-xs text-slate-600">Mon-Fri: 6am - 8pm PST<br />Sat-Sun: 8am - 5pm PST</p>
-          <p className="text-xs font-bold text-[#0b5c37]">+1 (800) 492-3566</p>
-        </div>
+          <p className="text-xs text-slate-600">Mon-Fri: 6am - 8pm IST<br />Sat-Sun: 8am - 5pm IST</p>
+          <p className="text-xs font-bold text-[#0b5c37]">+91 1800 200 4882</p>
+        </ScrollReveal>
 
-        <div className="p-6 bg-white rounded-3xl border border-slate-200/90 shadow-2xs space-y-3">
+        <ScrollReveal animation="fade-up" delay={100} className="p-6 bg-white rounded-3xl border border-slate-200/90 shadow-2xs space-y-3">
           <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-[#0b5c37] flex items-center justify-center">
             <Mail className="w-5 h-5" />
           </div>
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">Email Inquiries</h3>
           <p className="text-xs text-slate-600">Direct response within 4 hours guaranteed.</p>
-          <p className="text-xs font-bold text-[#0b5c37]">concierge@shopcart.com</p>
-        </div>
+          <p className="text-xs font-bold text-[#0b5c37]">support@shopcart.in</p>
+        </ScrollReveal>
 
-        <div className="p-6 bg-white rounded-3xl border border-slate-200/90 shadow-2xs space-y-3">
+        <ScrollReveal animation="fade-up" delay={150} className="p-6 bg-white rounded-3xl border border-slate-200/90 shadow-2xs space-y-3">
           <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-[#0b5c37] flex items-center justify-center">
             <MapPin className="w-5 h-5" />
           </div>
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">Flagship Presence</h3>
-          <p className="text-xs text-slate-600">500 Market St, Suite 1200<br />San Francisco, CA 94105</p>
-          <p className="text-xs font-bold text-[#0b5c37]">Visit Showroom</p>
-        </div>
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">Distribution Centre</h3>
+          <p className="text-xs text-slate-600">Cyber City, Tower B, Phase II<br />Gurugram, HR 122002</p>
+          <p className="text-xs font-bold text-[#0b5c37]">India Hub</p>
+        </ScrollReveal>
 
-        <div className="p-6 bg-white rounded-3xl border border-slate-200/90 shadow-2xs space-y-3">
+        <ScrollReveal animation="fade-up" delay={200} className="p-6 bg-white rounded-3xl border border-slate-200/90 shadow-2xs space-y-3">
           <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-[#0b5c37] flex items-center justify-center">
             <Clock className="w-5 h-5" />
           </div>
@@ -111,13 +118,13 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
           <span className="inline-block text-[11px] font-bold text-[#08482b] bg-emerald-100 px-2 py-0.5 rounded-full">
             ● Average wait: 2 mins
           </span>
-        </div>
+        </ScrollReveal>
       </div>
 
       {/* 2-Column: Contact Form & FAQ Accordion */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
         {/* Left Column: Form */}
-        <div className="lg:col-span-6 bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/90 shadow-2xs space-y-6">
+        <ScrollReveal animation="slide-left" className="lg:col-span-6 bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/90 shadow-2xs space-y-6">
           <div>
             <h2 className="text-xl font-bold text-slate-900">Send Us a Direct Message</h2>
             <p className="text-xs text-slate-500 mt-1">
@@ -178,10 +185,10 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
                     onChange={(e) => setFormData({ ...formData, topic: e.target.value })}
                     className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
                   >
-                    <option value="order_inquiry">Order Status & Tracking</option>
+                    <option value="order_inquiry">Order Status &amp; Tracking</option>
                     <option value="return_exchange">Return / Exchange Request</option>
                     <option value="product_question">Product Specifications</option>
-                    <option value="wholesale">Corporate & Wholesale Inquiries</option>
+                    <option value="wholesale">Corporate &amp; Wholesale Inquiries</option>
                   </select>
                 </div>
 
@@ -211,17 +218,27 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
 
               <button
                 type="submit"
-                className="w-full py-3.5 bg-[#0b5c37] hover:bg-[#08482b] text-white font-bold text-xs rounded-xl shadow-md transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                disabled={isSending}
+                className="w-full py-3.5 bg-[#0b5c37] hover:bg-[#08482b] text-white font-bold text-xs rounded-xl shadow-md transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
               >
-                <Send className="w-4 h-4" />
-                <span>Transmit Message</span>
+                {isSending ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Transmitting Message...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    <span>Transmit Message</span>
+                  </>
+                )}
               </button>
             </form>
           )}
-        </div>
+        </ScrollReveal>
 
         {/* Right Column: FAQ Accordion */}
-        <div className="lg:col-span-6 space-y-6">
+        <ScrollReveal animation="slide-right" className="lg:col-span-6 space-y-6">
           <div className="flex items-center gap-2">
             <HelpCircle className="w-5 h-5 text-[#0b5c37]" />
             <h2 className="text-xl font-bold text-slate-900">Frequently Asked Questions</h2>
@@ -245,24 +262,15 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
                     }`}
                   />
                 </button>
-
                 {openFaqIndex === index && (
-                  <div className="px-4 pb-4 text-xs text-slate-600 leading-relaxed border-t border-slate-100 pt-3 animate-in fade-in-50">
+                  <div className="px-4 pb-4 text-xs text-slate-600 leading-relaxed border-t border-slate-100 pt-3 animate-in fade-in-50 duration-200">
                     {faq.answer}
                   </div>
                 )}
               </div>
             ))}
           </div>
-
-          {/* Quick Support Promise */}
-          <div className="p-6 bg-slate-900 text-white rounded-3xl space-y-3">
-            <h3 className="text-sm font-bold text-white">Our 100% Satisfaction Guarantee</h3>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              If any product delivered does not meet your discerning expectations for any reason within 30 days, we arrange free return courier pickup and issue an immediate 100% refund.
-            </p>
-          </div>
-        </div>
+        </ScrollReveal>
       </div>
     </div>
   );

@@ -15,7 +15,8 @@ import {
   Users,
   ShieldCheck,
   ArrowRight,
-  MessageSquare
+  MessageSquare,
+  Heart
 } from 'lucide-react';
 import {
   isSupabaseConfigured,
@@ -324,7 +325,7 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ isOpen
           {activeTab === 'tables' && (
             <div className="space-y-4">
               <div className="text-xs text-slate-600">
-                All 11 required tables and atomic functions have been generated with Row Level Security (RLS) policies enabled.
+                All 12 required tables and atomic functions have been generated with Row Level Security (RLS) policies enabled.
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -385,6 +386,16 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ isOpen
                   </div>
                   <p className="text-[11px] text-slate-500">
                     Stores authenticated customer reviews (1–5 stars), verified purchase badges, review comments, and helpful votes in Supabase. Public read; authenticated customer submit.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1 sm:col-span-2">
+                  <div className="flex items-center gap-2 font-bold text-slate-900">
+                    <Heart className="w-4 h-4 text-rose-600" />
+                    wishlist (Customer Private Wishlist)
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Stores customers' private saved items in Supabase with RLS enforcement. Only the authenticated customer can view, add, or remove their own wishlist products.
                   </p>
                 </div>
               </div>

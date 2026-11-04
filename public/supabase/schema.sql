@@ -12,10 +12,11 @@
 -- 8. Order Items Table
 -- 9. Payment Records Table
 -- 10. Product Reviews Table
--- 11. Safe Atomic Inventory Deduction Function
--- 12. Profile Auto-Creation Trigger on Auth Signup
--- 13. Row Level Security (RLS) Policies for Public, Customers & Admins
--- 14. Comprehensive Seed Data (Categories, 14 Sample Products, Inventory & Reviews)
+-- 11. Customer Wishlist Table
+-- 12. Safe Atomic Inventory Deduction Function
+-- 13. Profile Auto-Creation Trigger on Auth Signup
+-- 14. Row Level Security (RLS) Policies for Public, Customers & Admins
+-- 15. Comprehensive Seed Data (Categories, 14 Sample Products, Inventory & Reviews)
 -- ==============================================================================
 
 -- Enable UUID extension if not already enabled
@@ -252,7 +253,22 @@ CREATE INDEX IF NOT EXISTS idx_reviews_user_id ON public.reviews(user_id);
 CREATE INDEX IF NOT EXISTS idx_reviews_created_at ON public.reviews(created_at DESC);
 
 -- ==============================================================================
--- 11. SAFE INVENTORY DEDUCTION FUNCTION
+-- 11. CUSTOMER WISHLIST TABLE
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.wishlist (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+    product_id TEXT REFERENCES public.products(id) ON DELETE CASCADE NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
+    UNIQUE (user_id, product_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_wishlist_user_id ON public.wishlist(user_id);
+CREATE INDEX IF NOT EXISTS idx_wishlist_product_id ON public.wishlist(product_id);
+CREATE INDEX IF NOT EXISTS idx_wishlist_created_at ON public.wishlist(created_at DESC);
+
+-- ==============================================================================
+-- 12. SAFE INVENTORY DEDUCTION FUNCTION
 -- ==============================================================================
 CREATE OR REPLACE FUNCTION public.deduct_product_inventory(
     p_product_id TEXT,
@@ -288,7 +304,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- ==============================================================================
 -- 11. ROW LEVEL SECURITY (RLS) POLICIES
 -- ==============================================================================
--- Explicitly enable Row Level Security on all 11 public tables
+-- Explicitly enable Row Level Security on all 12 public tables
 ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.inventory ENABLE ROW LEVEL SECURITY;
@@ -300,6 +316,7 @@ ALTER TABLE public.order_shipment_updates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payment_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reviews ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.wishlist ENABLE ROW LEVEL SECURITY;
 
 -- ------------------------------------------------------------------------------
 -- Admin Authorization Helper (Security Definer with isolated search_path)
@@ -652,8 +669,32 @@ CREATE POLICY "Anyone can update review helpful votes" ON public.reviews
     USING (true)
     WITH CHECK (true);
 
+-- ------------------------------------------------------------------------------
+-- 12. Customer Wishlist RLS: Private list per customer, Admins manage all
+-- ------------------------------------------------------------------------------
+DROP POLICY IF EXISTS "Users can view own wishlist" ON public.wishlist;
+CREATE POLICY "Users can view own wishlist" ON public.wishlist
+    FOR SELECT TO authenticated
+    USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can add to own wishlist" ON public.wishlist;
+CREATE POLICY "Users can add to own wishlist" ON public.wishlist
+    FOR INSERT TO authenticated
+    WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can remove from own wishlist" ON public.wishlist;
+CREATE POLICY "Users can remove from own wishlist" ON public.wishlist
+    FOR DELETE TO authenticated
+    USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Admins can view and manage all wishlists" ON public.wishlist;
+CREATE POLICY "Admins can view and manage all wishlists" ON public.wishlist
+    FOR ALL TO authenticated
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
+
 -- ==============================================================================
--- 12. SEED DATA: CATEGORIES
+-- 13. SEED DATA: CATEGORIES
 -- ==============================================================================
 INSERT INTO public.categories (id, slug, name, description, icon) VALUES
 ('all', 'all', 'All Categories', 'Discover thousands of premium curated products', 'LayoutGrid'),

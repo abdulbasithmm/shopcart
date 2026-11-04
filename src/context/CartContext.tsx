@@ -4,6 +4,12 @@ import { useToast } from './ToastContext';
 import { useAuth } from './AuthContext';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { fetchUserCartFromSupabase, syncCartWithSupabase } from '../services/cartService';
+import {
+  fetchUserWishlistFromSupabase,
+  addToWishlistSupabase,
+  removeFromWishlistSupabase,
+  syncWishlistWithSupabase,
+} from '../services/wishlistService';
 
 export interface Coupon {
   code: string;
@@ -24,6 +30,8 @@ export interface CartContextType {
   clearCart: () => void;
   wishlist: string[];
   toggleWishlist: (productId: string) => void;
+  addToWishlist: (productId: string) => void;
+  removeFromWishlist: (productId: string) => void;
   isInWishlist: (productId: string) => boolean;
   coupon: Coupon | null;
   applyCoupon: (code: string) => { success: boolean; message: string };
@@ -105,6 +113,16 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           if (remote.savedForLater.length > 0) {
             setSavedForLater(remote.savedForLater);
+          }
+        }
+
+        // Fetch customer's private wishlist from Supabase
+        const remoteWishlist = await fetchUserWishlistFromSupabase(user.id);
+        if (!isCancelled && remoteWishlist) {
+          if (remoteWishlist.productIds.length > 0) {
+            setWishlist(remoteWishlist.productIds);
+          } else if (wishlist.length > 0) {
+            syncWishlistWithSupabase(user.id, wishlist);
           }
         }
       }
@@ -317,13 +335,34 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const toggleWishlist = (productId: string) => {
     setWishlist((prev) => {
-      if (prev.includes(productId)) {
-        showToast('Removed from wishlist', 'info');
+      const isSaved = prev.includes(productId);
+      if (isSaved) {
+        removeFromWishlistSupabase(user?.id, productId).catch(console.warn);
+        showToast('Removed from your Wishlist', 'info');
         return prev.filter((id) => id !== productId);
       } else {
-        showToast('Saved to wishlist!', 'success');
+        addToWishlistSupabase(user?.id, productId).catch(console.warn);
+        showToast('Saved to your private Wishlist!', 'success');
         return [...prev, productId];
       }
+    });
+  };
+
+  const addToWishlist = (productId: string) => {
+    setWishlist((prev) => {
+      if (prev.includes(productId)) return prev;
+      addToWishlistSupabase(user?.id, productId).catch(console.warn);
+      showToast('Saved to your private Wishlist!', 'success');
+      return [...prev, productId];
+    });
+  };
+
+  const removeFromWishlist = (productId: string) => {
+    setWishlist((prev) => {
+      if (!prev.includes(productId)) return prev;
+      removeFromWishlistSupabase(user?.id, productId).catch(console.warn);
+      showToast('Removed from your Wishlist', 'info');
+      return prev.filter((id) => id !== productId);
     });
   };
 
@@ -381,6 +420,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         clearCart,
         wishlist,
         toggleWishlist,
+        addToWishlist,
+        removeFromWishlist,
         isInWishlist,
         coupon,
         applyCoupon,

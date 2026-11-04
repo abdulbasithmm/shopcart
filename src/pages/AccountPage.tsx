@@ -22,6 +22,8 @@ import {
   Check,
   RotateCcw,
   Eye,
+  Heart,
+  Trash2,
 } from 'lucide-react';
 import { PageView, Order, OrderItem } from '../types';
 import { PRODUCTS } from '../data/mockData';
@@ -40,10 +42,11 @@ import {
 } from '../utils/orderTracking';
 
 interface AccountPageProps {
-  onNavigate: (page: PageView) => void;
+  onNavigate: (page: PageView, params?: { productId?: string; category?: string; query?: string; tab?: string }) => void;
+  initialTab?: 'profile' | 'orders' | 'wishlist' | 'security';
 }
 
-export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate }) => {
+export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab }) => {
   const {
     user,
     isAuthenticated,
@@ -55,8 +58,17 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate }) => {
     isSupabaseBackend,
   } = useAuth();
   const { showToast } = useToast();
+  const { addToCart, wishlist, toggleWishlist } = useCart();
 
-  const [activeTab, setActiveTab] = useState<'profile' | 'orders' | 'security'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'orders' | 'wishlist' | 'security'>(
+    initialTab || 'profile'
+  );
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
 
   // Profile Form state
   const [name, setName] = useState(user?.name || '');
@@ -79,7 +91,6 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate }) => {
   const [trackingModalOrder, setTrackingModalOrder] = useState<Order | null>(null);
   const [orderFilterTab, setOrderFilterTab] = useState<'all' | 'in_progress' | 'delivered' | 'cancelled'>('all');
   const [copiedOrderId, setCopiedOrderId] = useState<string | null>(null);
-  const { addToCart } = useCart();
 
   const handleCopyOrderId = (idStr: string) => {
     navigator.clipboard.writeText(idStr);
@@ -334,6 +345,18 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate }) => {
         >
           <Package className="w-4 h-4" />
           <span>Order History ({orders.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('wishlist')}
+          className={`pb-3 px-2 text-xs font-bold border-b-2 transition-all flex items-center gap-2 cursor-pointer shrink-0 ${
+            activeTab === 'wishlist'
+              ? 'border-[#0b5c37] text-[#0b5c37]'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Heart className="w-4 h-4 text-rose-500" />
+          <span>Your Wishlist ({wishlist.length})</span>
         </button>
 
         <button
@@ -831,7 +854,135 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate }) => {
         </div>
       )}
 
-      {/* TAB 3: Security & Password */}
+      {/* TAB 3: Customer Wishlist */}
+      {activeTab === 'wishlist' && (
+        <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/90 shadow-sm space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+            <div>
+              <div className="flex items-center gap-2">
+                <Heart className="w-5 h-5 text-rose-500 fill-rose-500" />
+                <h2 className="text-base font-bold text-slate-900">Your Private Wishlist</h2>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-50 text-rose-600 border border-rose-200">
+                  {wishlist.length} item{wishlist.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Products saved to your private list stored securely in the Supabase <code className="font-mono text-[#0b5c37] bg-emerald-50 px-1 py-0.5 rounded">public.wishlist</code> table.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-[#0b5c37] border border-emerald-200 rounded-full text-xs font-semibold">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Supabase Sync Active</span>
+              </span>
+            </div>
+          </div>
+
+          {wishlist.length === 0 ? (
+            <div className="text-center py-16 space-y-4 max-w-md mx-auto">
+              <div className="w-16 h-16 bg-rose-50 text-rose-500 rounded-full flex items-center justify-center mx-auto shadow-inner">
+                <Heart className="w-8 h-8" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900">Your Wishlist is Empty</h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Save products you love while shopping so you can easily compare, track prices, or purchase them later. Click the "Add to Wishlist" button on any product page.
+              </p>
+              <button
+                onClick={() => onNavigate('shop')}
+                className="px-6 py-2.5 bg-[#0b5c37] hover:bg-[#08482b] text-white text-xs font-bold rounded-xl transition-all shadow-md cursor-pointer inline-flex items-center gap-2"
+              >
+                <ShoppingBag className="w-4 h-4" />
+                <span>Explore Products</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {wishlist.map((productId) => {
+                const prod = PRODUCTS.find((p) => p.id === productId);
+                if (!prod) return null;
+                return (
+                  <div
+                    key={prod.id}
+                    className="p-4 rounded-2xl border border-slate-200 hover:border-slate-300 transition-all bg-slate-50/50 flex flex-col sm:flex-row gap-4 items-center sm:items-start"
+                  >
+                    <div
+                      onClick={() => onNavigate('product', { productId: prod.id })}
+                      className="w-24 h-24 rounded-xl bg-white border border-slate-200/80 overflow-hidden shrink-0 flex items-center justify-center cursor-pointer group"
+                    >
+                      <ProductImage
+                        product={prod}
+                        className="w-full h-full p-2 group-hover:scale-105 transition-transform"
+                      />
+                    </div>
+
+                    <div className="flex-1 min-w-0 space-y-1.5 text-center sm:text-left w-full">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold uppercase text-[#0b5c37] tracking-wider">
+                          {prod.brand}
+                        </span>
+                        <span className="text-[11px] text-emerald-700 bg-emerald-50 font-bold px-2 py-0.5 rounded-full">
+                          In Stock ({prod.stockCount})
+                        </span>
+                      </div>
+
+                      <h4
+                        onClick={() => onNavigate('product', { productId: prod.id })}
+                        className="text-xs sm:text-sm font-bold text-slate-900 truncate hover:text-[#0b5c37] cursor-pointer"
+                        title={prod.name}
+                      >
+                        {prod.name}
+                      </h4>
+
+                      <div className="flex items-baseline justify-center sm:justify-start gap-2">
+                        <span className="text-sm font-black text-slate-900 tabular-nums">
+                          {formatPrice(prod.price)}
+                        </span>
+                        {prod.originalPrice > prod.price && (
+                          <span className="text-xs text-slate-400 line-through tabular-nums">
+                            {formatPrice(prod.originalPrice)}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="pt-2 flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                        <button
+                          onClick={() => {
+                            addToCart(prod, 1);
+                            showToast(`Added ${prod.name} to cart!`, 'success');
+                          }}
+                          className="px-3.5 py-1.5 bg-[#0b5c37] hover:bg-[#08482b] text-white text-xs font-bold rounded-lg shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                          <ShoppingBag className="w-3.5 h-3.5" />
+                          <span>Move to Cart</span>
+                        </button>
+
+                        <button
+                          onClick={() => toggleWishlist(prod.id)}
+                          className="px-3 py-1.5 bg-white hover:bg-rose-50 text-slate-600 hover:text-rose-600 border border-slate-200 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                          title="Remove from wishlist"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Remove</span>
+                        </button>
+
+                        <button
+                          onClick={() => onNavigate('product', { productId: prod.id })}
+                          className="px-2.5 py-1.5 text-xs text-slate-500 hover:text-slate-800 font-medium cursor-pointer"
+                        >
+                          View Details &rarr;
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 4: Security & Password */}
       {activeTab === 'security' && (
         <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/90 shadow-sm space-y-6">
           <div>

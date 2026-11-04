@@ -9,6 +9,7 @@ import { CartDrawer } from './components/common/CartDrawer';
 import { QuickViewModal } from './components/common/QuickViewModal';
 import { SupabaseStatusModal } from './components/common/SupabaseStatusModal';
 import { AdminGuard } from './components/AdminGuard';
+import { BackToTop } from './components/common/BackToTop';
 
 // Pages
 import { HomePage } from './pages/HomePage';
@@ -108,6 +109,7 @@ function AppContent() {
   const [shopSearchQuery, setShopSearchQuery] = useState<string>('');
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
+  const [accountTab, setAccountTab] = useState<'profile' | 'orders' | 'wishlist' | 'security'>('profile');
 
   // Synchronize with URL pathname and hash for browser back/forward and direct links
   useEffect(() => {
@@ -136,8 +138,12 @@ function AppContent() {
 
   const handleNavigate = (
     page: PageView,
-    params?: { productId?: string; category?: string; query?: string }
+    params?: { productId?: string; category?: string; query?: string; tab?: string }
   ) => {
+    if (params?.tab) {
+      setAccountTab(params.tab as any);
+    }
+
     let targetPath = '/';
     let targetHash = '';
 
@@ -244,7 +250,9 @@ function AppContent() {
 
         {currentPage === 'register' && <RegisterPage onNavigate={handleNavigate} />}
 
-        {currentPage === 'account' && <AccountPage onNavigate={handleNavigate} />}
+        {currentPage === 'account' && (
+          <AccountPage onNavigate={handleNavigate} initialTab={accountTab} />
+        )}
 
         {currentPage === 'reset-password' && <ResetPasswordPage onNavigate={handleNavigate} />}
 
@@ -291,6 +299,9 @@ function AppContent() {
         isOpen={isSupabaseModalOpen}
         onClose={() => setIsSupabaseModalOpen(false)}
       />
+
+      {/* Floating Back to Top Button */}
+      <BackToTop />
     </div>
   );
 }
