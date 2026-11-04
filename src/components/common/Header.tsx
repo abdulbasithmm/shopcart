@@ -93,12 +93,28 @@ export const Header: React.FC<HeaderProps> = ({
             </span>
           </div>
 
-          <button
-            onClick={() => onNavigate('shop')}
-            className="px-3.5 py-1 bg-white hover:bg-slate-100 text-[#093d22] text-[11px] font-bold rounded-md shadow-xs transition-colors shrink-0 cursor-pointer"
-          >
-            Shop Now
-          </button>
+          <div className="flex items-center gap-2.5 shrink-0">
+            {/* Database status indicator badge */}
+            <button
+              onClick={() => onOpenSupabaseModal?.()}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold tracking-wider uppercase border cursor-pointer transition-all ${
+                isSupabaseConfigured()
+                  ? 'bg-emerald-950/90 text-emerald-300 border-emerald-500/50 hover:bg-emerald-900 shadow-xs'
+                  : 'bg-amber-950/90 text-amber-300 border-amber-500/50 hover:bg-amber-900 shadow-xs'
+              }`}
+              title="Click to view database connection status and enter Supabase credentials"
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${isSupabaseConfigured() ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+              <span>{isSupabaseConfigured() ? 'LIVE SUPABASE' : 'LOCAL STORAGE FALLBACK'}</span>
+            </button>
+
+            <button
+              onClick={() => onNavigate('shop')}
+              className="px-3.5 py-1 bg-white hover:bg-slate-100 text-[#093d22] text-[11px] font-bold rounded-md shadow-xs transition-colors shrink-0 cursor-pointer"
+            >
+              Shop Now
+            </button>
+          </div>
         </div>
       </div>
 

@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
 
@@ -398,6 +399,213 @@ app.post('/api/admin/verify-payment', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     return res.status(500).json({ error: err.message || 'Failed to verify payment' });
+  }
+});
+
+// 6. Check Supabase Live Connection Status
+app.get('/api/supabase/status', async (_req: Request, res: Response) => {
+  const currentUrl = (process.env.VITE_SUPABASE_URL || '').trim();
+  const currentKey = (process.env.VITE_SUPABASE_ANON_KEY || '').trim();
+
+  const isConfigured = Boolean(currentUrl && currentKey && !currentUrl.includes('your-project-id') && currentUrl.startsWith('http'));
+
+  if (!isConfigured) {
+    return res.json({
+      configured: false,
+      isLive: false,
+      url: currentUrl ? `${currentUrl.slice(0, 15)}...` : '',
+      message: 'Supabase credentials are not configured in environment or .env file. Running in local storage fallback mode.',
+    });
+  }
+
+  const startTime = Date.now();
+  try {
+    const testClient = createClient(currentUrl, currentKey, {
+      auth: { persistSession: false },
+    });
+
+    const { data: categories, error: catError } = await testClient
+      .from('categories')
+      .select('id, name')
+      .limit(10);
+
+    const latencyMs = Date.now() - startTime;
+
+    if (catError) {
+      return res.json({
+        configured: true,
+        isLive: false,
+        url: currentUrl,
+        latencyMs,
+        message: `Connected to Supabase URL, but database returned error: ${catError.message}`,
+        error: catError,
+      });
+    }
+
+    const { data: products } = await testClient
+      .from('products')
+      .select('id')
+      .limit(5);
+
+    return res.json({
+      configured: true,
+      isLive: true,
+      url: currentUrl,
+      latencyMs,
+      categoryCount: categories?.length || 0,
+      productCount: products?.length || 0,
+      message: `Successfully connected to live Supabase PostgreSQL (${latencyMs}ms latency). ${categories?.length || 0} categories, ${products?.length || 0}+ products verified.`,
+    });
+  } catch (err: any) {
+    return res.json({
+      configured: true,
+      isLive: false,
+      url: currentUrl,
+      latencyMs: Date.now() - startTime,
+      message: `Failed to ping Supabase: ${err.message}`,
+    });
+  }
+});
+
+// 7. Verify Supabase Credentials against live tables
+app.post('/api/supabase/verify', async (req: Request, res: Response) => {
+  try {
+    const { url, anonKey } = req.body;
+
+    if (!url || !anonKey) {
+      return res.status(400).json({ success: false, message: 'Please provide both Supabase Project URL and Anon Public Key.' });
+    }
+
+    const trimmedUrl = String(url).trim();
+    const trimmedKey = String(anonKey).trim();
+
+    if (!trimmedUrl.startsWith('https://')) {
+      return res.status(400).json({ success: false, message: 'Supabase Project URL must start with https://' });
+    }
+
+    const startTime = Date.now();
+    const client = createClient(trimmedUrl, trimmedKey, { auth: { persistSession: false } });
+
+    // Test 1: Categories
+    const { data: cats, error: catErr } = await client.from('categories').select('id, name').limit(15);
+    if (catErr) {
+      return res.status(400).json({
+        success: false,
+        step: 'categories',
+        latencyMs: Date.now() - startTime,
+        message: `Categories query failed: ${catErr.message}. Ensure supabase/schema.sql has been executed in the Supabase SQL Editor.`,
+      });
+    }
+
+    // Test 2: Products
+    const { data: prods, error: prodErr } = await client.from('products').select('id, name, price').limit(15);
+    if (prodErr) {
+      return res.status(400).json({
+        success: false,
+        step: 'products',
+        latencyMs: Date.now() - startTime,
+        message: `Products query failed: ${prodErr.message}`,
+      });
+    }
+
+    // Test 3: Inventory
+    const { data: inv, error: invErr } = await client.from('inventory').select('product_id, stock_count').limit(15);
+    if (invErr) {
+      return res.status(400).json({
+        success: false,
+        step: 'inventory',
+        latencyMs: Date.now() - startTime,
+        message: `Inventory query failed: ${invErr.message}`,
+      });
+    }
+
+    // Test 4: RLS policy isolation on orders
+    const { data: orders, error: orderErr } = await client.from('orders').select('id').limit(1);
+
+    const latencyMs = Date.now() - startTime;
+
+    return res.json({
+      success: true,
+      latencyMs,
+      url: trimmedUrl,
+      verifiedTables: {
+        categories: cats?.length || 0,
+        products: prods?.length || 0,
+        inventory: inv?.length || 0,
+        ordersIsolatedByRLS: !orderErr,
+      },
+      message: `Verified! Successfully queried live PostgreSQL tables in ${latencyMs}ms.`,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err.message || 'Verification exception' });
+  }
+});
+
+// 8. Persist Supabase Credentials to .env and runtime
+app.post('/api/supabase/save', async (req: Request, res: Response) => {
+  try {
+    const { url, anonKey } = req.body;
+
+    if (!url || !anonKey) {
+      return res.status(400).json({ success: false, message: 'Missing URL or Anon Key' });
+    }
+
+    const trimmedUrl = String(url).trim();
+    const trimmedKey = String(anonKey).trim();
+
+    // Verify first
+    const client = createClient(trimmedUrl, trimmedKey, { auth: { persistSession: false } });
+    const { error: testErr } = await client.from('categories').select('id').limit(1);
+
+    if (testErr) {
+      return res.status(400).json({
+        success: false,
+        message: `Connection failed: ${testErr.message}. Please check your Project URL and Anon Key.`,
+      });
+    }
+
+    // Update in-memory environment variables
+    process.env.VITE_SUPABASE_URL = trimmedUrl;
+    process.env.VITE_SUPABASE_ANON_KEY = trimmedKey;
+
+    // Write / update .env file on disk
+    const envPath = path.resolve(process.cwd(), '.env');
+    let envContent = '';
+    if (fs.existsSync(envPath)) {
+      envContent = fs.readFileSync(envPath, 'utf-8');
+    }
+
+    const lines = envContent.split('\n');
+    let hasUrl = false;
+    let hasKey = false;
+
+    const newLines = lines.map((l) => {
+      if (l.trim().startsWith('VITE_SUPABASE_URL=')) {
+        hasUrl = true;
+        return `VITE_SUPABASE_URL="${trimmedUrl}"`;
+      }
+      if (l.trim().startsWith('VITE_SUPABASE_ANON_KEY=')) {
+        hasKey = true;
+        return `VITE_SUPABASE_ANON_KEY="${trimmedKey}"`;
+      }
+      return l;
+    });
+
+    if (!hasUrl) {
+      newLines.push(`VITE_SUPABASE_URL="${trimmedUrl}"`);
+    }
+    if (!hasKey) {
+      newLines.push(`VITE_SUPABASE_ANON_KEY="${trimmedKey}"`);
+    }
+
+    fs.writeFileSync(envPath, newLines.filter(Boolean).join('\n') + '\n', 'utf-8');
+
+    return res.json({
+      success: true,
+      message: 'Supabase credentials saved and verified against live database!',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err.message || 'Failed to save configuration' });
   }
 });
 

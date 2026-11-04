@@ -243,6 +243,61 @@ export async function createOrder(params: CreateOrderParams): Promise<OrderResul
       }
     }
 
+    // Mirror order locally for immediate responsiveness
+    try {
+      const localOrders: Order[] = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
+      const newOrderRecord: Order = {
+        id: orderId,
+        order_number: params.orderNumber,
+        user_id: params.user?.id || null,
+        guest_email: params.guestEmail || params.shippingAddress.fullName || null,
+        status: initialStatus,
+        subtotal: params.subtotal,
+        discount_amount: params.discountAmount,
+        shipping_fee: params.shippingFee,
+        tax_amount: params.taxAmount,
+        total_amount: params.totalAmount,
+        coupon_code: params.couponCode || null,
+        shipping_address: params.shippingAddress,
+        customer_notes: params.customerNotes || null,
+        tracking_number: trackingNumber,
+        carrier: carrier,
+        estimated_delivery_date: estimatedDeliveryISO,
+        shipment_updates: initialShipmentUpdates,
+        paymentMethod: params.paymentMethod,
+        paymentStatus: params.paymentStatus,
+        transactionReference: params.transactionReference || null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        order_items: params.cart.map((item) => ({
+          product_id: item.product.id,
+          product_name: item.product.name,
+          unit_price: item.product.price,
+          quantity: item.quantity,
+          total_price: Number((item.product.price * item.quantity).toFixed(2)),
+          selected_color: item.selectedColor || null,
+          selected_size: item.selectedSize || null,
+          product: item.product,
+        })),
+        payment_records: [
+          {
+            id: `pay-${Date.now()}`,
+            payment_method: params.paymentMethod,
+            amount: params.totalAmount,
+            currency: 'INR',
+            payment_status: params.paymentStatus,
+            transaction_reference: params.transactionReference || null,
+            created_at: new Date().toISOString(),
+          },
+        ],
+      };
+      const filtered = localOrders.filter((o) => o.order_number !== params.orderNumber);
+      filtered.unshift(newOrderRecord);
+      localStorage.setItem('shopcart_orders', JSON.stringify(filtered));
+    } catch {
+      // Ignore storage error
+    }
+
     return {
       success: true,
       orderId,
@@ -291,7 +346,20 @@ export async function fetchUserOrders(userId: string): Promise<Order[]> {
       return local.filter((o) => !o.user_id || o.user_id === userId);
     }
 
-    return (data || []).map(normalizeOrderRecord);
+    const remote = (data || []).map(normalizeOrderRecord);
+    let local: Order[] = [];
+    try {
+      local = JSON.parse(localStorage.getItem('shopcart_orders') || '[]').filter((o: Order) => o.user_id === userId);
+    } catch {
+      local = [];
+    }
+
+    const map = new Map<string, Order>();
+    local.forEach((o) => map.set(o.order_number, o));
+    remote.forEach((o) => map.set(o.order_number, o));
+    return Array.from(map.values()).sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
   } catch (err) {
     console.warn('Exception in fetchUserOrders:', err);
     return [];
@@ -302,12 +370,15 @@ export async function fetchUserOrders(userId: string): Promise<Order[]> {
  * Fetch all orders for administrator
  */
 export async function fetchAllAdminOrders(): Promise<Order[]> {
+  let localOrders: Order[] = [];
+  try {
+    localOrders = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
+  } catch {
+    localOrders = [];
+  }
+
   if (!isSupabaseConfigured()) {
-    try {
-      return JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
-    } catch {
-      return [];
-    }
+    return localOrders;
   }
 
   try {
@@ -318,13 +389,19 @@ export async function fetchAllAdminOrders(): Promise<Order[]> {
 
     if (error) {
       console.warn('Failed to fetch admin orders from Supabase:', error.message);
-      return JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
+      return localOrders;
     }
 
-    return (data || []).map(normalizeOrderRecord);
+    const remoteOrders = (data || []).map(normalizeOrderRecord);
+    const orderMap = new Map<string, Order>();
+    localOrders.forEach((o) => orderMap.set(o.order_number, o));
+    remoteOrders.forEach((o) => orderMap.set(o.order_number, o));
+    return Array.from(orderMap.values()).sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
   } catch (err) {
     console.warn('Exception in fetchAllAdminOrders:', err);
-    return [];
+    return localOrders;
   }
 }
 

@@ -78,6 +78,7 @@ import {
 
 interface AdminPageProps {
   onNavigate: (page: PageView) => void;
+  onOpenSupabaseModal?: () => void;
 }
 
 export type AdminSection =
@@ -91,7 +92,7 @@ export type AdminSection =
   | 'analytics'
   | 'settings';
 
-export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate }) => {
+export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabaseModal }) => {
   const { user, logout } = useAuth();
   const { showToast } = useToast();
 
@@ -173,16 +174,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate }) => {
     try {
       if (isSupabaseConfigured()) {
         // 1. Fetch Orders with Items and Payments
-        const { data: ordersData, error: ordersErr } = await supabase
-          .from('orders')
-          .select('*, order_items(*), payment_records(*)')
-          .order('created_at', { ascending: false });
-
-        if (ordersData && ordersData.length > 0) {
-          setOrders(ordersData);
-        } else {
-          loadLocalOrders();
-        }
+        const adminOrders = await fetchAllAdminOrders();
+        setOrders(adminOrders);
 
         // 2. Fetch Products
         const prodRes = await fetchProducts();
@@ -922,11 +915,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate }) => {
               <span className="text-xs uppercase font-mono font-bold tracking-wider text-[#0b5c37]">
                 Staff Console · {activeSection.toUpperCase()}
               </span>
-              <span className="text-slate-300">|</span>
-              <span className="text-xs text-slate-500 flex items-center gap-1.5">
-                <Database className="w-3.5 h-3.5 text-emerald-600" />
-                <span>{isSupabaseConfigured() ? 'Supabase PostgreSQL (Connected)' : 'Local Engine'}</span>
-              </span>
+              <button
+                onClick={() => onOpenSupabaseModal?.()}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase border cursor-pointer transition-colors ${
+                  isSupabaseConfigured()
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                    : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+                }`}
+                title="Click to view or update Supabase database connection"
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${isSupabaseConfigured() ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                <span>{isSupabaseConfigured() ? 'LIVE SUPABASE (POSTGRESQL)' : 'LOCAL STORAGE FALLBACK'}</span>
+              </button>
             </div>
             <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-1 capitalize">
               {activeSection === 'dashboard'
@@ -940,6 +940,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate }) => {
           </div>
 
           <div className="flex items-center gap-2.5">
+            <button
+              onClick={() => onOpenSupabaseModal?.()}
+              className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors flex items-center gap-2 cursor-pointer"
+              title="Open Supabase Database Configuration & Diagnostics"
+            >
+              <Database className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden sm:inline">Database Config</span>
+            </button>
+
             <button
               onClick={loadAdminData}
               disabled={isLoading}

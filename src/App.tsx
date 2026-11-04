@@ -268,7 +268,10 @@ function AppContent() {
 
         {currentPage === 'admin' && (
           <AdminGuard onNavigate={handleNavigate}>
-            <AdminPage onNavigate={handleNavigate} />
+            <AdminPage
+              onNavigate={handleNavigate}
+              onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
+            />
           </AdminGuard>
         )}
       </main>
