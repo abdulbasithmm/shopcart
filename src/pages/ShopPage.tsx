@@ -609,7 +609,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
 
               {(minPrice > 0 || maxPrice < 25000) && (
                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-200 text-slate-800 text-xs font-semibold">
-                  <span>Price: ${minPrice} – {formatPrice(maxPrice)}</span>
+                  <span>Price: {formatPrice(minPrice)} – {formatPrice(maxPrice)}</span>
                   <button
                     onClick={() => {
                       setMinPrice(0);
@@ -670,37 +670,37 @@ export const ShopPage: React.FC<ShopPageProps> = ({
             </div>
           ) : viewMode === 'grid' ? (
             /* Responsive Product Grid */
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
+            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-3 sm:gap-6">
               {paginatedProducts.map((product) => {
                 const inWish = isInWishlist(product.id);
                 return (
                   <div
                     key={product.id}
-                    className="group bg-white rounded-3xl border border-slate-200/90 hover:border-[#0b5c37] hover:shadow-xl transition-all duration-300 flex flex-col justify-between overflow-hidden"
+                    className="group bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 hover:border-[#0b5c37] hover:shadow-xl transition-all duration-300 flex flex-col justify-between overflow-hidden"
                   >
                     {/* Image Area with Badges & Action Buttons */}
                     <div
-                      className="relative cursor-pointer p-4 pb-2"
+                      className="relative cursor-pointer p-2.5 sm:p-4 pb-1 sm:pb-2"
                       onClick={() => onNavigate('product', { productId: product.id })}
                     >
                       <ProductImage product={product} size="md" />
 
                       {/* Floating Action Buttons */}
-                      <div className="absolute top-6 right-6 flex flex-col gap-2 z-10">
+                      <div className="absolute top-3 sm:top-6 right-3 sm:right-6 flex flex-col gap-1.5 sm:gap-2 z-10">
                         {/* Wishlist Button */}
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             toggleWishlist(product.id);
                           }}
-                          className={`w-9 h-9 rounded-full shadow-md flex items-center justify-center transition-all cursor-pointer ${
+                          className={`w-7 h-7 sm:w-9 sm:h-9 rounded-full shadow-md flex items-center justify-center transition-all cursor-pointer ${
                             inWish
                               ? 'bg-rose-500 text-white'
                               : 'bg-white/90 text-slate-700 hover:bg-white hover:text-rose-500'
                           }`}
                           title={inWish ? 'Remove from Wishlist' : 'Add to Wishlist'}
                         >
-                          <Heart className={`w-4 h-4 ${inWish ? 'fill-current' : ''}`} />
+                          <Heart className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${inWish ? 'fill-current' : ''}`} />
                         </button>
 
                         {/* Quick View Button */}
@@ -709,87 +709,88 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                             e.stopPropagation();
                             onQuickView(product);
                           }}
-                          className="w-9 h-9 rounded-full bg-white/90 hover:bg-white text-slate-700 hover:text-[#0b5c37] shadow-md flex items-center justify-center transition-all cursor-pointer"
+                          className="w-7 h-7 sm:w-9 sm:h-9 rounded-full bg-white/90 hover:bg-white text-slate-700 hover:text-[#0b5c37] shadow-md flex items-center justify-center transition-all cursor-pointer hidden xs:flex"
                           title="Quick View"
                         >
-                          <Eye className="w-4 h-4" />
+                          <Eye className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                         </button>
                       </div>
 
                       {/* Stock Indicator Pill */}
-                      <div className="absolute bottom-4 left-6">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/90 backdrop-blur-xs text-slate-700 shadow-2xs border border-slate-200/80">
+                      <div className="absolute bottom-2.5 sm:bottom-4 left-3 sm:left-6">
+                        <span className="inline-flex items-center gap-1 px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-bold bg-white/90 backdrop-blur-xs text-slate-700 shadow-2xs border border-slate-200/80">
                           <span className={`w-1.5 h-1.5 rounded-full ${product.inStock ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                          <span>{product.inStock ? `In Stock (${product.stockCount})` : 'Out of Stock'}</span>
+                          <span className="hidden sm:inline">{product.inStock ? `In Stock (${product.stockCount})` : 'Out of Stock'}</span>
+                          <span className="sm:hidden">{product.inStock ? 'In Stock' : 'Out'}</span>
                         </span>
                       </div>
                     </div>
 
                     {/* Product Metadata & Actions */}
-                    <div className="p-5 pt-2 flex-1 flex flex-col justify-between space-y-4">
+                    <div className="p-3 sm:p-5 pt-1 sm:pt-2 flex-1 flex flex-col justify-between space-y-3 sm:space-y-4">
                       <div>
                         {/* Brand & Rating Header */}
-                        <div className="flex items-center justify-between text-[11px] mb-1.5">
-                          <span className="uppercase tracking-wider font-extrabold text-[#0b5c37]">
+                        <div className="flex items-center justify-between text-[10px] sm:text-[11px] mb-1">
+                          <span className="uppercase tracking-wider font-extrabold text-[#0b5c37] truncate max-w-[90px] sm:max-w-none">
                             {product.brand}
                           </span>
-                          <span className="flex items-center gap-1 text-slate-800 font-bold">
-                            <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                          <span className="flex items-center gap-0.5 sm:gap-1 text-slate-800 font-bold shrink-0">
+                            <Star className="w-3 h-3 sm:w-3.5 sm:h-3.5 fill-amber-400 text-amber-400" />
                             <span>{product.rating}</span>
-                            <span className="text-slate-400 text-[10px]">({product.reviewsCount})</span>
+                            <span className="text-slate-400 text-[9px] sm:text-[10px] hidden sm:inline">({product.reviewsCount})</span>
                           </span>
                         </div>
 
                         {/* Product Title */}
                         <h3
                           onClick={() => onNavigate('product', { productId: product.id })}
-                          className="text-sm font-bold text-slate-900 group-hover:text-[#0b5c37] transition-colors line-clamp-1 cursor-pointer"
+                          className="text-xs sm:text-sm font-bold text-slate-900 group-hover:text-[#0b5c37] transition-colors line-clamp-1 cursor-pointer leading-snug"
                         >
                           {product.name}
                         </h3>
 
                         {/* Short Description */}
-                        <p className="text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed">
+                        <p className="text-[11px] sm:text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed hidden sm:block">
                           {product.shortDescription}
                         </p>
                       </div>
 
                       {/* Pricing Breakdown */}
-                      <div className="pt-3 border-t border-slate-100">
-                        <div className="flex items-baseline justify-between mb-3">
-                          <div className="flex items-baseline gap-2">
-                            <span className="text-lg font-black text-slate-950 tabular-nums">
+                      <div className="pt-2 sm:pt-3 border-t border-slate-100">
+                        <div className="flex items-baseline justify-between mb-2 sm:mb-3 flex-wrap gap-1">
+                          <div className="flex items-baseline gap-1.5 sm:gap-2">
+                            <span className="text-sm sm:text-lg font-black text-slate-950 tabular-nums">
                               {formatPrice(product.price)}
                             </span>
                             {product.originalPrice > product.price && (
-                              <span className="text-xs text-slate-400 line-through tabular-nums">
+                              <span className="text-[10px] sm:text-xs text-slate-400 line-through tabular-nums">
                                 {formatPrice(product.originalPrice)}
                               </span>
                             )}
                           </div>
                           {product.discountPercentage && product.discountPercentage > 0 && (
-                            <span className="text-[11px] font-extrabold text-[#08482b] bg-emerald-50 px-2 py-0.5 rounded-md">
-                              Save {product.discountPercentage}%
+                            <span className="text-[9px] sm:text-[11px] font-extrabold text-[#08482b] bg-emerald-50 px-1.5 py-0.5 rounded-md">
+                              {product.discountPercentage}% OFF
                             </span>
                           )}
                         </div>
 
                         {/* Dual Action Buttons: Add to Cart + Buy Now */}
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2">
                           <button
                             onClick={() => addToCart(product, 1)}
-                            className="py-2.5 px-3 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                            className="py-1.5 sm:py-2.5 px-2 sm:px-3 bg-slate-900 hover:bg-slate-800 text-white text-[11px] sm:text-xs font-bold rounded-lg sm:rounded-xl transition-colors flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer shadow-2xs min-h-[34px] sm:min-h-[40px]"
                           >
                             <ShoppingBag className="w-3.5 h-3.5" />
-                            <span>Add to Cart</span>
+                            <span>Add</span>
                           </button>
 
                           <button
                             onClick={() => handleBuyNow(product)}
-                            className="py-2.5 px-3 bg-[#0b5c37] hover:bg-[#08482b] text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer shadow-md shadow-emerald-900/10"
+                            className="py-1.5 sm:py-2.5 px-2 sm:px-3 bg-[#0b5c37] hover:bg-[#08482b] text-white text-[11px] sm:text-xs font-bold rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer shadow-md shadow-emerald-900/10 min-h-[34px] sm:min-h-[40px]"
                           >
                             <Zap className="w-3.5 h-3.5 fill-current" />
-                            <span>Buy Now</span>
+                            <span>Buy</span>
                           </button>
                         </div>
                       </div>

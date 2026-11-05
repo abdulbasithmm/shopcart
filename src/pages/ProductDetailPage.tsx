@@ -518,27 +518,27 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
           </div>
 
           {/* Pricing Box & Savings */}
-          <div className="p-5 rounded-2xl bg-emerald-50/40 border border-emerald-200/70 flex items-baseline justify-between">
+          <div className="p-4 sm:p-5 rounded-2xl bg-emerald-50/40 border border-emerald-200/70 flex flex-wrap items-baseline justify-between gap-3">
             <div>
-              <div className="flex items-baseline gap-3">
-                <span className="text-3xl sm:text-4xl font-black text-slate-950 tabular-nums">
+              <div className="flex items-baseline gap-2.5 sm:gap-3 flex-wrap">
+                <span className="text-2xl sm:text-4xl font-black text-slate-950 tabular-nums">
                   {formatPrice(product.price)}
                 </span>
                 {product.originalPrice > product.price && (
-                  <span className="text-base sm:text-lg text-slate-400 line-through tabular-nums font-semibold">
+                  <span className="text-sm sm:text-lg text-slate-400 line-through tabular-nums font-semibold">
                     {formatPrice(product.originalPrice)}
                   </span>
                 )}
               </div>
-              <p className="text-[11px] text-slate-500 mt-1">
+              <p className="text-[10px] sm:text-[11px] text-slate-500 mt-1">
                 Includes all applicable taxes · Free insured courier shipping
               </p>
             </div>
 
             {product.discountPercentage && product.discountPercentage > 0 && (
               <div className="text-right">
-                <span className="inline-block px-3 py-1 bg-[#0b5c37] text-white text-xs font-black rounded-lg shadow-2xs">
-                  Save ${product.originalPrice - product.price} ({product.discountPercentage}%)
+                <span className="inline-block px-2.5 sm:px-3 py-1 bg-[#0b5c37] text-white text-[11px] sm:text-xs font-black rounded-lg shadow-2xs">
+                  Save {formatPrice(product.originalPrice - product.price)} ({product.discountPercentage}%)
                 </span>
               </div>
             )}

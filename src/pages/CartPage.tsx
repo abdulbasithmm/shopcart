@@ -513,7 +513,7 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
                       {/* Line Total */}
                       <div className="text-right min-w-24">
                         <div className="text-base font-extrabold text-slate-900 tabular-nums">
-                          ${(item.product.price * item.quantity).toFixed(2)}
+                          {formatPrice(item.product.price * item.quantity)}
                         </div>
                         <div className="text-[11px] text-slate-400 hidden sm:block">
                           ({formatPrice(item.product.price)} / unit)

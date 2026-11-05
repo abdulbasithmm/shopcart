@@ -113,31 +113,31 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onQuickView }) =
           {/* Left Arrow */}
           <button
             onClick={handlePrevSlide}
-            className="absolute left-2 sm:left-4 z-20 w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-white/95 hover:bg-white shadow-md border border-slate-200/90 flex items-center justify-center text-slate-700 hover:text-slate-950 cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95"
+            className="absolute left-1 sm:left-4 z-20 w-8 h-8 sm:w-11 sm:h-11 rounded-full bg-white/95 hover:bg-white shadow-md border border-slate-200/90 flex items-center justify-center text-slate-700 hover:text-slate-950 cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95"
             aria-label="Previous slide"
           >
-            <ChevronLeft className="w-5 h-5" />
+            <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
 
           {/* Right Arrow */}
           <button
             onClick={handleNextSlide}
-            className="absolute right-2 sm:right-4 z-20 w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-white/95 hover:bg-white shadow-md border border-slate-200/90 flex items-center justify-center text-slate-700 hover:text-slate-950 cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95"
+            className="absolute right-1 sm:right-4 z-20 w-8 h-8 sm:w-11 sm:h-11 rounded-full bg-white/95 hover:bg-white shadow-md border border-slate-200/90 flex items-center justify-center text-slate-700 hover:text-slate-950 cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95"
             aria-label="Next slide"
           >
-            <ChevronRight className="w-5 h-5" />
+            <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
 
           {/* SLIDE 0: UPGRADE YOUR EVERYDAY (REFERENCE SCREENSHOT THEME) */}
           {heroSlide === 0 && (
             <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-8 items-center animate-in fade-in duration-500">
               {/* Left Column: Heading, Subtitle, CTA & 3 Badges */}
-              <div className="lg:col-span-5 space-y-5 z-10">
+              <div className="lg:col-span-5 space-y-4 sm:space-y-5 z-10">
                 <div className="space-y-1">
-                  <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-[#111827] tracking-tight leading-tight">
+                  <h1 className="text-2xl sm:text-4xl lg:text-5xl font-extrabold text-[#111827] tracking-tight leading-tight">
                     Upgrade your
                   </h1>
-                  <div className="text-4xl sm:text-5xl lg:text-6xl font-black text-[#0b5c37] tracking-tight leading-none">
+                  <div className="text-3xl sm:text-5xl lg:text-6xl font-black text-[#0b5c37] tracking-tight leading-none">
                     Everyday
                   </div>
                 </div>
@@ -271,10 +271,10 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onQuickView }) =
                 </div>
 
                 <div className="space-y-1">
-                  <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-[#111827] tracking-tight leading-tight">
+                  <h1 className="text-2xl sm:text-4xl lg:text-5xl font-extrabold text-[#111827] tracking-tight leading-tight">
                     Smart Tech &amp;
                   </h1>
-                  <div className="text-4xl sm:text-5xl lg:text-6xl font-black text-[#0b5c37] tracking-tight leading-none">
+                  <div className="text-3xl sm:text-5xl lg:text-6xl font-black text-[#0b5c37] tracking-tight leading-none">
                     Wireless Audio
                   </div>
                 </div>
@@ -354,10 +354,10 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onQuickView }) =
                 </div>
 
                 <div className="space-y-1">
-                  <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-[#111827] tracking-tight leading-tight">
+                  <h1 className="text-2xl sm:text-4xl lg:text-5xl font-extrabold text-[#111827] tracking-tight leading-tight">
                     Modern Living &amp;
                   </h1>
-                  <div className="text-4xl sm:text-5xl lg:text-6xl font-black text-[#0b5c37] tracking-tight leading-none">
+                  <div className="text-3xl sm:text-5xl lg:text-6xl font-black text-[#0b5c37] tracking-tight leading-none">
                     Home Kitchen
                   </div>
                 </div>
@@ -449,7 +449,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onQuickView }) =
       {/* 2. VALUE PROPOSITION STRIP (4 PILLARS IN CLEAN WHITE CARD) */}
       {/* --------------------------------------------------------------------- */}
       <ScrollReveal animation="fade-up" delay={50} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="bg-white rounded-lg border border-slate-200 shadow-xs p-4 sm:p-6 grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
+        <div className="bg-white rounded-lg border border-slate-200 shadow-xs p-4 sm:p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
           {/* Pillar 1: Fast & Free Delivery */}
           <div className="flex items-center gap-3.5 pt-2 sm:pt-0">
             <div className="text-[#0b5c37] shrink-0">
@@ -511,14 +511,14 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onQuickView }) =
           </button>
         </ScrollReveal>
 
-        {/* 7 Circular Category Badges */}
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 gap-4 sm:gap-6">
+        {/* 7 Circular Category Badges - Swipeable on mobile, pristine grid on desktop */}
+        <div className="flex md:grid md:grid-cols-7 gap-4 sm:gap-6 overflow-x-auto no-scrollbar touch-pan-x pb-2 md:pb-0 justify-start md:justify-center">
           {categoryList.map((cat, idx) => (
             <ScrollReveal
               key={idx}
               animation="zoom-in"
               delay={idx * 60}
-              className="flex flex-col items-center gap-2.5 cursor-pointer group select-none text-center"
+              className="flex flex-col items-center gap-2.5 cursor-pointer group select-none text-center shrink-0 w-20 sm:w-24 md:w-auto"
             >
               <div
                 onClick={() => onNavigate('shop', { category: cat.name })}
@@ -606,13 +606,13 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onQuickView }) =
 
         {/* Deals Grid matching screenshot items */}
         <div className="relative">
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
             {currentDeals.map((deal, idx) => (
               <ScrollReveal
                 key={deal.id}
                 animation="fade-up"
                 delay={idx * 70}
-                className="bg-white rounded-lg border border-slate-200 p-3.5 flex flex-col justify-between hover:shadow-md transition-all duration-200 cursor-pointer group"
+                className="bg-white rounded-lg border border-slate-200 p-2.5 sm:p-3.5 flex flex-col justify-between hover:shadow-md transition-all duration-200 cursor-pointer group"
               >
                 <div onClick={() => onNavigate('product', { productId: deal.id })}>
                   {/* Product Image Canvas */}

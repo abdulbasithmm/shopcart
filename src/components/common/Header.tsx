@@ -84,20 +84,20 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="sticky top-0 z-40 bg-white border-b border-slate-200">
       {/* 1. TOP ANNOUNCEMENT BAR (DARK GREEN MATCHING SCREENSHOT) */}
-      <div className="bg-[#093d22] text-white text-[11px] sm:text-xs py-2 px-4 font-medium">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 overflow-hidden text-ellipsis whitespace-nowrap">
-            <span className="text-sm">🌱</span>
-            <span className="tracking-wide">
+      <div className="bg-[#093d22] text-white text-[11px] sm:text-xs py-1.5 sm:py-2 px-3 sm:px-4 font-medium">
+        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-1.5 sm:gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 overflow-hidden text-ellipsis whitespace-nowrap min-w-0">
+            <span className="text-xs sm:text-sm shrink-0">🌱</span>
+            <span className="tracking-wide truncate text-[10px] sm:text-xs">
               Summer Sale: Up to 50% Off on Top Brands | Limited Time Offer!
             </span>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0 ml-auto">
             {/* Database status indicator badge */}
             <button
               onClick={() => onOpenSupabaseModal?.()}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold tracking-wider uppercase border cursor-pointer transition-all ${
+              className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-md text-[9px] sm:text-[10px] font-bold tracking-wider uppercase border cursor-pointer transition-all ${
                 isSupabaseConfigured()
                   ? 'bg-emerald-950/90 text-emerald-300 border-emerald-500/50 hover:bg-emerald-900 shadow-xs'
                   : 'bg-amber-950/90 text-amber-300 border-amber-500/50 hover:bg-amber-900 shadow-xs'
@@ -105,12 +105,13 @@ export const Header: React.FC<HeaderProps> = ({
               title="Click to view database connection status and enter Supabase credentials"
             >
               <span className={`w-1.5 h-1.5 rounded-full ${isSupabaseConfigured() ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-              <span>{isSupabaseConfigured() ? 'LIVE SUPABASE' : 'LOCAL STORAGE FALLBACK'}</span>
+              <span className="hidden sm:inline">{isSupabaseConfigured() ? 'LIVE SUPABASE' : 'LOCAL STORAGE FALLBACK'}</span>
+              <span className="sm:hidden">{isSupabaseConfigured() ? 'LIVE' : 'FALLBACK'}</span>
             </button>
 
             <button
               onClick={() => onNavigate('shop')}
-              className="px-3.5 py-1 bg-white hover:bg-slate-100 text-[#093d22] text-[11px] font-bold rounded-md shadow-xs transition-colors shrink-0 cursor-pointer"
+              className="px-2.5 sm:px-3.5 py-0.5 sm:py-1 bg-white hover:bg-slate-100 text-[#093d22] text-[10px] sm:text-[11px] font-bold rounded-md shadow-xs transition-colors shrink-0 cursor-pointer"
             >
               Shop Now
             </button>
@@ -118,29 +119,58 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* 2. MAIN HEADER BAR (CRISP WHITE AMAZON STYLE) */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 bg-white">
-        <div className="flex items-center justify-between gap-3 md:gap-6">
-          {/* Hamburger + Logo */}
-          <div className="flex items-center gap-3 shrink-0">
-            <button
-              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="p-1.5 text-slate-800 hover:text-slate-950 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
-              aria-label="Toggle navigation"
-            >
-              <Menu className="w-6 h-6 stroke-[2]" />
-            </button>
+      {/* 2. MAIN HEADER BAR (CRISP WHITE AMAZON STYLE - FULLY RESPONSIVE) */}
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2 sm:py-3 bg-white">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5 md:gap-6">
+          {/* Top Row on Mobile: Hamburger + Logo on left, User Actions on right */}
+          <div className="flex items-center justify-between w-full md:w-auto gap-2">
+            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+              <button
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                className="p-2 text-slate-800 hover:text-slate-950 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer min-w-[40px] min-h-[40px] flex items-center justify-center"
+                aria-label="Toggle navigation"
+              >
+                <Menu className="w-6 h-6 stroke-[2]" />
+              </button>
 
-            {/* Amazon Logo with Smile */}
-            <div onClick={() => onNavigate('home')}>
-              <AmazonLogo variant="dark" size="md" />
+              {/* Amazon Logo with Smile */}
+              <div onClick={() => onNavigate('home')}>
+                <AmazonLogo variant="dark" size="md" />
+              </div>
+            </div>
+
+            {/* Mobile Actions: Account + Cart (visible on mobile, hidden on md+) */}
+            <div className="flex items-center gap-1 sm:gap-2 md:hidden text-slate-800">
+              <button
+                onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                className="px-2 py-1.5 hover:bg-slate-100 rounded-lg text-xs font-bold text-slate-900 flex items-center gap-1 min-h-[40px] cursor-pointer"
+                aria-label="Account menu"
+              >
+                <span className="text-[11px] font-semibold text-slate-700 max-w-[80px] truncate">
+                  {isAuthenticated && user ? user.name.split(' ')[0] : 'Sign in'}
+                </span>
+                <ChevronDown className="w-3 h-3 text-slate-500" />
+              </button>
+
+              <button
+                onClick={() => setIsCartDrawerOpen(true)}
+                className="p-2 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer relative min-h-[40px] min-w-[40px] flex items-center justify-center"
+                aria-label="Shopping Cart"
+              >
+                <div className="relative">
+                  <ShoppingCart className="w-6 h-6 stroke-[2] text-slate-900" />
+                  <span className="absolute -top-1.5 -right-2 bg-[#0b5c37] text-white text-[10px] font-black w-4 h-4 rounded-full flex items-center justify-center">
+                    {cartCount}
+                  </span>
+                </div>
+              </button>
             </div>
           </div>
 
-          {/* Center Search Bar with All ▾ and Green Search Button */}
-          <div ref={searchContainerRef} className="flex-1 max-w-2xl relative">
+          {/* Center Search Bar: Full width on mobile (< md), flex-1 on tablet & desktop (md+) */}
+          <div ref={searchContainerRef} className="w-full md:flex-1 md:max-w-2xl relative">
             <form onSubmit={handleSearchSubmit} className="relative flex items-center">
-              {/* Category selector on left */}
+              {/* Category selector on left (hidden on small screens, shown on md+) */}
               <div className="relative hidden md:block">
                 <select
                   value={selectedCategory}
@@ -169,13 +199,13 @@ export const Header: React.FC<HeaderProps> = ({
                   setIsSearchFocused(true);
                 }}
                 onFocus={() => setIsSearchFocused(true)}
-                className="w-full py-2.5 px-3.5 text-xs sm:text-sm bg-white text-slate-900 placeholder:text-slate-500 border border-slate-300 focus:outline-none focus:border-[#0b5c37] focus:ring-1 focus:ring-[#0b5c37] md:rounded-l-none rounded-l-md transition-all"
+                className="w-full py-2 sm:py-2.5 px-3.5 text-xs sm:text-sm bg-white text-slate-900 placeholder:text-slate-500 border border-slate-300 focus:outline-none focus:border-[#0b5c37] focus:ring-1 focus:ring-[#0b5c37] md:rounded-l-none rounded-l-md transition-all min-h-[40px]"
               />
 
               {/* Dark Forest Green Search Button */}
               <button
                 type="submit"
-                className="p-2.5 bg-[#0b5c37] hover:bg-[#08482b] text-white rounded-r-md border border-[#0b5c37] transition-colors flex items-center justify-center shrink-0 cursor-pointer shadow-xs"
+                className="p-2 sm:p-2.5 bg-[#0b5c37] hover:bg-[#08482b] text-white rounded-r-md border border-[#0b5c37] transition-colors flex items-center justify-center shrink-0 cursor-pointer shadow-xs min-h-[40px] min-w-[42px]"
                 title="Search"
               >
                 <Search className="w-4 h-4 stroke-[2.5]" />
@@ -184,7 +214,7 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* Autocomplete dropdown suggestions */}
             {isSearchFocused && filteredSuggestions.length > 0 && (
-              <div className="absolute left-0 right-0 top-full mt-1 bg-white rounded-lg shadow-xl border border-slate-200 overflow-hidden z-50">
+              <div className="absolute left-0 right-0 top-full mt-1 bg-white rounded-lg shadow-xl border border-slate-200 overflow-hidden z-50 max-h-72 overflow-y-auto">
                 <div className="p-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-50 border-b border-slate-100">
                   Quick Matching Suggestions
                 </div>
@@ -198,11 +228,11 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                       className="p-2.5 hover:bg-slate-50 cursor-pointer flex items-center justify-between transition-colors"
                     >
-                      <div className="flex items-center gap-2.5">
-                        <span className="text-xs font-semibold text-slate-900">{prod.name}</span>
-                        <span className="text-[11px] text-slate-400">in {prod.category}</span>
+                      <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                        <span className="text-xs font-semibold text-slate-900 truncate">{prod.name}</span>
+                        <span className="text-[11px] text-slate-400 shrink-0">in {prod.category}</span>
                       </div>
-                      <span className="text-xs font-bold text-[#0b5c37] tabular-nums">
+                      <span className="text-xs font-bold text-[#0b5c37] tabular-nums shrink-0">
                         {formatPrice(prod.price)}
                       </span>
                     </div>
@@ -212,8 +242,8 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </div>
 
-          {/* Right Action Cluster: Flag, Account, Orders, Cart */}
-          <div className="flex items-center gap-2 sm:gap-4 shrink-0 text-slate-800">
+          {/* Desktop Right Action Cluster: Flag, Account, Orders, Cart (shown on md+) */}
+          <div className="hidden md:flex items-center gap-2 sm:gap-4 shrink-0 text-slate-800">
             {/* Language / Country Selector: Indian Flag EN */}
             <div className="relative hidden lg:block">
               <button
@@ -243,7 +273,7 @@ export const Header: React.FC<HeaderProps> = ({
 
               {/* User Dropdown Menu */}
               {isUserMenuOpen && (
-                <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-xl shadow-2xl border border-slate-200 p-4 z-50 animate-in fade-in-50 duration-150 text-slate-800">
+                <div className="absolute right-0 top-full mt-2 w-64 max-w-[calc(100vw-24px)] bg-white rounded-xl shadow-2xl border border-slate-200 p-4 z-50 animate-in fade-in-50 duration-150 text-slate-800">
                   {!isAuthenticated ? (
                     <div className="pb-3 border-b border-slate-100 text-center">
                       <button
@@ -382,43 +412,43 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* 3. SUB-NAVIGATION STRIP (MATCHING REFERENCE EXACTLY) */}
-      <div className="bg-[#f8f9fa] border-t border-b border-slate-200/80 px-4 sm:px-6 lg:px-8 py-1.5 text-xs text-slate-700 font-medium overflow-x-auto no-scrollbar">
-        <div className="max-w-7xl mx-auto flex items-center gap-4 sm:gap-6 whitespace-nowrap">
+      <div className="bg-[#f8f9fa] border-t border-b border-slate-200/80 px-3 sm:px-6 lg:px-8 py-1.5 text-xs text-slate-700 font-medium overflow-x-auto no-scrollbar touch-pan-x">
+        <div className="max-w-7xl mx-auto flex items-center gap-3 sm:gap-6 whitespace-nowrap">
           {/* All menu */}
           <button
             onClick={() => onNavigate('shop')}
-            className="flex items-center gap-1.5 font-bold text-slate-900 hover:text-[#0b5c37] transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 font-bold text-slate-900 hover:text-[#0b5c37] transition-colors cursor-pointer py-1"
           >
             <Menu className="w-4 h-4" />
             <span>All</span>
           </button>
 
-          <button onClick={() => onNavigate('shop', { category: 'Groceries' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer">
+          <button onClick={() => onNavigate('shop', { category: 'Groceries' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer py-1">
             Fresh
           </button>
-          <button onClick={() => onNavigate('shop', { category: 'Electronics' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer">
+          <button onClick={() => onNavigate('shop', { category: 'Electronics' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer py-1">
             Shop Cart TV
           </button>
-          <button onClick={() => onNavigate('admin-login')} className="hover:text-[#0b5c37] transition-colors cursor-pointer font-semibold text-[#0b5c37]">
+          <button onClick={() => onNavigate('admin-login')} className="hover:text-[#0b5c37] transition-colors cursor-pointer font-semibold text-[#0b5c37] py-1">
             Sell
           </button>
-          <button onClick={() => onNavigate('shop', { query: 'bestseller' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer">
+          <button onClick={() => onNavigate('shop', { query: 'bestseller' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer py-1">
             Best Sellers
           </button>
-          <button onClick={() => onNavigate('shop', { category: 'Mobiles' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer">
+          <button onClick={() => onNavigate('shop', { category: 'Mobiles' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer py-1">
             Mobiles
           </button>
-          <button onClick={() => onNavigate('shop', { query: 'deal' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer font-semibold text-rose-600">
+          <button onClick={() => onNavigate('shop', { query: 'deal' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer font-semibold text-rose-600 py-1">
             Today&apos;s Deals
           </button>
-          <button onClick={() => onNavigate('home')} className="hover:text-[#0b5c37] transition-colors cursor-pointer flex items-center gap-0.5">
+          <button onClick={() => onNavigate('home')} className="hover:text-[#0b5c37] transition-colors cursor-pointer flex items-center gap-0.5 py-1">
             <span>Prime</span>
             <ChevronDown className="w-3 h-3 text-slate-400" />
           </button>
-          <button onClick={() => onNavigate('shop', { query: 'new' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer">
+          <button onClick={() => onNavigate('shop', { query: 'new' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer py-1">
             New Releases
           </button>
-          <button onClick={() => onNavigate('contact')} className="hover:text-[#0b5c37] transition-colors cursor-pointer">
+          <button onClick={() => onNavigate('contact')} className="hover:text-[#0b5c37] transition-colors cursor-pointer py-1">
             Customer Service
           </button>
         </div>
@@ -427,7 +457,7 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Mobile Drawer Navigation */}
       {isMobileMenuOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex md:hidden animate-in fade-in duration-150">
-          <div className="w-4/5 max-w-sm bg-white h-full shadow-2xl p-5 overflow-y-auto space-y-6">
+          <div className="w-[85vw] max-w-sm bg-white h-full shadow-2xl p-5 overflow-y-auto space-y-6">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
               <AmazonLogo variant="dark" size="md" />
               <button

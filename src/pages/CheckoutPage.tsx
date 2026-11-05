@@ -977,7 +977,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                       ) : (
                         <>
                           <Lock className="w-4 h-4 text-emerald-600" />
-                          <span>Submit Order with UPI Reference (${finalPayableTotal.toFixed(2)})</span>
+                          <span>Submit Order with UPI Reference ({formatPrice(finalPayableTotal)})</span>
                         </>
                       )}
                     </button>
