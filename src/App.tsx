@@ -22,12 +22,12 @@ import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { AccountPage } from './pages/AccountPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
-import { AdminPage } from './pages/AdminPage';
+import { AdminPage, AdminSection } from './pages/AdminPage';
 import { AdminLoginPage } from './pages/AdminLoginPage';
 import { AccessDeniedPage } from './pages/AccessDeniedPage';
 
 // Helper to parse current browser URL (supporting both pathnames and hashes)
-function parseCurrentRoute(): { page: PageView; productId?: string } {
+function parseCurrentRoute(): { page: PageView; productId?: string; adminSection?: AdminSection } {
   if (typeof window === 'undefined') return { page: 'home' };
 
   const pathname = window.location.pathname.toLowerCase().replace(/\/$/, '');
@@ -48,14 +48,28 @@ function parseCurrentRoute(): { page: PageView; productId?: string } {
     return { page: 'admin-login' };
   }
 
-  // 3. Admin Dashboard route: /admin/dashboard or /admin or #/admin/dashboard or #admin
-  if (
-    pathname === '/admin/dashboard' ||
-    pathname === '/admin' ||
-    hash === 'admin/dashboard' ||
-    hash === 'admin'
-  ) {
-    return { page: 'admin' };
+  // 3. Admin section routes: /admin/dashboard, /admin/orders, /admin/products, etc.
+  if (pathname === '/admin/dashboard' || pathname === '/admin') {
+    return { page: 'admin', adminSection: 'dashboard' };
+  }
+
+  const checkAdminSection = (pathStr: string): AdminSection | null => {
+    const clean = pathStr.replace(/^\//, '');
+    if (clean === 'admin' || clean === 'admin/dashboard') return 'dashboard';
+    if (clean === 'admin/orders') return 'orders';
+    if (clean === 'admin/products') return 'products';
+    if (clean === 'admin/categories') return 'categories';
+    if (clean === 'admin/customers') return 'customers';
+    if (clean === 'admin/inventory') return 'inventory';
+    if (clean === 'admin/payments') return 'payments';
+    if (clean === 'admin/analytics') return 'analytics';
+    if (clean === 'admin/profile' || clean === 'admin/settings') return 'settings';
+    return null;
+  };
+
+  const parsedAdminSec = checkAdminSection(pathname) || checkAdminSection(hash);
+  if (parsedAdminSec) {
+    return { page: 'admin', adminSection: parsedAdminSec };
   }
 
   // 4. Access Denied route
@@ -104,6 +118,7 @@ function AppContent() {
   const { isPasswordRecovery } = useAuth();
   const initialRoute = parseCurrentRoute();
   const [currentPage, setCurrentPage] = useState<PageView>(initialRoute.page);
+  const [adminSection, setAdminSection] = useState<AdminSection>(initialRoute.adminSection || 'dashboard');
   const [selectedProductId, setSelectedProductId] = useState<string>(initialRoute.productId || 'eko-prod-1');
   const [shopCategory, setShopCategory] = useState<string>('all');
   const [shopSearchQuery, setShopSearchQuery] = useState<string>('');
@@ -118,6 +133,9 @@ function AppContent() {
       setCurrentPage(route.page);
       if (route.productId) {
         setSelectedProductId(route.productId);
+      }
+      if (route.adminSection) {
+        setAdminSection(route.adminSection);
       }
     };
 
@@ -138,7 +156,7 @@ function AppContent() {
 
   const handleNavigate = (
     page: PageView,
-    params?: { productId?: string; category?: string; query?: string; tab?: string }
+    params?: { productId?: string; category?: string; query?: string; tab?: string; adminSection?: AdminSection }
   ) => {
     if (params?.tab) {
       setAccountTab(params.tab as any);
@@ -155,8 +173,11 @@ function AppContent() {
       targetPath = '/admin/login';
       targetHash = '/admin/login';
     } else if (page === 'admin') {
-      targetPath = '/admin/dashboard';
-      targetHash = '/admin/dashboard';
+      const sec = params?.adminSection || adminSection || 'dashboard';
+      const secPath = sec === 'settings' ? 'profile' : sec;
+      targetPath = `/admin/${secPath}`;
+      targetHash = `/admin/${secPath}`;
+      setAdminSection(sec);
     } else if (page === 'access-denied') {
       targetPath = '/access-denied';
       targetHash = '/access-denied';
@@ -269,6 +290,17 @@ function AppContent() {
         {currentPage === 'admin' && (
           <AdminGuard onNavigate={handleNavigate}>
             <AdminPage
+              initialSection={adminSection}
+              onSectionChange={(sec) => {
+                setAdminSection(sec);
+                const secPath = sec === 'settings' ? 'profile' : sec;
+                try {
+                  window.history.pushState(null, '', `/admin/${secPath}`);
+                  window.location.hash = `/admin/${secPath}`;
+                } catch {
+                  window.location.hash = `/admin/${secPath}`;
+                }
+              }}
               onNavigate={handleNavigate}
               onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
             />

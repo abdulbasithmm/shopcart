@@ -75,9 +75,12 @@ import {
   ALL_ORDER_STATUSES,
   normalizeOrderStatus,
 } from '../utils/orderTracking';
+import { updateCustomerProfile } from '../services/profileService';
 
 interface AdminPageProps {
-  onNavigate: (page: PageView) => void;
+  initialSection?: AdminSection;
+  onSectionChange?: (section: AdminSection) => void;
+  onNavigate: (page: PageView, params?: any) => void;
   onOpenSupabaseModal?: () => void;
 }
 
@@ -92,13 +95,38 @@ export type AdminSection =
   | 'analytics'
   | 'settings';
 
-export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabaseModal }) => {
-  const { user, logout } = useAuth();
+export const AdminPage: React.FC<AdminPageProps> = ({
+  initialSection = 'dashboard',
+  onSectionChange,
+  onNavigate,
+  onOpenSupabaseModal,
+}) => {
+  const { user, logout, refreshProfile } = useAuth();
   const { showToast } = useToast();
 
-  const [activeSection, setActiveSection] = useState<AdminSection>('dashboard');
+  const [activeSection, setActiveSection] = useState<AdminSection>(initialSection);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Sync active section when initialSection prop changes (e.g. from browser back/forward or direct route)
+  useEffect(() => {
+    if (initialSection && initialSection !== activeSection) {
+      setActiveSection(initialSection);
+    }
+  }, [initialSection]);
+
+  const handleSelectSection = (sec: AdminSection) => {
+    setActiveSection(sec);
+    onSectionChange?.(sec);
+    setIsMobileSidebarOpen(false);
+    const secPath = sec === 'settings' ? 'profile' : sec;
+    try {
+      window.history.pushState(null, '', `/admin/${secPath}`);
+      window.location.hash = `/admin/${secPath}`;
+    } catch {
+      window.location.hash = `/admin/${secPath}`;
+    }
+  };
 
   // Live Database States
   const [orders, setOrders] = useState<any[]>([]);
@@ -118,11 +146,39 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'gpay_qr' | 'paypal' | 'pending'>('all');
   const [analyticsRange, setAnalyticsRange] = useState<'7d' | '30d' | 'all'>('30d');
 
+  // Inventory Filters & Search
+  const [inventoryFilter, setInventoryFilter] = useState<'all' | 'low' | 'out'>('all');
+  const [inventorySearchQuery, setInventorySearchQuery] = useState('');
+
   // Modals & Drawers
   const [selectedOrderDetails, setSelectedOrderDetails] = useState<any | null>(null);
   const [verifyingOrder, setVerifyingOrder] = useState<any | null>(null);
   const [adminNotes, setAdminNotes] = useState('');
   const [isProcessingVerify, setIsProcessingVerify] = useState(false);
+
+  // Customer Detail Drawer Modal
+  const [viewingCustomer, setViewingCustomer] = useState<any | null>(null);
+
+  // Category Edit / Delete States
+  const [editingCategory, setEditingCategory] = useState<any | null>(null);
+  const [editCatName, setEditCatName] = useState('');
+  const [editCatSlug, setEditCatSlug] = useState('');
+  const [editCatDesc, setEditCatDesc] = useState('');
+  const [deletingCategory, setDeletingCategory] = useState<any | null>(null);
+
+  // Admin Profile Form State
+  const [adminFullName, setAdminFullName] = useState(user?.name || '');
+  const [adminPhone, setAdminPhone] = useState(user?.phone || '');
+  const [adminAvatar, setAdminAvatar] = useState(user?.avatar || '');
+  const [isSavingAdminProfile, setIsSavingAdminProfile] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      setAdminFullName(user.name || '');
+      setAdminPhone(user.phone || '');
+      setAdminAvatar(user.avatar || '');
+    }
+  }, [user]);
 
   // Logistics & Tracking edit state
   const [carrierInput, setCarrierInput] = useState('Shop Cart Express');
@@ -347,6 +403,133 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
       return true;
     });
   }, [orders, paymentFilter]);
+
+  // Filtered inventory products
+  const filteredInventoryProducts = useMemo(() => {
+    return products.filter((p) => {
+      const q = inventorySearchQuery.toLowerCase();
+      const matchSearch =
+        !q ||
+        p.name.toLowerCase().includes(q) ||
+        p.brand.toLowerCase().includes(q) ||
+        p.category.toLowerCase().includes(q);
+      if (!matchSearch) return false;
+      if (inventoryFilter === 'low') return p.stockCount > 0 && p.stockCount <= 5;
+      if (inventoryFilter === 'out') return p.stockCount === 0;
+      return true;
+    });
+  }, [products, inventorySearchQuery, inventoryFilter]);
+
+  // Real Dynamic Analytics Computations
+  const periodRevenueStats = useMemo(() => {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const weekStart = Date.now() - 7 * 86400000;
+    const monthStart = Date.now() - 30 * 86400000;
+    const yearStart = new Date(now.getFullYear(), 0, 1).getTime();
+
+    let todayRev = 0;
+    let weekRev = 0;
+    let monthRev = 0;
+    let yearRev = 0;
+
+    for (const o of orders) {
+      if (o.status === 'cancelled' || o.status === 'refunded') continue;
+      const amt = Number(o.total_amount || 0);
+      const t = new Date(o.created_at || Date.now()).getTime();
+      if (t >= todayStart) todayRev += amt;
+      if (t >= weekStart) weekRev += amt;
+      if (t >= monthStart) monthRev += amt;
+      if (t >= yearStart) yearRev += amt;
+    }
+
+    return { todayRev, weekRev, monthRev, yearRev };
+  }, [orders]);
+
+  // Dynamic daily trajectory for 7 days
+  const dailyTrajectory = useMemo(() => {
+    const daysCount = 7;
+    const days = [];
+    const now = new Date();
+    for (let i = daysCount - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const dayLabel = i === 0 ? 'Today' : d.toLocaleDateString('en-US', { weekday: 'short' });
+      days.push({ dateStr, dayLabel, total: 0, orderCount: 0 });
+    }
+
+    for (const o of orders) {
+      if (o.status === 'cancelled' || o.status === 'refunded') continue;
+      const oDate = (o.created_at || new Date().toISOString()).split('T')[0];
+      const slot = days.find((d) => d.dateStr === oDate);
+      if (slot) {
+        slot.total += Number(o.total_amount || 0);
+        slot.orderCount += 1;
+      }
+    }
+    return days;
+  }, [orders]);
+
+  // Dynamic Top Selling Products
+  const topSellingProducts = useMemo(() => {
+    const salesMap = new Map<
+      string,
+      { id: string; name: string; category: string; price: number; unitsSold: number; revenue: number; stockCount: number }
+    >();
+
+    for (const o of orders) {
+      if (o.status === 'cancelled' || o.status === 'refunded') continue;
+      const items = o.order_items || o.items || [];
+      for (const it of items) {
+        const pid = it.product_id || it.id || it.product_name;
+        const matchingProd = products.find((p) => p.id === it.product_id || p.name === it.product_name);
+        const existing = salesMap.get(pid) || {
+          id: pid,
+          name: it.product_name || matchingProd?.name || 'Product',
+          category: matchingProd?.category || 'General',
+          price: Number(it.unit_price || matchingProd?.price || 0),
+          unitsSold: 0,
+          revenue: 0,
+          stockCount: matchingProd?.stockCount ?? 10,
+        };
+        const qty = Number(it.quantity || 1);
+        existing.unitsSold += qty;
+        existing.revenue += Number(it.total_price || it.unit_price * qty || 0);
+        salesMap.set(pid, existing);
+      }
+    }
+
+    return Array.from(salesMap.values())
+      .sort((a, b) => b.unitsSold - a.unitsSold)
+      .slice(0, 5);
+  }, [orders, products]);
+
+  // Dynamic Department Sales Breakdown
+  const categoryRevenueBreakdown = useMemo(() => {
+    const catMap = new Map<string, number>();
+    let totalItemSales = 0;
+
+    for (const o of orders) {
+      if (o.status === 'cancelled' || o.status === 'refunded') continue;
+      const items = o.order_items || o.items || [];
+      for (const it of items) {
+        const matchingProd = products.find((p) => p.id === it.product_id || p.name === it.product_name);
+        const catName = matchingProd?.category || 'General Catalog';
+        const rev = Number(it.total_price || it.unit_price * (it.quantity || 1) || 0);
+        catMap.set(catName, (catMap.get(catName) || 0) + rev);
+        totalItemSales += rev;
+      }
+    }
+
+    const colors = ['bg-emerald-500', 'bg-blue-500', 'bg-purple-500', 'bg-amber-500', 'bg-teal-500'];
+    return Array.from(catMap.entries()).map(([name, total], idx) => ({
+      name,
+      total,
+      percentage: totalItemSales > 0 ? Math.round((total / totalItemSales) * 100) : 0,
+      color: colors[idx % colors.length],
+    }));
+  }, [orders, products]);
 
   // Sync selectedOrderDetails into tracking & update forms
   useEffect(() => {
@@ -713,13 +896,144 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
     showToast(`Category "${newCat.name}" created!`, 'success');
   };
 
+  // Edit Category Handler
+  const handleUpdateCategorySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCategory || !editCatName.trim()) return;
+
+    const slug = editCatSlug.trim() || editCatName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const updated = {
+      name: editCatName.trim(),
+      slug,
+      description: editCatDesc.trim(),
+    };
+
+    if (isSupabaseConfigured()) {
+      await supabase
+        .from('categories')
+        .update(updated)
+        .eq('id', editingCategory.id);
+    }
+
+    setCategories((prev) =>
+      prev.map((c) => (c.id === editingCategory.id ? { ...c, ...updated } : c))
+    );
+    setEditingCategory(null);
+    showToast(`Category "${updated.name}" updated in catalog!`, 'success');
+  };
+
+  // Delete Category Handler
+  const handleDeleteCategory = async (cat: any) => {
+    const countInCat = products.filter(
+      (p) => p.category === cat.name || (p as any).category_id === cat.id
+    ).length;
+
+    if (countInCat > 0) {
+      showToast(
+        `Cannot delete "${cat.name}": ${countInCat} active products belong to this category. Please reassign or delete them first.`,
+        'error'
+      );
+      setDeletingCategory(null);
+      return;
+    }
+
+    if (isSupabaseConfigured()) {
+      const { error } = await supabase.from('categories').delete().eq('id', cat.id);
+      if (error) {
+        showToast('Failed to delete category: ' + error.message, 'error');
+        setDeletingCategory(null);
+        return;
+      }
+    }
+
+    setCategories((prev) => prev.filter((c) => c.id !== cat.id));
+    setDeletingCategory(null);
+    showToast(`Category "${cat.name}" removed from catalog`, 'info');
+  };
+
+  // Reject Payment Handler
+  const handleRejectPendingPayment = async () => {
+    if (!verifyingOrder) return;
+    setIsProcessingVerify(true);
+    try {
+      if (isSupabaseConfigured()) {
+        await supabase
+          .from('orders')
+          .update({ status: 'cancelled' })
+          .eq('id', verifyingOrder.id);
+
+        await supabase
+          .from('payment_records')
+          .update({
+            payment_status: 'failed',
+            raw_details: {
+              rejectedAt: new Date().toISOString(),
+              rejectedBy: user?.email || 'admin@shopcart.com',
+              reason: adminNotes.trim() || 'Payment could not be verified in merchant bank records',
+            },
+          })
+          .eq('order_id', verifyingOrder.id);
+      } else {
+        const local = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
+        const updated = local.map((o: any) => {
+          if (o.id === verifyingOrder.id || o.order_number === verifyingOrder.order_number) {
+            return {
+              ...o,
+              status: 'cancelled',
+              paymentStatus: 'failed',
+            };
+          }
+          return o;
+        });
+        localStorage.setItem('shopcart_orders', JSON.stringify(updated));
+      }
+
+      showToast(`Payment rejected for Order #${verifyingOrder.order_number || verifyingOrder.id}. Order marked Cancelled.`, 'info');
+      setVerifyingOrder(null);
+      setAdminNotes('');
+      loadAdminData();
+    } catch (err: any) {
+      showToast(err.message || 'Payment rejection failed', 'error');
+    } finally {
+      setIsProcessingVerify(false);
+    }
+  };
+
+  // Admin Profile Save Handler
+  const handleSaveAdminProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    setIsSavingAdminProfile(true);
+    try {
+      if (isSupabaseConfigured()) {
+        const ok = await updateCustomerProfile(user.id, {
+          name: adminFullName.trim(),
+          phone: adminPhone.trim(),
+          avatar: adminAvatar.trim(),
+        });
+        if (ok) {
+          await refreshProfile();
+          showToast('Administrator profile updated in Supabase public.profiles!', 'success');
+        } else {
+          showToast('Failed to update administrator profile', 'error');
+        }
+      } else {
+        showToast('Administrator profile saved locally', 'success');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Profile update failed', 'error');
+    } finally {
+      setIsSavingAdminProfile(false);
+    }
+  };
+
   // Navigation Item List
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'orders', label: 'Orders', icon: Package, badge: pendingOrders > 0 ? pendingOrders : null },
     { id: 'products', label: 'Products', icon: ShoppingBag, count: products.length },
-    { id: 'categories', label: 'Categories', icon: Layers },
-    { id: 'customers', label: 'Customers', icon: Users },
+    { id: 'categories', label: 'Categories', icon: Layers, count: categories.length },
+    { id: 'customers', label: 'Customers', icon: Users, count: customers.length },
     { id: 'inventory', label: 'Inventory', icon: Boxes, badge: lowStockProducts > 0 ? `${lowStockProducts} Low` : null },
     { id: 'payments', label: 'Payments', icon: CreditCard, badge: pendingUpiPayments.length > 0 ? `${pendingUpiPayments.length} Check` : null },
     { id: 'analytics', label: 'Sales Analytics', icon: BarChart3 },
@@ -843,8 +1157,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
                 <button
                   key={nav.id}
                   onClick={() => {
-                    setActiveSection(nav.id as AdminSection);
-                    setIsMobileSidebarOpen(false);
+                    handleSelectSection(nav.id as AdminSection);
                   }}
                   className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                     isActive
@@ -1090,7 +1403,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
                     {lowStockProducts} item{lowStockProducts === 1 ? '' : 's'}
                   </div>
                   <button
-                    onClick={() => setActiveSection('inventory')}
+                    onClick={() => handleSelectSection('inventory')}
                     className="text-xs font-bold text-[#0b5c37] hover:text-[#08482b] cursor-pointer"
                   >
                     Manage Inventory →
@@ -1120,7 +1433,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
                 </div>
 
                 <button
-                  onClick={() => setActiveSection('payments')}
+                  onClick={() => handleSelectSection('payments')}
                   className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors shrink-0 cursor-pointer"
                 >
                   Review Payments ({pendingUpiPayments.length})
@@ -1136,7 +1449,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
                   <p className="text-xs text-slate-500">Latest storefront checkout transactions</p>
                 </div>
                 <button
-                  onClick={() => setActiveSection('orders')}
+                  onClick={() => handleSelectSection('orders')}
                   className="text-xs font-bold text-[#0b5c37] hover:text-[#08482b] cursor-pointer"
                 >
                   View All Orders →
@@ -1174,7 +1487,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
                             {pMethod === 'paypal' ? 'PayPal' : 'Google Pay QR'} · {ref}
                           </td>
                           <td className="py-3 px-4 font-bold text-[#0b5c37] tabular-nums">
-                            ${Number(ord.total_amount).toFixed(2)}
+                            {formatPrice(ord.total_amount)}
                           </td>
                           <td className="py-3 px-4">
                             <span
@@ -1514,13 +1827,28 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
         )}
 
         {/* ===================================================================== */}
+        {/* ===================================================================== */}
         {/* 4. CATEGORIES MANAGEMENT */}
         {/* ===================================================================== */}
         {activeSection === 'categories' && (
           <div className="space-y-5">
+            <div className="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-xs flex flex-col sm:flex-row gap-3 justify-between items-center">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Store Departments &amp; Catalog Taxonomy</h3>
+                <p className="text-xs text-slate-500">Manage categories, URL slugs, and navigation taxonomy</p>
+              </div>
+              <button
+                onClick={() => setIsAddCategoryOpen(true)}
+                className="px-3.5 py-2 bg-[#0b5c37] hover:bg-[#08482b] text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Category</span>
+              </button>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {categories.map((c) => {
-                const countInCat = products.filter((p) => p.category === c.name).length;
+                const countInCat = products.filter((p) => p.category === c.name || (p as any).category_id === c.id).length;
                 return (
                   <div
                     key={c.id || c.name}
@@ -1530,14 +1858,37 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
                       <div className="w-10 h-10 rounded-xl bg-emerald-50 text-[#0b5c37] border border-emerald-200 flex items-center justify-center font-bold">
                         <Layers className="w-5 h-5" />
                       </div>
-                      <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                        /{c.slug || c.id}
-                      </span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => {
+                            setEditingCategory(c);
+                            setEditCatName(c.name || '');
+                            setEditCatSlug(c.slug || '');
+                            setEditCatDesc(c.description || '');
+                          }}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-800 hover:bg-slate-100 transition-colors cursor-pointer"
+                          title="Edit Category"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setDeletingCategory(c)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                          title="Delete Category"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
 
                     <div>
-                      <h3 className="text-sm font-bold text-slate-900">{c.name}</h3>
-                      <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-bold text-slate-900">{c.name}</h3>
+                        <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                          /{c.slug || c.id}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1 line-clamp-2">
                         {c.description || 'Curated storefront department'}
                       </p>
                     </div>
@@ -1547,7 +1898,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
                       <button
                         onClick={() => {
                           setProductCategoryFilter(c.name);
-                          setActiveSection('products');
+                          handleSelectSection('products');
                         }}
                         className="text-[#0b5c37] font-bold hover:underline cursor-pointer"
                       >
@@ -1593,12 +1944,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
                       <th className="py-3 px-4">Phone</th>
                       <th className="py-3 px-4">Registered Date</th>
                       <th className="py-3 px-4 text-right">Orders &amp; Spend</th>
+                      <th className="py-3 px-4 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredCustomers.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="py-12 text-center text-xs text-slate-400">
+                        <td colSpan={7} className="py-12 text-center text-xs text-slate-400">
                           No registered customer accounts matching the search query.
                         </td>
                       </tr>
@@ -1635,11 +1987,19 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
                             </td>
                             <td className="py-3.5 px-4 text-right">
                               <span className="font-bold text-slate-900 block tabular-nums">
-                                ${custSpend.toFixed(2)}
+                                {formatPrice(custSpend)}
                               </span>
                               <span className="text-[10px] text-slate-500">
                                 {custOrders.length} order{custOrders.length === 1 ? '' : 's'}
                               </span>
+                            </td>
+                            <td className="py-3.5 px-4 text-right">
+                              <button
+                                onClick={() => setViewingCustomer(c)}
+                                className="px-2.5 py-1 bg-slate-100 hover:bg-[#0b5c37] hover:text-white text-slate-700 rounded-lg font-bold text-[11px] transition-colors cursor-pointer"
+                              >
+                                View History
+                              </button>
                             </td>
                           </tr>
                         );
@@ -1657,6 +2017,40 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
         {/* ===================================================================== */}
         {activeSection === 'inventory' && (
           <div className="space-y-5">
+            {/* Filter & Search Bar */}
+            <div className="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-xs flex flex-col sm:flex-row gap-3 justify-between items-center">
+              <div className="relative w-full sm:w-72">
+                <input
+                  type="text"
+                  placeholder="Search stock by product, brand, category..."
+                  value={inventorySearchQuery}
+                  onChange={(e) => setInventorySearchQuery(e.target.value)}
+                  className="w-full py-2 pl-9 pr-3 text-xs bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-[#0b5c37] focus:bg-white"
+                />
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              </div>
+
+              <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto">
+                {[
+                  { id: 'all', label: 'All Catalog' },
+                  { id: 'low', label: 'Low Stock (≤ 5 units)' },
+                  { id: 'out', label: 'Out of Stock (0)' },
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => setInventoryFilter(f.id as any)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 ${
+                      inventoryFilter === f.id
+                        ? 'bg-[#0b5c37] text-white shadow-2xs'
+                        : 'bg-slate-100 text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
               <div className="p-4 border-b border-slate-200 flex items-center justify-between">
                 <div>
@@ -1684,75 +2078,83 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {products.map((p) => {
-                      const isLow = p.stockCount <= 5;
-                      const isOut = p.stockCount === 0;
+                    {filteredInventoryProducts.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-12 text-center text-xs text-slate-400">
+                          No inventory items matching this filter.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredInventoryProducts.map((p) => {
+                        const isLow = p.stockCount <= 5;
+                        const isOut = p.stockCount === 0;
 
-                      return (
-                        <tr key={p.id} className="hover:bg-slate-50/70 transition-colors">
-                          <td className="py-3.5 px-4">
-                            <span className="font-bold text-slate-900 block">{p.name}</span>
-                            <span className="text-[11px] text-slate-500">{p.brand}</span>
-                          </td>
-                          <td className="py-3.5 px-4 text-slate-600">{p.category}</td>
-                          <td className="py-3.5 px-4 font-bold text-slate-800 tabular-nums">
-                            {formatPrice(p.price)}
-                          </td>
-                          <td className="py-3.5 px-4 tabular-nums font-mono font-bold text-sm">
-                            <span
-                              className={
-                                isOut
-                                  ? 'text-rose-600'
-                                  : isLow
-                                  ? 'text-amber-600'
-                                  : 'text-emerald-700'
-                              }
-                            >
-                              {p.stockCount}
-                            </span>
-                          </td>
-                          <td className="py-3.5 px-4">
-                            <span
-                              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                                isOut
-                                  ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                                  : isLow
-                                  ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                                  : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              }`}
-                            >
-                              {isOut ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock'}
-                            </span>
-                          </td>
-                          <td className="py-3.5 px-4 text-right space-x-1.5">
-                            <button
-                              onClick={() => handleStockAdjust(p.id, -1)}
-                              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-mono font-bold cursor-pointer transition-colors"
-                              title="Decrease by 1"
-                            >
-                              -1
-                            </button>
-                            <button
-                              onClick={() => handleStockAdjust(p.id, 5)}
-                              className="px-2.5 py-1 bg-[#0b5c37] hover:bg-[#08482b] text-white rounded font-bold cursor-pointer shadow-2xs transition-colors"
-                              title="Restock +5 units"
-                            >
-                              +5 Stock
-                            </button>
-                            <button
-                              onClick={() => {
-                                setRestockProduct(p);
-                                setRestockAmount(20);
-                              }}
-                              className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded font-bold cursor-pointer transition-colors"
-                              title="Custom Restock Modal"
-                            >
-                              Restock...
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                        return (
+                          <tr key={p.id} className="hover:bg-slate-50/70 transition-colors">
+                            <td className="py-3.5 px-4">
+                              <span className="font-bold text-slate-900 block">{p.name}</span>
+                              <span className="text-[11px] text-slate-500">{p.brand}</span>
+                            </td>
+                            <td className="py-3.5 px-4 text-slate-600">{p.category}</td>
+                            <td className="py-3.5 px-4 font-bold text-slate-800 tabular-nums">
+                              {formatPrice(p.price)}
+                            </td>
+                            <td className="py-3.5 px-4 tabular-nums font-mono font-bold text-sm">
+                              <span
+                                className={
+                                  isOut
+                                    ? 'text-rose-600'
+                                    : isLow
+                                    ? 'text-amber-600'
+                                    : 'text-emerald-700'
+                                }
+                              >
+                                {p.stockCount}
+                              </span>
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                  isOut
+                                    ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                                    : isLow
+                                    ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                    : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                }`}
+                              >
+                                {isOut ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock'}
+                              </span>
+                            </td>
+                            <td className="py-3.5 px-4 text-right space-x-1.5">
+                              <button
+                                onClick={() => handleStockAdjust(p.id, -1)}
+                                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-mono font-bold cursor-pointer transition-colors"
+                                title="Decrease by 1"
+                              >
+                                -1
+                              </button>
+                              <button
+                                onClick={() => handleStockAdjust(p.id, 5)}
+                                className="px-2.5 py-1 bg-[#0b5c37] hover:bg-[#08482b] text-white rounded font-bold cursor-pointer shadow-2xs transition-colors"
+                                title="Restock +5 units"
+                              >
+                                +5 Stock
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setRestockProduct(p);
+                                  setRestockAmount(20);
+                                }}
+                                className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded font-bold cursor-pointer transition-colors"
+                                title="Custom Restock Modal"
+                              >
+                                Restock...
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -1889,7 +2291,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
         )}
 
         {/* ===================================================================== */}
-        {/* 8. SALES ANALYTICS WITH INTERACTIVE SVG CHARTS */}
+        {/* 8. SALES ANALYTICS (REAL DATABASE AGGREGATIONS & TIME PERIODS) */}
         {/* ===================================================================== */}
         {activeSection === 'analytics' && (
           <div className="space-y-6">
@@ -1897,7 +2299,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
             <div className="bg-white rounded-2xl p-5 border border-slate-200/90 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h3 className="font-bold text-base text-slate-900">Commercial Performance Analytics</h3>
-                <p className="text-xs text-slate-500">Real-time aggregations from live customer orders</p>
+                <p className="text-xs text-slate-500">Live aggregations computed directly from customer orders</p>
               </div>
 
               <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
@@ -1917,29 +2319,63 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
               </div>
             </div>
 
-            {/* Analytics Stats Grid */}
+            {/* Time Period Revenue Breakdowns (Today, Week, Month, Year) */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-xs space-y-1">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Gross Sales</span>
-                <div className="text-2xl font-black text-slate-900 tabular-nums">{formatPrice(totalRevenue)}</div>
-                <div className="text-[10px] text-emerald-600 font-semibold">+14.8% vs prior period</div>
-              </div>
-
-              <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-xs space-y-1">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Average Order Value</span>
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Today's Revenue</span>
                 <div className="text-2xl font-black text-slate-900 tabular-nums">
-                  {formatPrice(totalOrders > 0 ? (totalRevenue / totalOrders) : 0)}
+                  {formatPrice(periodRevenueStats.todayRev)}
                 </div>
-                <div className="text-[10px] text-slate-500">Cart conversion baseline</div>
+                <div className="text-[10px] text-emerald-600 font-semibold">Today's settled gross</div>
               </div>
 
               <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-xs space-y-1">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Settlement Rate</span>
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">This Week (7 Days)</span>
+                <div className="text-2xl font-black text-slate-900 tabular-nums">
+                  {formatPrice(periodRevenueStats.weekRev)}
+                </div>
+                <div className="text-[10px] text-slate-500">Trailing 7-day volume</div>
+              </div>
+
+              <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-xs space-y-1">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">This Month (30 Days)</span>
+                <div className="text-2xl font-black text-slate-900 tabular-nums">
+                  {formatPrice(periodRevenueStats.monthRev)}
+                </div>
+                <div className="text-[10px] text-slate-500">Trailing 30-day volume</div>
+              </div>
+
+              <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-xs space-y-1">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Year-to-Date Gross</span>
+                <div className="text-2xl font-black text-[#0b5c37] tabular-nums">
+                  {formatPrice(periodRevenueStats.yearRev)}
+                </div>
+                <div className="text-[10px] text-emerald-700 font-semibold">Calendar year cumulative</div>
+              </div>
+            </div>
+
+            {/* Core Commercial Ratios */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-xs space-y-1">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Total Revenue</span>
+                <div className="text-2xl font-black text-slate-900 tabular-nums">{formatPrice(totalRevenue)}</div>
+                <div className="text-[10px] text-slate-500">All-time settled orders</div>
+              </div>
+
+              <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-xs space-y-1">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Average Order Value (AOV)</span>
+                <div className="text-2xl font-black text-slate-900 tabular-nums">
+                  {formatPrice(totalOrders > 0 ? totalRevenue / totalOrders : 0)}
+                </div>
+                <div className="text-[10px] text-slate-500">Mean spend per checkout</div>
+              </div>
+
+              <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-xs space-y-1">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Payment Settlement Rate</span>
                 <div className="text-2xl font-black text-emerald-600 tabular-nums">
                   {totalOrders > 0
                     ? Math.round(((totalOrders - pendingUpiPayments.length) / totalOrders) * 100)
-                    : 100}
-                  %
+                    : 100}%
                 </div>
                 <div className="text-[10px] text-slate-500">Confirmed &amp; captured funds</div>
               </div>
@@ -1953,127 +2389,105 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
               </div>
             </div>
 
-            {/* SVG Charts Row */}
+            {/* Dynamic Charts Row */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Chart 1: Revenue Trajectory (Interactive SVG Area / Bar Chart) */}
+              {/* Chart 1: Real Daily Revenue Trajectory */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-xs space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <h4 className="font-bold text-sm text-slate-900">Revenue Trajectory</h4>
-                    <p className="text-[11px] text-slate-500">Daily gross sales distribution</p>
+                    <p className="text-[11px] text-slate-500">Daily gross sales distribution across the past 7 days</p>
                   </div>
                   <span className="text-xs font-mono font-bold text-[#0b5c37] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                     INR (₹)
                   </span>
                 </div>
 
-                {/* SVG Area & Bar Visualizer */}
-                <div className="h-56 w-full pt-4">
-                  <svg className="w-full h-full overflow-visible" viewBox="0 0 500 200">
-                    <defs>
-                      <linearGradient id="revenueGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#ea580c" stopOpacity="0.25" />
-                        <stop offset="100%" stopColor="#ea580c" stopOpacity="0.0" />
-                      </linearGradient>
-                    </defs>
-
-                    {/* Horizontal Gridlines */}
-                    <line x1="0" y1="40" x2="500" y2="40" stroke="#f1f5f9" strokeWidth="1" />
-                    <line x1="0" y1="90" x2="500" y2="90" stroke="#f1f5f9" strokeWidth="1" />
-                    <line x1="0" y1="140" x2="500" y2="140" stroke="#f1f5f9" strokeWidth="1" />
-                    <line x1="0" y1="190" x2="500" y2="190" stroke="#e2e8f0" strokeWidth="1" />
-
-                    {/* Shaded Area */}
-                    <polygon
-                      points="10,190 60,150 130,110 200,135 270,75 340,95 410,45 480,30 480,190 10,190"
-                      fill="url(#revenueGrad)"
-                    />
-
-                    {/* Polyline Curve */}
-                    <polyline
-                      points="10,190 60,150 130,110 200,135 270,75 340,95 410,45 480,30"
-                      fill="none"
-                      stroke="#ea580c"
-                      strokeWidth="3"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-
-                    {/* Interactive Data Points */}
-                    {[
-                      { cx: 60, cy: 150, val: '₹14,000' },
-                      { cx: 130, cy: 110, val: '₹28,000' },
-                      { cx: 200, cy: 135, val: '₹21,000' },
-                      { cx: 270, cy: 75, val: '₹42,000' },
-                      { cx: 340, cy: 95, val: '₹36,000' },
-                      { cx: 410, cy: 45, val: '₹59,000' },
-                      { cx: 480, cy: 30, val: `$${totalRevenue > 0 ? totalRevenue.toFixed(0) : '750'}` },
-                    ].map((pt, i) => (
-                      <g key={i}>
-                        <circle cx={pt.cx} cy={pt.cy} r="4" fill="#ea580c" stroke="#ffffff" strokeWidth="2" />
-                        <text
-                          x={pt.cx}
-                          y={pt.cy - 10}
-                          textAnchor="middle"
-                          fill="#475569"
-                          fontSize="9"
-                          fontFamily="sans-serif"
-                          fontWeight="bold"
-                        >
-                          {pt.val}
-                        </text>
-                      </g>
-                    ))}
-                  </svg>
-                </div>
-
-                <div className="flex justify-between text-[10px] font-mono text-slate-400 pt-1 border-t border-slate-100">
-                  <span>Mon</span>
-                  <span>Tue</span>
-                  <span>Wed</span>
-                  <span>Thu</span>
-                  <span>Fri</span>
-                  <span>Sat</span>
-                  <span>Today</span>
-                </div>
+                {orders.length === 0 ? (
+                  <div className="h-56 flex flex-col items-center justify-center text-center p-6 bg-slate-50 rounded-xl border border-dashed border-slate-200 space-y-2">
+                    <BarChart3 className="w-8 h-8 text-slate-300" />
+                    <p className="text-xs font-bold text-slate-600">No Sales Transactions Recorded</p>
+                    <p className="text-[11px] text-slate-400 max-w-xs">
+                      When customers complete orders, daily revenue trajectories will appear here dynamically.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="h-56 w-full pt-4 flex flex-col justify-between">
+                    {/* SVG Bar Chart with real calculated scale */}
+                    {(() => {
+                      const maxDaily = Math.max(...dailyTrajectory.map((d) => d.total), 100);
+                      return (
+                        <div className="h-44 w-full flex items-end justify-between gap-2 px-2 pb-2 border-b border-slate-200">
+                          {dailyTrajectory.map((d, i) => {
+                            const barHeight = Math.max(8, Math.round((d.total / maxDaily) * 140));
+                            return (
+                              <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative">
+                                <span className="text-[9px] font-mono text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity absolute -top-5 whitespace-nowrap bg-slate-900 text-white px-1.5 py-0.5 rounded z-10">
+                                  {formatPrice(d.total)} ({d.orderCount} ord)
+                                </span>
+                                <div
+                                  style={{ height: `${barHeight}px` }}
+                                  className={`w-full max-w-[40px] rounded-t-lg transition-all ${
+                                    d.total > 0
+                                      ? 'bg-gradient-to-t from-[#0b5c37] to-emerald-500 hover:to-emerald-400'
+                                      : 'bg-slate-100'
+                                  }`}
+                                />
+                                <span className="text-[10px] font-bold text-slate-600 truncate mt-1">
+                                  {d.dayLabel}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
               </div>
 
-              {/* Chart 2: Category Revenue Breakdown */}
+              {/* Chart 2: Dynamic Category Sales Breakdown */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-xs space-y-4">
                 <div>
                   <h4 className="font-bold text-sm text-slate-900">Department Sales Breakdown</h4>
-                  <p className="text-[11px] text-slate-500">Revenue generation across top categories</p>
+                  <p className="text-[11px] text-slate-500">Revenue generation across active catalog categories</p>
                 </div>
 
-                <div className="space-y-3.5 pt-2">
-                  {[
-                    { name: 'Electronics & Audio', percentage: 42, color: 'bg-emerald-500', total: '₹1,84,000' },
-                    { name: 'Fashion & Wearables', percentage: 28, color: 'bg-blue-500', total: '₹1,22,000' },
-                    { name: 'Home & Living', percentage: 16, color: 'bg-emerald-500', total: '₹70,000' },
-                    { name: 'Beauty & Wellness', percentage: 9, color: 'bg-purple-500', total: '₹39,000' },
-                    { name: 'Accessories', percentage: 5, color: 'bg-amber-500', total: '₹21,000' },
-                  ].map((cat, i) => (
-                    <div key={i} className="space-y-1">
-                      <div className="flex justify-between text-xs">
-                        <span className="font-semibold text-slate-800">{cat.name}</span>
-                        <div className="space-x-2">
-                          <span className="font-bold text-slate-900">{cat.total}</span>
-                          <span className="text-slate-400 text-[11px]">({cat.percentage}%)</span>
+                {categoryRevenueBreakdown.length === 0 ? (
+                  <div className="h-56 flex flex-col items-center justify-center text-center p-6 bg-slate-50 rounded-xl border border-dashed border-slate-200 space-y-2">
+                    <PieChart className="w-8 h-8 text-slate-300" />
+                    <p className="text-xs font-bold text-slate-600">No Category Breakdown Yet</p>
+                    <p className="text-[11px] text-slate-400 max-w-xs">
+                      Category share distribution will populate once customer orders are placed.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3.5 pt-2 max-h-56 overflow-y-auto">
+                    {categoryRevenueBreakdown.map((cat, i) => (
+                      <div key={i} className="space-y-1">
+                        <div className="flex justify-between text-xs">
+                          <span className="font-semibold text-slate-800">{cat.name}</span>
+                          <div className="space-x-2">
+                            <span className="font-bold text-slate-900 tabular-nums">
+                              {formatPrice(cat.total)}
+                            </span>
+                            <span className="text-slate-400 text-[11px]">({cat.percentage}%)</span>
+                          </div>
+                        </div>
+                        <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full ${cat.color} rounded-full transition-all`}
+                            style={{ width: `${Math.max(5, cat.percentage)}%` }}
+                          />
                         </div>
                       </div>
-                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full ${cat.color} rounded-full`}
-                          style={{ width: `${cat.percentage}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Top 5 Products Leaderboard */}
+            {/* Dynamic Top Selling Products Leaderboard */}
             <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-5 space-y-3">
               <h4 className="font-bold text-sm text-slate-900">Top Selling Products</h4>
               <div className="overflow-x-auto">
@@ -2085,23 +2499,37 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
                       <th className="py-2.5 px-3">Price</th>
                       <th className="py-2.5 px-3">Stock Units</th>
                       <th className="py-2.5 px-3 text-right">Units Sold</th>
+                      <th className="py-2.5 px-3 text-right">Gross Sales</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {products.slice(0, 5).map((p, idx) => (
-                      <tr key={p.id} className="hover:bg-slate-50/70">
-                        <td className="py-2.5 px-3 font-semibold text-slate-900">
-                          <span className="text-slate-400 font-mono mr-2">#{idx + 1}</span>
-                          {p.name}
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-600">{p.category}</td>
-                        <td className="py-2.5 px-3 font-bold text-slate-900 tabular-nums">{formatPrice(p.price)}</td>
-                        <td className="py-2.5 px-3 tabular-nums text-slate-600">{p.stockCount} units</td>
-                        <td className="py-2.5 px-3 text-right font-bold text-[#0b5c37] tabular-nums">
-                          {24 - idx * 4} sold
+                    {topSellingProducts.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-8 text-center text-xs text-slate-400">
+                          No product checkout units recorded yet. Top sellers will dynamically rank here.
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      topSellingProducts.map((p, idx) => (
+                        <tr key={p.id} className="hover:bg-slate-50/70">
+                          <td className="py-2.5 px-3 font-semibold text-slate-900">
+                            <span className="text-slate-400 font-mono mr-2">#{idx + 1}</span>
+                            {p.name}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-600">{p.category}</td>
+                          <td className="py-2.5 px-3 font-bold text-slate-900 tabular-nums">
+                            {formatPrice(p.price)}
+                          </td>
+                          <td className="py-2.5 px-3 tabular-nums text-slate-600">{p.stockCount} units</td>
+                          <td className="py-2.5 px-3 text-right font-bold text-[#0b5c37] tabular-nums">
+                            {p.unitsSold} sold
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-extrabold text-slate-900 tabular-nums">
+                            {formatPrice(p.revenue)}
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -2119,10 +2547,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
               <div className="flex items-center justify-between pb-4 border-b border-slate-200">
                 <div className="flex items-center gap-3.5">
                   <div className="w-14 h-14 rounded-2xl bg-[#0b5c37] text-white font-black text-lg flex items-center justify-center shadow-md shadow-emerald-900/10">
-                    {user?.avatar || (user?.name || 'AD').substring(0, 2).toUpperCase()}
+                    {adminAvatar || user?.avatar || (adminFullName || user?.name || 'AD').substring(0, 2).toUpperCase()}
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-slate-900">{user?.name || 'Administrator'}</h3>
+                    <h3 className="text-base font-bold text-slate-900">{adminFullName || user?.name || 'Administrator'}</h3>
                     <p className="text-xs text-slate-500 font-mono">{user?.email || 'admin@shopcart.com'}</p>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-[10px] uppercase font-mono font-bold tracking-wider px-2 py-0.5 bg-purple-50 text-purple-700 rounded border border-purple-200">
@@ -2147,8 +2575,67 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
                 </button>
               </div>
 
+              {/* Edit Admin Profile Form */}
+              <form onSubmit={handleSaveAdminProfile} className="space-y-4 pt-2">
+                <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider font-mono">
+                  Update Administrator Credentials
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  <div>
+                    <label className="block text-slate-600 font-bold mb-1">Full Name</label>
+                    <input
+                      type="text"
+                      value={adminFullName}
+                      onChange={(e) => setAdminFullName(e.target.value)}
+                      placeholder="e.g. Sarah Connor"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-[#0b5c37] focus:bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-600 font-bold mb-1">Phone Number</label>
+                    <input
+                      type="tel"
+                      value={adminPhone}
+                      onChange={(e) => setAdminPhone(e.target.value)}
+                      placeholder="e.g. +1 (555) 234-5678"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-[#0b5c37] focus:bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-600 font-bold mb-1">Avatar Initials / Icon</label>
+                    <input
+                      type="text"
+                      value={adminAvatar}
+                      onChange={(e) => setAdminAvatar(e.target.value)}
+                      placeholder="e.g. SC or URL"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-[#0b5c37] focus:bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="submit"
+                    disabled={isSavingAdminProfile}
+                    className="px-4 py-2 bg-[#0b5c37] hover:bg-[#08482b] text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    {isSavingAdminProfile ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-3.5 h-3.5" />
+                        <span>Save Profile Changes</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+
               {/* Database Health & Ping Test */}
-              <div className="space-y-3">
+              <div className="space-y-3 pt-3 border-t border-slate-200">
                 <div className="flex items-center justify-between">
                   <div>
                     <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider font-mono">
@@ -2639,24 +3126,32 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
               />
             </div>
 
-            <div className="flex gap-2 pt-2">
+            <div className="flex flex-col sm:flex-row gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setVerifyingOrder(null)}
-                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer transition-colors"
+                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer transition-colors"
               >
                 Cancel
               </button>
               <button
                 type="button"
+                onClick={handleRejectPendingPayment}
+                disabled={isProcessingVerify}
+                className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 cursor-pointer transition-colors disabled:opacity-50"
+              >
+                Reject (Invalid UTR)
+              </button>
+              <button
+                type="button"
                 onClick={handleVerifyPendingPayment}
                 disabled={isProcessingVerify}
-                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer"
+                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
               >
                 {isProcessingVerify ? (
                   <>
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Verifying...</span>
+                    <span>Processing...</span>
                   </>
                 ) : (
                   <>
@@ -3136,6 +3631,254 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* --------------------------------------------------------------------- */}
+      {/* MODAL 8: EDIT CATEGORY MODAL */}
+      {/* --------------------------------------------------------------------- */}
+      {editingCategory && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-md w-full border border-slate-200 p-6 space-y-4 text-slate-900">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+              <h3 className="font-bold text-sm text-slate-900">Edit Store Category</h3>
+              <button
+                onClick={() => setEditingCategory(null)}
+                className="text-slate-400 hover:text-slate-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateCategorySubmit} className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Category Title</label>
+                <input
+                  type="text"
+                  required
+                  value={editCatName}
+                  onChange={(e) => setEditCatName(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-[#0b5c37] focus:bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">URL Slug</label>
+                <input
+                  type="text"
+                  value={editCatSlug}
+                  onChange={(e) => setEditCatSlug(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-[#0b5c37] font-mono focus:bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Description</label>
+                <input
+                  type="text"
+                  value={editCatDesc}
+                  onChange={(e) => setEditCatDesc(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-[#0b5c37] focus:bg-white"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingCategory(null)}
+                  className="flex-1 py-2 bg-slate-100 text-slate-700 rounded-xl font-bold cursor-pointer transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2 bg-[#0b5c37] hover:bg-[#08482b] text-white rounded-xl font-bold cursor-pointer shadow-xs transition-colors"
+                >
+                  Save Category
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --------------------------------------------------------------------- */}
+      {/* MODAL 9: DELETE CATEGORY CONFIRMATION MODAL */}
+      {/* --------------------------------------------------------------------- */}
+      {deletingCategory && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-sm w-full border border-slate-200 p-6 space-y-4 text-center text-slate-900">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="font-bold text-base text-slate-900">Delete Category</h3>
+              <p className="text-xs text-slate-500 mt-1">
+                Are you sure you want to remove category <strong className="text-slate-800">"{deletingCategory.name}"</strong>?
+              </p>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeletingCategory(null)}
+                className="flex-1 py-2 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold cursor-pointer transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteCategory(deletingCategory)}
+                className="flex-1 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold cursor-pointer shadow-xs transition-colors"
+              >
+                Confirm Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --------------------------------------------------------------------- */}
+      {/* MODAL 10: CUSTOMER PROFILE & ORDER HISTORY MODAL */}
+      {/* --------------------------------------------------------------------- */}
+      {viewingCustomer && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-2xl w-full border border-slate-200 shadow-2xl p-6 sm:p-7 space-y-5 my-8 text-slate-900 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-xl bg-teal-50 text-teal-700 font-black text-sm flex items-center justify-center border border-teal-200">
+                  {viewingCustomer.avatar_url || (viewingCustomer.full_name || 'CU').substring(0, 2).toUpperCase()}
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">{viewingCustomer.full_name || 'Customer Profile'}</h3>
+                  <p className="text-xs text-slate-500 font-mono">{viewingCustomer.email}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setViewingCustomer(null)}
+                className="text-slate-400 hover:text-slate-700 p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Customer Details Box */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <div className="space-y-1">
+                <span className="text-slate-500 uppercase font-mono text-[10px] block">Customer Credentials</span>
+                <p className="text-slate-900 font-bold">{viewingCustomer.full_name || 'Customer'}</p>
+                <p className="text-slate-600 flex items-center gap-1 font-mono text-[11px]">
+                  <Mail className="w-3.5 h-3.5 text-slate-400" />
+                  <span>{viewingCustomer.email}</span>
+                </p>
+                <p className="text-slate-600 flex items-center gap-1">
+                  <Phone className="w-3.5 h-3.5 text-slate-400" />
+                  <span>{viewingCustomer.phone || 'No phone registered'}</span>
+                </p>
+                <span className="inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-200 text-slate-700">
+                  Role: {viewingCustomer.role || 'customer'}
+                </span>
+              </div>
+
+              <div className="space-y-1">
+                <span className="text-slate-500 uppercase font-mono text-[10px] block">Saved Shipping Address</span>
+                {viewingCustomer.shipping_address ? (
+                  <>
+                    <p className="text-slate-900 font-medium">
+                      {viewingCustomer.shipping_address.street || viewingCustomer.shipping_address.address || 'Street not specified'}
+                    </p>
+                    <p className="text-slate-600">
+                      {viewingCustomer.shipping_address.city || ''}{viewingCustomer.shipping_address.state ? `, ${viewingCustomer.shipping_address.state}` : ''}{' '}
+                      {viewingCustomer.shipping_address.zipCode || viewingCustomer.shipping_address.postalCode || ''}
+                    </p>
+                    <p className="text-slate-600">{viewingCustomer.shipping_address.country || 'United States'}</p>
+                  </>
+                ) : (
+                  <p className="text-slate-400 italic">No saved address in public.profiles yet.</p>
+                )}
+              </div>
+            </div>
+
+            {/* Customer Order History */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-700 uppercase font-mono tracking-wider">
+                  Order History &amp; Checkout Transactions
+                </span>
+                <span className="text-xs text-slate-500 font-mono">
+                  {orders.filter((o) => o.user_id === viewingCustomer.id || o.guest_email === viewingCustomer.email).length} Orders Placed
+                </span>
+              </div>
+
+              <div className="border border-slate-200 rounded-2xl overflow-hidden max-h-56 overflow-y-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-slate-500 uppercase font-mono text-[10px] border-b border-slate-200">
+                    <tr>
+                      <th className="py-2.5 px-3">Order #</th>
+                      <th className="py-2.5 px-3">Date</th>
+                      <th className="py-2.5 px-3">Status</th>
+                      <th className="py-2.5 px-3">Amount</th>
+                      <th className="py-2.5 px-3 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {(() => {
+                      const custOrders = orders.filter(
+                        (o) => o.user_id === viewingCustomer.id || o.guest_email === viewingCustomer.email
+                      );
+                      if (custOrders.length === 0) {
+                        return (
+                          <tr>
+                            <td colSpan={5} className="py-6 text-center text-xs text-slate-400">
+                              No orders found for this customer account.
+                            </td>
+                          </tr>
+                        );
+                      }
+                      return custOrders.map((ord) => (
+                        <tr key={ord.id || ord.order_number} className="hover:bg-slate-50">
+                          <td className="py-2.5 px-3 font-mono font-bold text-slate-900">
+                            #{ord.order_number || ord.id?.slice(0, 8)}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-500">
+                            {ord.created_at ? new Date(ord.created_at).toLocaleDateString() : 'Recent'}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="capitalize px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700">
+                              {ord.status?.replace('_', ' ') || 'pending'}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 font-bold text-[#0b5c37] tabular-nums">
+                            {formatPrice(ord.total_amount)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right">
+                            <button
+                              onClick={() => {
+                                setViewingCustomer(null);
+                                setSelectedOrderDetails(ord);
+                              }}
+                              className="text-xs text-[#0b5c37] font-bold hover:underline cursor-pointer"
+                            >
+                              View Order →
+                            </button>
+                          </td>
+                        </tr>
+                      ));
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setViewingCustomer(null)}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors"
+              >
+                Close Customer Profile
+              </button>
+            </div>
           </div>
         </div>
       )}
