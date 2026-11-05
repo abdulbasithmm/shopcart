@@ -54,7 +54,7 @@ export const AccessDeniedPage: React.FC<AccessDeniedPageProps> = ({ onNavigate }
           <div>
             <div className="flex items-center justify-center gap-2">
               <span className="text-2xl font-black text-white tracking-tight">
-                Eko<span className="text-[#0b5c37]">mart</span>
+                Shop<span className="text-[#0b5c37]">cart</span>
               </span>
               <span className="text-xs uppercase font-mono font-bold tracking-wider px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30">
                 Unauthorized Access

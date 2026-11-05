@@ -229,7 +229,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
   };
 
   // Generate unique order reference
-  const [currentOrderNumber] = useState(() => `EKO-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`);
+  const [currentOrderNumber] = useState(() => `SC-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`);
 
   // Handler 1: PAYPAL AUTHORITATIVE CAPTURE SUCCESS
   const handlePayPalSuccess = async (transactionId: string, payerEmail: string) => {

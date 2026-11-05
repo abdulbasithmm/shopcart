@@ -8,9 +8,6 @@ import {
   ArrowRight,
   ShieldAlert,
   ArrowLeft,
-  Key,
-  Database,
-  CheckCircle2,
   AlertCircle,
   RefreshCw,
 } from 'lucide-react';
@@ -136,37 +133,25 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onNavigate }) =>
     }
   };
 
-  const handleDemoAdminLogin = () => {
-    quickDemoLogin(true);
-    showToast('Authenticated as Administrator (Sarah Connor)', 'success');
-    onNavigate('admin');
-  };
-
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col justify-center py-12 sm:px-6 lg:px-8 text-slate-100 selection:bg-[#0b5c37] selection:text-white relative overflow-hidden">
       {/* Background glow effects */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[350px] bg-gradient-to-tr from-[#0b5c37]/10 via-purple-600/10 to-emerald-600/10 blur-3xl pointer-events-none rounded-full" />
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md relative z-10 px-4">
-        {/* Brand & Security Header */}
+        {/* Brand Header */}
         <div className="text-center space-y-3">
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-[#0b5c37] to-emerald-800 text-white shadow-xl shadow-emerald-900/20 border border-emerald-600/30">
             <ShieldCheck className="w-8 h-8" />
           </div>
 
           <div>
-            <div className="flex items-center justify-center gap-2">
+            <div className="flex items-center justify-center">
               <span className="text-2xl font-black text-white tracking-tight">
-                Eko<span className="text-[#0b5c37]">mart</span>
-              </span>
-              <span className="text-xs uppercase font-mono font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-600 border border-[#0b5c37]/30">
-                Staff Portal
+                Shop<span className="text-[#0b5c37]">cart</span>
               </span>
             </div>
-            <h1 className="text-xl font-bold text-white mt-1">Admin Dashboard Login</h1>
-            <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-              Dedicated back-office portal for inventory management, order fulfillment, and merchant analytics.
-            </p>
+            <h1 className="text-xl font-bold text-white mt-2">Admin Dashboard Login</h1>
           </div>
         </div>
 
@@ -182,23 +167,6 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onNavigate }) =>
               </div>
             </div>
           )}
-
-          {/* 1-Click Evaluation Admin Switcher */}
-          <div className="p-3.5 bg-slate-800/80 rounded-2xl border border-slate-700/80 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-xs text-slate-300">
-              <Key className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>
-                Evaluating? Sign in as <strong>Sarah Connor (Admin)</strong>.
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={handleDemoAdminLogin}
-              className="px-3 py-1.5 bg-[#0b5c37] hover:bg-[#08482b] text-white text-xs font-bold rounded-lg shadow-sm transition-colors shrink-0 cursor-pointer"
-            >
-              1-Click Sign In
-            </button>
-          </div>
 
           {/* Admin Sign In Form */}
           <form onSubmit={handleAdminLogin} className="space-y-4" noValidate>
@@ -291,17 +259,6 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onNavigate }) =>
               )}
             </button>
           </form>
-
-          {/* Security Protocols Notice */}
-          <div className="pt-4 border-t border-slate-800 space-y-2 text-[11px] text-slate-400">
-            <div className="flex items-center gap-1.5 text-emerald-400 font-semibold">
-              <Database className="w-3.5 h-3.5" />
-              <span>Row Level Security (RLS) &amp; RBAC Active</span>
-            </div>
-            <p className="text-slate-500 leading-relaxed">
-              Route <code className="text-emerald-600 font-mono text-[10px]">/admin/dashboard</code> is strictly protected. User roles are verified from <code className="text-emerald-400 font-mono text-[10px]">public.profiles</code>.
-            </p>
-          </div>
 
           {/* Return to Storefront */}
           <div className="text-center pt-2">

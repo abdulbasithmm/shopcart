@@ -745,7 +745,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
               <ShieldCheck className="w-4 h-4" />
             </div>
             <span className="text-base font-black tracking-tight text-white">
-              Eko<span className="text-[#0b5c37]">mart</span> Admin
+              Shop<span className="text-[#0b5c37]">cart</span> Admin
             </span>
           </div>
         </div>
@@ -793,7 +793,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
               </div>
               <div>
                 <span className="text-lg font-black tracking-tight text-white block leading-none">
-                  Eko<span className="text-[#0b5c37]">mart</span>
+                  Shop<span className="text-[#0b5c37]">cart</span>
                 </span>
                 <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest font-bold">
                   Merchant Console
@@ -2355,7 +2355,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenSupabase
                     type="text"
                     value={trackingNumberInput}
                     onChange={(e) => setTrackingNumberInput(e.target.value)}
-                    placeholder="e.g. EKO-TRK-8492019482"
+                    placeholder="e.g. SC-TRK-8492019482"
                     className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 font-mono placeholder:text-slate-400 focus:outline-none focus:border-[#0b5c37]"
                   />
                 </div>

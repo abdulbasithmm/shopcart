@@ -58,8 +58,8 @@ export async function createOrder(params: CreateOrderParams): Promise<OrderResul
   estDeliveryDate.setDate(estDeliveryDate.getDate() + 4);
   const estimatedDeliveryISO = estDeliveryDate.toISOString();
 
-  // Generate unique tracking number (e.g. EKO-TRK-7849201948)
-  const trackingNumber = `EKO-TRK-${Math.floor(1000000000 + Math.random() * 9000000000)}`;
+  // Generate unique tracking number (e.g. SC-TRK-7849201948)
+  const trackingNumber = `SC-TRK-${Math.floor(1000000000 + Math.random() * 9000000000)}`;
   const carrier = 'Shop Cart Express';
 
   // Generate initial shipment milestones

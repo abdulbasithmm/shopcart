@@ -196,7 +196,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
                   <label className="block text-xs font-bold text-slate-700 mb-1">Order # (Optional)</label>
                   <input
                     type="text"
-                    placeholder="e.g. EKO-10492"
+                    placeholder="e.g. SC-10492"
                     value={formData.orderNumber}
                     onChange={(e) => setFormData({ ...formData, orderNumber: e.target.value })}
                     className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37] font-mono"

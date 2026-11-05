@@ -128,7 +128,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
               <ShoppingBag className="w-5 h-5" />
             </div>
             <span className="text-2xl font-extrabold text-slate-900 tracking-tight">
-              Eko<span className="text-[#0b5c37]">mart</span>
+              Shop<span className="text-[#0b5c37]">cart</span>
             </span>
           </div>
 

@@ -70,7 +70,7 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
     year: 'numeric',
   });
 
-  const trackingNum = order.tracking_number || `EKO-TRK-${order.order_number.replace(/\D/g, '').slice(-8) || '84729104'}`;
+  const trackingNum = order.tracking_number || `SC-TRK-${order.order_number.replace(/\D/g, '').slice(-8) || '84729104'}`;
   const carrierName = order.carrier || 'Shop Cart Express';
 
   const handleCopy = (text: string, type: 'tracking' | 'orderId') => {
