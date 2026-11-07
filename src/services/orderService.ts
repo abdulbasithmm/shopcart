@@ -1,4 +1,4 @@
-import { CartItem, User, Order, OrderStatus, ShipmentUpdate } from '../types';
+import { CartItem, User, Order, OrderStatus, ShipmentUpdate, PaymentStatus, AIScreenshotAnalysis } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import {
   normalizeOrderStatus,
@@ -28,9 +28,11 @@ export interface CreateOrderParams {
     phone: string;
   };
   customerNotes?: string;
-  paymentMethod: 'paypal' | 'gpay_qr' | 'credit_card' | 'cash_on_delivery';
-  paymentStatus: 'pending' | 'verified';
+  paymentMethod: string;
+  paymentStatus: PaymentStatus;
   transactionReference?: string;
+  screenshotUrl?: string | null;
+  aiAnalysis?: AIScreenshotAnalysis | null;
 }
 
 export interface OrderResult {
@@ -93,6 +95,8 @@ export async function createOrder(params: CreateOrderParams): Promise<OrderResul
         paymentMethod: params.paymentMethod,
         paymentStatus: params.paymentStatus,
         transactionReference: params.transactionReference || null,
+        screenshotUrl: params.screenshotUrl || null,
+        aiAnalysis: params.aiAnalysis || null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         order_items: params.cart.map((item) => ({
@@ -110,9 +114,14 @@ export async function createOrder(params: CreateOrderParams): Promise<OrderResul
             id: `pay-${Date.now()}`,
             payment_method: params.paymentMethod,
             amount: params.totalAmount,
-            currency: 'USD',
+            currency: 'INR',
             payment_status: params.paymentStatus,
             transaction_reference: params.transactionReference || null,
+            screenshot_url: params.screenshotUrl || null,
+            ai_analysis: params.aiAnalysis || null,
+            ai_confidence_score: params.aiAnalysis?.confidence_score || null,
+            ai_recommendation: params.aiAnalysis?.recommended_action || null,
+            suspicious_indicators: params.aiAnalysis?.suspicious_indicators || [],
             created_at: new Date().toISOString(),
           },
         ],
@@ -187,12 +196,18 @@ export async function createOrder(params: CreateOrderParams): Promise<OrderResul
       order_id: orderId,
       payment_method: params.paymentMethod,
       amount: params.totalAmount,
-      currency: 'USD',
+      currency: 'INR',
       payment_status: params.paymentStatus,
       transaction_reference: params.transactionReference || null,
+      screenshot_url: params.screenshotUrl || null,
+      ai_analysis: params.aiAnalysis || null,
+      ai_confidence_score: params.aiAnalysis?.confidence_score ?? null,
+      ai_recommendation: params.aiAnalysis?.recommended_action || null,
+      suspicious_indicators: params.aiAnalysis?.suspicious_indicators || [],
       raw_details: {
         recordedAt: new Date().toISOString(),
         paymentMethodName: params.paymentMethod,
+        aiAnalysis: params.aiAnalysis || null,
       },
     });
 
@@ -415,9 +430,17 @@ function normalizeOrderRecord(row: any): Order {
   return {
     ...row,
     status: normStatus,
-    paymentMethod: row.paymentMethod || payRecord.payment_method || 'paypal',
-    paymentStatus: row.paymentStatus || payRecord.payment_status || (normStatus === 'confirmed' || normStatus === 'shipped' || normStatus === 'delivered' ? 'verified' : 'pending'),
-    transactionReference: row.transactionReference || payRecord.transaction_reference || null,
+    paymentMethod: row.payment_method || row.paymentMethod || payRecord.payment_method || 'all_upi',
+    paymentStatus: row.payment_status || row.paymentStatus || payRecord.payment_status || (normStatus === 'confirmed' || normStatus === 'shipped' || normStatus === 'delivered' ? 'verified' : 'pending_admin_verification'),
+    transactionReference: row.transaction_reference || row.transactionReference || payRecord.transaction_reference || null,
+    screenshot_url: row.screenshot_url || payRecord.screenshot_url || null,
+    ai_analysis: row.ai_analysis || payRecord.ai_analysis || null,
+    ai_confidence_score: row.ai_confidence_score ?? payRecord.ai_confidence_score ?? null,
+    ai_recommendation: row.ai_recommendation || payRecord.ai_recommendation || null,
+    suspicious_indicators: row.suspicious_indicators || payRecord.suspicious_indicators || [],
+    verified_at: row.verified_at || payRecord.verified_at || null,
+    verified_by: row.verified_by || payRecord.verified_by || null,
+    rejection_reason: row.rejection_reason || payRecord.rejection_reason || null,
     shipment_updates: Array.isArray(row.shipment_updates) && row.shipment_updates.length > 0
       ? row.shipment_updates
       : createInitialShipmentUpdates(new Date(row.created_at || Date.now()), payRecord.payment_status === 'verified'),

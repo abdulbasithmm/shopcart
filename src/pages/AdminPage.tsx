@@ -47,8 +47,14 @@ import {
   ChevronDown,
   ArrowRight,
   SlidersHorizontal,
+  Smartphone,
+  AlertCircle,
+  Sparkles,
+  ShieldAlert,
+  FileImage,
+  Download,
 } from 'lucide-react';
-import { PageView, Product, Order, OrderStatus, ShipmentUpdate } from '../types';
+import { PageView, Product, Order, OrderStatus, ShipmentUpdate, MerchantPaymentSettings, AIScreenshotAnalysis } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { PRODUCTS, CATEGORIES } from '../data/mockData';
@@ -61,6 +67,7 @@ import {
   updateAdminStock,
   fetchProducts,
 } from '../services/productService';
+import { ProductImageGalleryEditor } from '../components/admin/ProductImageGalleryEditor';
 import {
   updateOrderStatus,
   updateOrderTracking,
@@ -143,8 +150,49 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const [productSearchQuery, setProductSearchQuery] = useState('');
   const [productCategoryFilter, setProductCategoryFilter] = useState('all');
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
-  const [paymentFilter, setPaymentFilter] = useState<'all' | 'gpay_qr' | 'paypal' | 'pending'>('all');
+  const [paymentGatewayFilter, setPaymentGatewayFilter] = useState<'all' | 'all_upi' | 'gpay' | 'phonepe' | 'paytm' | 'bhim' | 'other'>('all');
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<'all' | 'pending_verification' | 'verified' | 'rejected'>('all');
+  const [paymentSearchQuery, setPaymentSearchQuery] = useState('');
   const [analyticsRange, setAnalyticsRange] = useState<'7d' | '30d' | 'all'>('30d');
+
+  // Merchant UPI Settings State
+  const [merchantSettings, setMerchantSettings] = useState<MerchantPaymentSettings>({
+    merchant_upi_id: 'shopcart.merchant@okaxis',
+    merchant_name: 'Shop Cart Online Store',
+    merchant_upi_number: '+91 98765 43210',
+    qr_image_url: '/assets/aistudio/qr_eeef5752.jpeg',
+    enable_dynamic_qr: true,
+    instructions: 'Scan QR with any UPI app, enter exact order amount, complete payment, and upload receipt screenshot.',
+  });
+  const [isMerchantSettingsOpen, setIsMerchantSettingsOpen] = useState(false);
+  const [isSavingMerchantSettings, setIsSavingMerchantSettings] = useState(false);
+  const [merchantSettingsForm, setMerchantSettingsForm] = useState<MerchantPaymentSettings>({
+    merchant_upi_id: 'shopcart.merchant@okaxis',
+    merchant_name: 'Shop Cart Online Store',
+    merchant_upi_number: '+91 98765 43210',
+    qr_image_url: '/assets/aistudio/qr_eeef5752.jpeg',
+    enable_dynamic_qr: true,
+    instructions: 'Scan QR with any UPI app, enter exact order amount, complete payment, and upload receipt screenshot.',
+  });
+
+  // Fetch real merchant settings on mount
+  useEffect(() => {
+    fetch('/api/payments/merchant-settings')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.merchant_upi_id) {
+          setMerchantSettings(data);
+          setMerchantSettingsForm(data);
+        }
+      })
+      .catch((err) => console.warn('Could not load merchant settings in admin:', err));
+  }, []);
+
+  // Screenshot Request & Zoom Modal State
+  const [requestingScreenshotOrder, setRequestingScreenshotOrder] = useState<any | null>(null);
+  const [requestMessage, setRequestMessage] = useState('');
+  const [isSendingScreenshotRequest, setIsSendingScreenshotRequest] = useState(false);
+  const [adminZoomScreenshot, setAdminZoomScreenshot] = useState<string | null>(null);
 
   // Inventory Filters & Search
   const [inventoryFilter, setInventoryFilter] = useState<'all' | 'low' | 'out'>('all');
@@ -152,7 +200,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({
 
   // Modals & Drawers
   const [selectedOrderDetails, setSelectedOrderDetails] = useState<any | null>(null);
+  const [viewingPaymentOrder, setViewingPaymentOrder] = useState<any | null>(null);
   const [verifyingOrder, setVerifyingOrder] = useState<any | null>(null);
+  const [rejectingOrder, setRejectingOrder] = useState<any | null>(null);
+  const [rejectionReason, setRejectionReason] = useState('');
   const [adminNotes, setAdminNotes] = useState('');
   const [isProcessingVerify, setIsProcessingVerify] = useState(false);
 
@@ -217,6 +268,17 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     shortDescription: '',
     fullDescription: '',
   });
+  const [prodImages, setProdImages] = useState<string[]>(['', '', '', '']);
+  const [editingProductImages, setEditingProductImages] = useState<string[]>(['', '', '', '']);
+
+  const handleStartEditProduct = (p: Product) => {
+    setEditingProduct(p);
+    const existingImgs = Array.isArray(p.images) && p.images.length > 0
+      ? [...p.images]
+      : (p.image ? [p.image] : []);
+    while (existingImgs.length < 4) existingImgs.push('');
+    setEditingProductImages(existingImgs.slice(0, 4));
+  };
 
   // Category Add State
   const [isAddCategoryOpen, setIsAddCategoryOpen] = useState(false);
@@ -390,19 +452,57 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     );
   }, [customers, customerSearchQuery]);
 
-  // Filtered payment records
+  // Filtered payment records (Google Pay & PhonePe UPI only)
   const filteredPaymentOrders = useMemo(() => {
     return orders.filter((ord) => {
       const pay = ord.payment_records?.[0] || {};
-      const method = ord.paymentMethod || pay.payment_method || 'paypal';
-      const isVerified = pay.payment_status === 'verified' || ord.paymentStatus === 'verified';
+      const method = (ord.paymentMethod || pay.payment_method || '').toLowerCase();
+      const rawStatus = (pay.payment_status || ord.paymentStatus || '').toLowerCase();
+      const orderStatus = (ord.status || '').toLowerCase();
+      
+      const isVerified = rawStatus === 'verified' || orderStatus === 'confirmed' || orderStatus === 'processing' || orderStatus === 'shipped' || orderStatus === 'delivered';
+      const isRejected = rawStatus === 'rejected' || rawStatus === 'failed' || orderStatus === 'cancelled';
+      const isPending = !isVerified && !isRejected;
 
-      if (paymentFilter === 'gpay_qr') return method === 'gpay_qr';
-      if (paymentFilter === 'paypal') return method === 'paypal';
-      if (paymentFilter === 'pending') return !isVerified;
+      // 1. Filter by Gateway (Universal UPI)
+      if (paymentGatewayFilter === 'all_upi') {
+        if (!method.includes('all_upi') && !method.includes('universal')) return false;
+      } else if (paymentGatewayFilter === 'gpay') {
+        if (!method.includes('gpay')) return false;
+      } else if (paymentGatewayFilter === 'phonepe') {
+        if (!method.includes('phonepe')) return false;
+      } else if (paymentGatewayFilter === 'paytm') {
+        if (!method.includes('paytm')) return false;
+      } else if (paymentGatewayFilter === 'bhim') {
+        if (!method.includes('bhim')) return false;
+      } else if (paymentGatewayFilter === 'other') {
+        if (method.includes('gpay') || method.includes('phonepe') || method.includes('paytm') || method.includes('bhim')) return false;
+      }
+
+      // 2. Filter by Payment Status
+      if (paymentStatusFilter === 'pending_verification') {
+        if (!isPending) return false;
+      } else if (paymentStatusFilter === 'verified') {
+        if (!isVerified) return false;
+      } else if (paymentStatusFilter === 'rejected') {
+        if (!isRejected) return false;
+      }
+
+      // 3. Search filter by Order ID, Customer Name, Email, or UTR number
+      if (paymentSearchQuery.trim()) {
+        const q = paymentSearchQuery.toLowerCase().trim();
+        const orderNum = (ord.order_number || ord.id || '').toLowerCase();
+        const custName = (ord.shipping_address?.fullName || ord.customer_name || '').toLowerCase();
+        const email = (ord.guest_email || ord.user_id || '').toLowerCase();
+        const utr = (pay.transaction_reference || ord.transactionReference || '').toLowerCase();
+        if (!orderNum.includes(q) && !custName.includes(q) && !email.includes(q) && !utr.includes(q)) {
+          return false;
+        }
+      }
+
       return true;
     });
-  }, [orders, paymentFilter]);
+  }, [orders, paymentGatewayFilter, paymentStatusFilter, paymentSearchQuery]);
 
   // Filtered inventory products
   const filteredInventoryProducts = useMemo(() => {
@@ -661,18 +761,39 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     }
   };
 
-  // UPI QR Payment Verification Handler
+  // UPI Payment Verification Handler (Reconciles 12-digit UTR with merchant bank ledger)
   const handleVerifyPendingPayment = async () => {
     if (!verifyingOrder) return;
     setIsProcessingVerify(true);
+    const verifiedAt = new Date().toISOString();
+    const verifiedBy = user?.email || 'admin@shopcart.com';
+    const auditNotes = adminNotes.trim() || 'Verified against merchant bank statement.';
+
     try {
+      // 1. Call server-side verification endpoint
+      try {
+        await fetch('/api/admin/verify-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            orderId: verifyingOrder.id,
+            paymentRecordId: verifyingOrder.payment_records?.[0]?.id,
+            adminEmail: verifiedBy,
+            notes: auditNotes,
+          }),
+        });
+      } catch (apiErr) {
+        console.warn('API verify-payment warning:', apiErr);
+      }
+
+      // 2. Direct Supabase verification
       if (isSupabaseConfigured()) {
         await supabase
           .from('orders')
           .update({
             payment_status: 'verified',
             status: 'confirmed',
-            updated_at: new Date().toISOString(),
+            updated_at: verifiedAt,
           })
           .eq('id', verifyingOrder.id);
 
@@ -680,10 +801,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           .from('payment_records')
           .update({
             payment_status: 'verified',
+            verified_at: verifiedAt,
+            verified_by: verifiedBy,
             raw_details: {
-              verifiedAt: new Date().toISOString(),
-              verifiedBy: user?.email || 'admin@shopcart.com',
-              notes: adminNotes.trim(),
+              verifiedAt,
+              verifiedBy,
+              notes: auditNotes,
             },
           })
           .eq('order_id', verifyingOrder.id);
@@ -699,9 +822,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                 {
                   id: `pay-${Date.now()}`,
                   payment_status: 'verified',
-                  payment_method: o.paymentMethod || 'gpay_qr',
+                  payment_method: o.paymentMethod || 'gpay_upi',
                   amount: o.total_amount,
                   transaction_reference: o.transactionReference,
+                  verified_at: verifiedAt,
+                  verified_by: verifiedBy,
                 },
               ],
             };
@@ -712,7 +837,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       }
 
       showToast(
-        `Payment verified! Order #${verifyingOrder.order_number || verifyingOrder.id} confirmed and marked Paid.`,
+        `Payment verified! Order #${verifyingOrder.order_number || verifyingOrder.id} verified & confirmed.`,
         'success'
       );
       setVerifyingOrder(null);
@@ -734,6 +859,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     }
 
     try {
+      const cleanImages = prodImages.filter(Boolean);
       const res = await createAdminProduct(
         {
           name: prodForm.name.trim(),
@@ -746,6 +872,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           shortDescription: prodForm.shortDescription || 'Curated premium product by Shop Cart.',
           fullDescription: prodForm.fullDescription || 'Crafted with precision and premium materials.',
           visualType: prodForm.visualType as any,
+          images: cleanImages,
+          image: cleanImages[0] || undefined,
         },
         Number(prodForm.stockCount)
       );
@@ -753,6 +881,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       if (res.success) {
         showToast(`Product "${prodForm.name}" created and synced with Supabase!`, 'success');
         setIsAddProductOpen(false);
+        setProdImages(['', '', '', '']);
         setProdForm({
           name: '',
           brand: '',
@@ -781,6 +910,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     if (!editingProduct) return;
 
     try {
+      const cleanImages = editingProductImages.filter(Boolean);
       const res = await updateAdminProduct(
         editingProduct.id,
         {
@@ -794,6 +924,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           shortDescription: editingProduct.shortDescription,
           fullDescription: editingProduct.fullDescription,
           visualType: editingProduct.visualType,
+          images: cleanImages,
+          image: cleanImages[0] || undefined,
         },
         Number(editingProduct.stockCount)
       );
@@ -801,6 +933,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       if (res.success) {
         showToast(`Product "${editingProduct.name}" updated successfully!`, 'success');
         setEditingProduct(null);
+        setEditingProductImages(['', '', '', '']);
         loadAdminData();
       } else {
         showToast(res.error || 'Failed to update product', 'error');
@@ -951,36 +1084,70 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     showToast(`Category "${cat.name}" removed from catalog`, 'info');
   };
 
-  // Reject Payment Handler
+  // Reject Payment Handler (Rejects invalid/fraudulent UTR references with reasons)
   const handleRejectPendingPayment = async () => {
-    if (!verifyingOrder) return;
+    const targetOrder = rejectingOrder || verifyingOrder;
+    if (!targetOrder) return;
     setIsProcessingVerify(true);
+    const reasonText = rejectionReason.trim() || adminNotes.trim() || '12-digit UTR not found in merchant bank ledger / unverified deposit';
+    const rejectedAt = new Date().toISOString();
+    const rejectedBy = user?.email || 'admin@shopcart.com';
+
     try {
+      // 1. Call server-side rejection endpoint
+      try {
+        await fetch('/api/admin/reject-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            orderId: targetOrder.id,
+            paymentRecordId: targetOrder.payment_records?.[0]?.id,
+            adminEmail: rejectedBy,
+            reason: reasonText,
+          }),
+        });
+      } catch (apiErr) {
+        console.warn('API reject-payment warning:', apiErr);
+      }
+
+      // 2. Direct Supabase update
       if (isSupabaseConfigured()) {
         await supabase
           .from('orders')
-          .update({ status: 'cancelled' })
-          .eq('id', verifyingOrder.id);
+          .update({
+            status: 'cancelled',
+            payment_status: 'rejected',
+            updated_at: rejectedAt,
+          })
+          .eq('id', targetOrder.id);
 
         await supabase
           .from('payment_records')
           .update({
-            payment_status: 'failed',
+            payment_status: 'rejected',
             raw_details: {
-              rejectedAt: new Date().toISOString(),
-              rejectedBy: user?.email || 'admin@shopcart.com',
-              reason: adminNotes.trim() || 'Payment could not be verified in merchant bank records',
+              rejectedAt,
+              rejectedBy,
+              rejectionReason: reasonText,
             },
           })
-          .eq('order_id', verifyingOrder.id);
+          .eq('order_id', targetOrder.id);
       } else {
         const local = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
         const updated = local.map((o: any) => {
-          if (o.id === verifyingOrder.id || o.order_number === verifyingOrder.order_number) {
+          if (o.id === targetOrder.id || o.order_number === targetOrder.order_number) {
             return {
               ...o,
               status: 'cancelled',
-              paymentStatus: 'failed',
+              paymentStatus: 'rejected',
+              rejectionReason: reasonText,
+              payment_records: (o.payment_records || []).map((p: any) => ({
+                ...p,
+                payment_status: 'rejected',
+                rejection_reason: reasonText,
+                rejected_at: rejectedAt,
+                rejected_by: rejectedBy,
+              })),
             };
           }
           return o;
@@ -988,14 +1155,71 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         localStorage.setItem('shopcart_orders', JSON.stringify(updated));
       }
 
-      showToast(`Payment rejected for Order #${verifyingOrder.order_number || verifyingOrder.id}. Order marked Cancelled.`, 'info');
+      showToast(`Payment rejected for Order #${targetOrder.order_number || targetOrder.id}. Order marked Cancelled.`, 'info');
       setVerifyingOrder(null);
+      setRejectingOrder(null);
       setAdminNotes('');
+      setRejectionReason('');
       loadAdminData();
     } catch (err: any) {
       showToast(err.message || 'Payment rejection failed', 'error');
     } finally {
       setIsProcessingVerify(false);
+    }
+  };
+
+  // Save Merchant UPI Settings Handler
+  const handleSaveMerchantSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingMerchantSettings(true);
+    try {
+      const res = await fetch('/api/admin/merchant-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(merchantSettingsForm),
+      });
+      const data = await res.json();
+      if (data.success && data.settings) {
+        setMerchantSettings(data.settings);
+        showToast('Merchant payment configuration saved successfully!', 'success');
+        setIsMerchantSettingsOpen(false);
+      } else {
+        showToast(data.error || 'Failed to save merchant settings', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error saving merchant settings', 'error');
+    } finally {
+      setIsSavingMerchantSettings(false);
+    }
+  };
+
+  // Request Replacement Screenshot Handler
+  const handleSendScreenshotRequest = async () => {
+    if (!requestingScreenshotOrder) return;
+    setIsSendingScreenshotRequest(true);
+    try {
+      const res = await fetch('/api/admin/request-new-screenshot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderNumber: requestingScreenshotOrder.order_number,
+          orderId: requestingScreenshotOrder.id,
+          message: requestMessage.trim() || 'Please upload a clearer receipt screenshot showing full 12-digit UTR and transfer amount.',
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`Replacement receipt requested for Order #${requestingScreenshotOrder.order_number}`, 'success');
+        setRequestingScreenshotOrder(null);
+        setRequestMessage('');
+        loadAdminData();
+      } else {
+        showToast(data.error || 'Failed to send request', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error sending request', 'error');
+    } finally {
+      setIsSendingScreenshotRequest(false);
     }
   };
 
@@ -1484,7 +1708,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                             {ord.shipping_address?.fullName || ord.guest_email || 'Customer'}
                           </td>
                           <td className="py-3 px-4 text-slate-500 font-mono text-[11px]">
-                            {pMethod === 'paypal' ? 'PayPal' : 'Google Pay QR'} · {ref}
+                            {(pMethod.includes('phonepe') ? 'PhonePe' : 'Google Pay')} · {ref}
                           </td>
                           <td className="py-3 px-4 font-bold text-[#0b5c37] tabular-nums">
                             {formatPrice(ord.total_amount)}
@@ -1586,7 +1810,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                     ) : (
                       filteredOrders.map((ord) => {
                         const pay = ord.payment_records?.[0] || {};
-                        const pMethod = ord.paymentMethod || pay.payment_method || 'paypal';
+                        const pMethod = ord.paymentMethod || pay.payment_method || 'gpay_upi';
                         const isVerified = pay.payment_status === 'verified' || ord.paymentStatus === 'verified';
                         const ref = pay.transaction_reference || ord.transactionReference || 'N/A';
                         const currentStatus = normalizeOrderStatus(ord.status);
@@ -1613,7 +1837,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                             </td>
                             <td className="py-3.5 px-4">
                               <span className="font-semibold text-slate-800 uppercase text-[11px] block">
-                                {pMethod === 'paypal' ? 'PayPal API v2' : 'Google Pay QR'}
+                                {pMethod.includes('phonepe') ? 'PhonePe (UPI)' : 'Google Pay (UPI)'}
                               </span>
                               <span className="text-[10px] font-mono text-slate-500 truncate max-w-[130px] block">
                                 {ref}
@@ -1758,8 +1982,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                       <tr key={p.id} className="hover:bg-slate-50/70 transition-colors">
                         <td className="py-3.5 px-4">
                           <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center font-bold text-[#0b5c37] text-xs shrink-0">
-                              {p.name.substring(0, 2).toUpperCase()}
+                            <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center font-bold text-[#0b5c37] text-xs shrink-0 overflow-hidden">
+                              {(p.images && p.images[0]) || p.image ? (
+                                <img
+                                  src={p.images?.[0] || p.image}
+                                  alt={p.name}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                p.name.substring(0, 2).toUpperCase()
+                              )}
                             </div>
                             <div>
                               <div className="font-bold text-slate-900 line-clamp-1">{p.name}</div>
@@ -1803,7 +2035,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                             <Boxes className="w-3.5 h-3.5" />
                           </button>
                           <button
-                            onClick={() => setEditingProduct(p)}
+                            onClick={() => handleStartEditProduct(p)}
                             className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors cursor-pointer"
                             title="Edit Product"
                           >
@@ -2163,42 +2395,107 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         )}
 
         {/* ===================================================================== */}
-        {/* 7. PAYMENTS & VERIFICATION (PAYPAL & GOOGLE PAY) */}
+        {/* 7. PAYMENTS & VERIFICATION (UNIVERSAL UPI & AI FRAUD SCREENING) */}
         {/* ===================================================================== */}
         {activeSection === 'payments' && (
           <div className="space-y-5">
-            {/* Filter Tabs & Guide Banner */}
+            {/* Filter Tabs, Search & Guide Banner */}
             <div className="bg-white rounded-2xl p-5 border border-slate-200/90 shadow-xs space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl bg-emerald-50 text-[#0b5c37] border border-emerald-200 flex items-center justify-center">
-                    <CreditCard className="w-5 h-5" />
+                    <QrCode className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-sm text-slate-900">Payment Reconciliation Hub</h3>
+                    <h3 className="font-bold text-sm text-slate-900">Universal UPI Payment Reconciliation Hub</h3>
                     <p className="text-xs text-slate-500">
-                      Audit settlements and verify 12-digit UTR bank transfers
+                      Audit settlements, Gemini AI fraud analysis, and verify 12-digit UTRs
                     </p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
-                  {[
-                    { id: 'all', label: 'All Gateways' },
-                    { id: 'gpay_qr', label: 'Google Pay' },
-                    { id: 'paypal', label: 'PayPal' },
-                    { id: 'pending', label: 'Pending Check' },
-                  ].map((tab) => (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setMerchantSettingsForm({ ...merchantSettings });
+                      setIsMerchantSettingsOpen(true);
+                    }}
+                    className="px-3 py-1.5 bg-[#0b5c37] hover:bg-[#08482b] text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                    <span>Merchant UPI Settings</span>
+                  </button>
+
+                  {/* Gateway Filter Tabs */}
+                  <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs">
+                    {[
+                      { id: 'all', label: 'All Gateways' },
+                      { id: 'all_upi', label: 'Universal UPI' },
+                      { id: 'gpay', label: 'Google Pay' },
+                      { id: 'phonepe', label: 'PhonePe' },
+                      { id: 'paytm', label: 'Paytm' },
+                      { id: 'bhim', label: 'BHIM' },
+                      { id: 'other', label: 'Other UPI' },
+                    ].map((tab) => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setPaymentGatewayFilter(tab.id as any)}
+                        className={`px-2.5 py-1 font-bold rounded-lg transition-colors cursor-pointer text-xs ${
+                          paymentGatewayFilter === tab.id
+                            ? 'bg-white text-slate-900 shadow-2xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Status Filter & Search Bar */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2 border-t border-slate-100">
+                {/* Search Input */}
+                <div className="relative flex-1 max-w-md">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={paymentSearchQuery}
+                    onChange={(e) => setPaymentSearchQuery(e.target.value)}
+                    placeholder="Search by Order ID, Customer, Email, or 12-digit UTR..."
+                    className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
+                  />
+                  {paymentSearchQuery && (
                     <button
-                      key={tab.id}
-                      onClick={() => setPaymentFilter(tab.id as any)}
-                      className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
-                        paymentFilter === tab.id
-                          ? 'bg-white text-slate-900 shadow-2xs'
-                          : 'text-slate-600 hover:text-slate-900'
+                      onClick={() => setPaymentSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Status Filter Pills */}
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider font-mono mr-1">
+                    Status:
+                  </span>
+                  {[
+                    { id: 'all', label: 'All' },
+                    { id: 'pending_verification', label: 'Pending Verification' },
+                    { id: 'verified', label: 'Verified' },
+                    { id: 'rejected', label: 'Rejected' },
+                  ].map((st) => (
+                    <button
+                      key={st.id}
+                      onClick={() => setPaymentStatusFilter(st.id as any)}
+                      className={`px-2.5 py-1 text-xs rounded-lg font-semibold transition-all cursor-pointer whitespace-nowrap ${
+                        paymentStatusFilter === st.id
+                          ? 'bg-[#0b5c37] text-white shadow-2xs'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                       }`}
                     >
-                      {tab.label}
+                      {st.label}
                     </button>
                   ))}
                 </div>
@@ -2208,7 +2505,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900 flex items-start gap-2.5">
                 <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                 <p className="leading-relaxed">
-                  <strong>Verification Protocol:</strong> Google Pay UPI payments require human verification. Never approve based on client screenshots alone — confirm that the UTR reference matches your merchant bank ledger before confirming the order.
+                  <strong>Strict Fraud Prevention Protocol:</strong> AI screenshot analysis is a preliminary fraud screening tool only. All customer payments remain in <em>Pending Verification</em> until an administrator independently reconciles the 12-digit UTR reference against the official merchant bank ledger. Orders are never dispatched prior to bank confirmation.
                 </p>
               </div>
             </div>
@@ -2219,65 +2516,243 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 text-slate-500 uppercase font-mono tracking-wider text-[10px] border-b border-slate-200">
                     <tr>
-                      <th className="py-3 px-4">Order Ref</th>
+                      <th className="py-3 px-4">Customer Name</th>
+                      <th className="py-3 px-4">Order ID</th>
                       <th className="py-3 px-4">Gateway</th>
-                      <th className="py-3 px-4">Transaction / UTR Reference</th>
+                      <th className="py-3 px-4">Screenshot</th>
+                      <th className="py-3 px-4">AI Fraud Check</th>
+                      <th className="py-3 px-4">12-Digit UTR</th>
                       <th className="py-3 px-4">Amount</th>
-                      <th className="py-3 px-4">Payment Status</th>
-                      <th className="py-3 px-4 text-right">Verification Action</th>
+                      <th className="py-3 px-4">Date</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredPaymentOrders.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="py-12 text-center text-xs text-slate-400">
-                          No payment records found for this filter.
+                        <td colSpan={10} className="py-12 text-center text-xs text-slate-400">
+                          No UPI payment records found matching the active filters.
                         </td>
                       </tr>
                     ) : (
                       filteredPaymentOrders.map((ord) => {
                         const pay = ord.payment_records?.[0] || {};
-                        const isVerified = pay.payment_status === 'verified' || ord.paymentStatus === 'verified';
-                        const pMethod = ord.paymentMethod || pay.payment_method || 'paypal';
-                        const ref = pay.transaction_reference || ord.transactionReference || 'N/A';
+                        const pMethod = (ord.paymentMethod || pay.payment_method || 'all_upi').toLowerCase();
+                        const isPhonePe = pMethod.includes('phonepe');
+                        const isGPay = pMethod.includes('gpay');
+                        const isPaytm = pMethod.includes('paytm');
+                        const isBhim = pMethod.includes('bhim');
+                        
+                        const rawStatus = (pay.payment_status || ord.paymentStatus || '').toLowerCase();
+                        const ordStatus = (ord.status || '').toLowerCase();
+                        const isVerified = rawStatus === 'verified' || ordStatus === 'confirmed' || ordStatus === 'processing' || ordStatus === 'shipped' || ordStatus === 'delivered';
+                        const isRejected = rawStatus === 'rejected' || rawStatus === 'failed' || ordStatus === 'cancelled';
+                        const isPending = !isVerified && !isRejected;
+
+                        const utrRef = pay.transaction_reference || ord.transactionReference || 'N/A';
+                        const custName = ord.shipping_address?.fullName || ord.customer_name || 'Customer';
+                        const custEmail = ord.guest_email || ord.user_id || 'N/A';
+                        const submissionDate = ord.created_at ? new Date(ord.created_at).toLocaleDateString() : 'Recent';
+
+                        const screenshotUrl = pay.screenshot_url || ord.screenshot_url || (pay.raw_details?.screenshotUrl);
+                        const aiAnalysis: AIScreenshotAnalysis | undefined = pay.ai_analysis || ord.ai_analysis || (pay.raw_details?.aiAnalysis);
 
                         return (
                           <tr key={ord.id || ord.order_number} className="hover:bg-slate-50/70 transition-colors">
-                            <td className="py-3.5 px-4 font-mono font-bold text-slate-900">
-                              #{ord.order_number || ord.id?.slice(0, 8)}
-                            </td>
-                            <td className="py-3.5 px-4 font-bold text-slate-800">
-                              {pMethod === 'paypal' ? 'PayPal Checkout' : 'Google Pay UPI QR'}
-                            </td>
-                            <td className="py-3.5 px-4 font-mono text-slate-600 font-semibold">{ref}</td>
-                            <td className="py-3.5 px-4 font-bold text-[#0b5c37] tabular-nums">
-                              ${Number(ord.total_amount).toFixed(2)}
-                            </td>
+                            {/* Customer */}
                             <td className="py-3.5 px-4">
-                              <span
-                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                                  isVerified
-                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                    : 'bg-amber-50 text-amber-700 border border-amber-200'
-                                }`}
-                              >
-                                {isVerified ? 'Verified & Captured' : 'Pending Verification'}
-                              </span>
+                              <div className="font-bold text-slate-900">{custName}</div>
+                              <div className="text-[11px] text-slate-500 font-mono truncate max-w-[130px]">{custEmail}</div>
                             </td>
-                            <td className="py-3.5 px-4 text-right">
-                              {!isVerified ? (
-                                <button
-                                  onClick={() => setVerifyingOrder(ord)}
-                                  className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer shadow-2xs"
-                                >
-                                  Reconcile UTR
-                                </button>
+
+                            {/* Order ID */}
+                            <td className="py-3.5 px-4">
+                              <button
+                                onClick={() => setSelectedOrderDetails(ord)}
+                                className="font-mono font-bold text-[#0b5c37] hover:underline cursor-pointer"
+                              >
+                                #{ord.order_number || ord.id?.slice(0, 8)}
+                              </button>
+                            </td>
+
+                            {/* Payment Method */}
+                            <td className="py-3.5 px-4 whitespace-nowrap">
+                              {isPhonePe ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                                  <Smartphone className="w-3 h-3 text-purple-600" />
+                                  <span>PhonePe</span>
+                                </span>
+                              ) : isGPay ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                                  <QrCode className="w-3 h-3 text-blue-600" />
+                                  <span>Google Pay</span>
+                                </span>
+                              ) : isPaytm ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-sky-50 text-sky-700 border border-sky-200">
+                                  <Smartphone className="w-3 h-3 text-sky-600" />
+                                  <span>Paytm</span>
+                                </span>
+                              ) : isBhim ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                  <QrCode className="w-3 h-3 text-amber-600" />
+                                  <span>BHIM UPI</span>
+                                </span>
                               ) : (
-                                <span className="text-emerald-700 font-bold flex items-center justify-end gap-1">
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                  <span>Settled</span>
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-50 text-[#0b5c37] border border-emerald-200">
+                                  <QrCode className="w-3 h-3" />
+                                  <span>Universal UPI</span>
                                 </span>
                               )}
+                            </td>
+
+                            {/* Screenshot Thumbnail */}
+                            <td className="py-3.5 px-4">
+                              {screenshotUrl ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setAdminZoomScreenshot(screenshotUrl)}
+                                  className="relative group block cursor-pointer"
+                                  title="Click to view full screenshot"
+                                >
+                                  <img
+                                    src={screenshotUrl}
+                                    alt="Payment Receipt"
+                                    className="w-10 h-10 rounded-lg object-cover border border-slate-300 shadow-2xs group-hover:opacity-80 transition-opacity"
+                                  />
+                                  <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <Eye className="w-3.5 h-3.5" />
+                                  </span>
+                                </button>
+                              ) : (
+                                <span className="text-[10px] text-slate-400 italic">No Image</span>
+                              )}
+                            </td>
+
+                            {/* AI Fraud Screening Verdict Badge */}
+                            <td className="py-3.5 px-4">
+                              {aiAnalysis ? (
+                                <div className="space-y-0.5">
+                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                                    aiAnalysis.recommended_action === 'DETAILS_MATCH'
+                                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                      : aiAnalysis.recommended_action === 'REVIEW_REQUIRED'
+                                      ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                                      : 'bg-rose-50 text-rose-800 border border-rose-200'
+                                  }`}>
+                                    <Sparkles className="w-3 h-3" />
+                                    <span>
+                                      {aiAnalysis.recommended_action === 'DETAILS_MATCH'
+                                        ? 'Details Match'
+                                        : aiAnalysis.recommended_action === 'REVIEW_REQUIRED'
+                                        ? 'Review Req'
+                                        : 'Fraud Risk'}
+                                    </span>
+                                  </span>
+                                  <span className="text-[10px] text-slate-500 block font-mono">
+                                    Score: {aiAnalysis.confidence_score}%
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-[10px] text-slate-400">Manual Check</span>
+                              )}
+                            </td>
+
+                            {/* 12-digit UTR with Copy button */}
+                            <td className="py-3.5 px-4 font-mono font-bold text-slate-800 whitespace-nowrap">
+                              <div className="inline-flex items-center gap-1.5 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                                <span className="tracking-wide text-xs">{utrRef}</span>
+                                {utrRef !== 'N/A' && (
+                                  <button
+                                    onClick={() => {
+                                      navigator.clipboard?.writeText(utrRef);
+                                      showToast(`Copied UTR: ${utrRef}`, 'success');
+                                    }}
+                                    className="text-slate-400 hover:text-slate-700 cursor-pointer p-0.5"
+                                    title="Copy UTR to check bank ledger"
+                                  >
+                                    <Copy className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Amount */}
+                            <td className="py-3.5 px-4 font-extrabold text-[#0b5c37] tabular-nums text-sm whitespace-nowrap">
+                              {formatPrice(ord.total_amount)}
+                            </td>
+
+                            {/* Submission Date */}
+                            <td className="py-3.5 px-4 text-slate-500 text-[11px] whitespace-nowrap">
+                              {submissionDate}
+                            </td>
+
+                            {/* Status */}
+                            <td className="py-3.5 px-4 whitespace-nowrap">
+                              {isVerified ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1 w-fit">
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  <span>Verified</span>
+                                </span>
+                              ) : isRejected ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200 flex items-center gap-1 w-fit">
+                                  <AlertCircle className="w-3 h-3" />
+                                  <span>Rejected</span>
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1 w-fit animate-pulse">
+                                  <Clock className="w-3 h-3" />
+                                  <span>Pending</span>
+                                </span>
+                              )}
+                            </td>
+
+                            {/* Actions */}
+                            <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => setViewingPaymentOrder(ord)}
+                                  className="px-2.5 py-1 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 font-semibold text-xs rounded-lg transition-colors cursor-pointer"
+                                  title="View Payment Details"
+                                >
+                                  View Details
+                                </button>
+
+                                {isPending && (
+                                  <>
+                                    <button
+                                      onClick={() => {
+                                        setVerifyingOrder(ord);
+                                        setAdminNotes('');
+                                      }}
+                                      className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer shadow-2xs"
+                                      title="Verify UTR against merchant ledger"
+                                    >
+                                      Verify UTR
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        setRequestingScreenshotOrder(ord);
+                                        setRequestMessage('');
+                                      }}
+                                      className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 font-bold text-xs rounded-lg transition-colors cursor-pointer"
+                                      title="Request clearer or replacement receipt screenshot"
+                                    >
+                                      Req Receipt
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        setRejectingOrder(ord);
+                                        setRejectionReason('');
+                                      }}
+                                      className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs rounded-lg transition-colors cursor-pointer"
+                                      title="Reject invalid transaction"
+                                    >
+                                      Reject
+                                    </button>
+                                  </>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         );
@@ -2731,7 +3206,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                 <li>Server-side role verification queries PostgreSQL profiles table directly.</li>
                 <li>Admin credentials and sensitive service role keys are never sent to the client browser.</li>
                 <li>RLS policies block customers from accessing foreign orders or administrative inventory tables.</li>
-                <li>Full-stack Express backend handles PayPal orders and payment reconciliation.</li>
+                <li>Full-stack Express backend handles Google Pay &amp; PhonePe UPI verification and bank ledger reconciliation.</li>
                 <li>Database trigger <code>trg_protect_user_role</code> prevents customer privilege escalation.</li>
               </ul>
             </div>
@@ -3063,7 +3538,335 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       )}
 
       {/* --------------------------------------------------------------------- */}
-      {/* MODAL 2: MANUAL UPI VERIFICATION MODAL */}
+      {/* MODAL 2A: VIEW PAYMENT DETAILS MODAL */}
+      {/* --------------------------------------------------------------------- */}
+      {viewingPaymentOrder && (() => {
+        const pay = viewingPaymentOrder.payment_records?.[0] || {};
+        const pMethod = (viewingPaymentOrder.paymentMethod || pay.payment_method || 'gpay_upi').toLowerCase();
+        const isPhonePe = pMethod.includes('phonepe');
+        const rawStatus = (pay.payment_status || viewingPaymentOrder.paymentStatus || '').toLowerCase();
+        const ordStatus = (viewingPaymentOrder.status || '').toLowerCase();
+        const isVerified = rawStatus === 'verified' || ordStatus === 'confirmed' || ordStatus === 'processing' || ordStatus === 'shipped' || ordStatus === 'delivered';
+        const isRejected = rawStatus === 'rejected' || rawStatus === 'failed' || ordStatus === 'cancelled';
+        const utrRef = pay.transaction_reference || viewingPaymentOrder.transactionReference || 'N/A';
+        const raw = pay.raw_details || {};
+        const screenshotUrl = pay.screenshot_url || viewingPaymentOrder.screenshot_url || raw.screenshotUrl;
+        const aiAnalysis: AIScreenshotAnalysis | undefined = pay.ai_analysis || viewingPaymentOrder.ai_analysis || raw.aiAnalysis;
+
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
+            <div className="bg-white rounded-3xl max-w-2xl w-full border border-slate-200 shadow-2xl p-6 sm:p-7 space-y-5 my-8 text-slate-900 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                    isPhonePe ? 'bg-purple-100 text-purple-700' : 'bg-emerald-100 text-[#0b5c37]'
+                  }`}>
+                    <QrCode className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900">Payment Reconciliation &amp; Fraud Audit</h3>
+                    <p className="text-xs text-slate-500">Order #{viewingPaymentOrder.order_number || viewingPaymentOrder.id}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setViewingPaymentOrder(null)}
+                  className="text-slate-400 hover:text-slate-700 p-1 rounded-lg cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Status Banner */}
+              <div className={`p-3.5 rounded-2xl border flex items-center gap-3 text-xs ${
+                isVerified
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                  : isRejected
+                  ? 'bg-rose-50 border-rose-200 text-rose-900'
+                  : 'bg-amber-50 border-amber-200 text-amber-900'
+              }`}>
+                {isVerified ? (
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                ) : isRejected ? (
+                  <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+                ) : (
+                  <Clock className="w-5 h-5 text-amber-600 shrink-0" />
+                )}
+                <div>
+                  <p className="font-bold">
+                    {isVerified
+                      ? 'Payment Status: Verified & Settled'
+                      : isRejected
+                      ? 'Payment Status: Rejected'
+                      : 'Payment Status: Pending Administrator Ledger Reconciliation'}
+                  </p>
+                  <p className="text-[11px] opacity-80 mt-0.5">
+                    {isVerified
+                      ? `Reconciled and confirmed against official merchant bank statement.`
+                      : isRejected
+                      ? `Transaction rejected: ${raw.rejectionReason || viewingPaymentOrder.rejectionReason || 'UTR not found in bank ledger'}`
+                      : 'Awaiting human administrator bank ledger verification prior to order confirmation.'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Uploaded Receipt & Gemini AI Fraud Screening Section */}
+              <div className="bg-slate-50 rounded-2xl border border-slate-200 p-4 space-y-3.5">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-200/80">
+                  <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-[#0b5c37]" />
+                    <span>Receipt Screenshot &amp; Gemini 3.8 Flash AI Screening</span>
+                  </span>
+                  {aiAnalysis && (
+                    <span className="text-[10px] font-mono font-bold bg-white px-2 py-0.5 rounded border border-slate-200 text-slate-700">
+                      Score: {aiAnalysis.confidence_score}%
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-4 items-start">
+                  {/* Screenshot thumbnail */}
+                  {screenshotUrl ? (
+                    <div className="shrink-0 space-y-1">
+                      <div
+                        onClick={() => setAdminZoomScreenshot(screenshotUrl)}
+                        className="w-28 h-28 sm:w-32 sm:h-32 rounded-xl overflow-hidden border border-slate-300 relative group cursor-pointer shadow-xs bg-slate-900 flex items-center justify-center"
+                      >
+                        <img
+                          src={screenshotUrl}
+                          alt="Customer Receipt Screenshot"
+                          className="w-full h-full object-cover group-hover:opacity-85 transition-opacity"
+                        />
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity text-white text-[11px] font-bold gap-1">
+                          <Eye className="w-4 h-4" />
+                          <span>Zoom</span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setAdminZoomScreenshot(screenshotUrl)}
+                        className="text-[10px] text-[#0b5c37] hover:underline block text-center w-full font-bold cursor-pointer"
+                      >
+                        Inspect Full Image
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="w-28 h-28 rounded-xl border-2 border-dashed border-slate-300 bg-white flex flex-col items-center justify-center text-slate-400 p-2 text-center text-[10px]">
+                      <FileImage className="w-6 h-6 mb-1 opacity-50" />
+                      <span>No Screenshot Uploaded</span>
+                    </div>
+                  )}
+
+                  {/* AI Analysis Breakdown */}
+                  <div className="flex-1 space-y-2 text-xs">
+                    {aiAnalysis ? (
+                      <div className="space-y-2">
+                        <div className={`p-2.5 rounded-xl border flex items-center justify-between text-xs font-bold ${
+                          aiAnalysis.recommended_action === 'DETAILS_MATCH'
+                            ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                            : aiAnalysis.recommended_action === 'REVIEW_REQUIRED'
+                            ? 'bg-amber-50 border-amber-200 text-amber-950'
+                            : 'bg-rose-50 border-rose-200 text-rose-950'
+                        }`}>
+                          <span>AI Recommendation: {aiAnalysis.recommended_action.replace('_', ' ')}</span>
+                          <span className="font-mono">{aiAnalysis.confidence_score}%</span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-[11px]">
+                          <div className="bg-white p-2 rounded-lg border border-slate-200">
+                            <span className="text-slate-500 block text-[10px] font-mono uppercase">Detected App</span>
+                            <strong className="text-slate-900">{aiAnalysis.extracted_app || 'UPI App'}</strong>
+                          </div>
+                          <div className="bg-white p-2 rounded-lg border border-slate-200">
+                            <span className="text-slate-500 block text-[10px] font-mono uppercase">Amount Verification</span>
+                            <strong className={aiAnalysis.amount_matches ? 'text-emerald-700' : 'text-rose-700 font-bold'}>
+                              {aiAnalysis.amount_matches ? 'Matches Total' : `₹${aiAnalysis.extracted_amount} (Mismatch)`}
+                            </strong>
+                          </div>
+                          <div className="bg-white p-2 rounded-lg border border-slate-200">
+                            <span className="text-slate-500 block text-[10px] font-mono uppercase">Extracted UTR</span>
+                            <strong className="font-mono text-slate-900 truncate block">
+                              {aiAnalysis.extracted_utr || 'Not Found'}
+                            </strong>
+                          </div>
+                          <div className="bg-white p-2 rounded-lg border border-slate-200">
+                            <span className="text-slate-500 block text-[10px] font-mono uppercase">Payee Check</span>
+                            <strong className={aiAnalysis.merchant_matches ? 'text-emerald-700' : 'text-amber-700'}>
+                              {aiAnalysis.merchant_matches ? 'Merchant Matches' : 'Unconfirmed Payee'}
+                            </strong>
+                          </div>
+                        </div>
+
+                        {aiAnalysis.ai_summary && (
+                          <p className="text-[11px] text-slate-600 bg-white p-2 rounded-lg border border-slate-200 leading-relaxed">
+                            <strong>AI Analysis:</strong> {aiAnalysis.ai_summary}
+                          </p>
+                        )}
+
+                        {aiAnalysis.suspicious_indicators && aiAnalysis.suspicious_indicators.length > 0 && (
+                          <div className="p-2 bg-rose-50 border border-rose-200 rounded-lg text-[11px] text-rose-900">
+                            <span className="font-bold block mb-0.5">Suspicious Flags:</span>
+                            <ul className="list-disc list-inside space-y-0.5">
+                              {aiAnalysis.suspicious_indicators.map((ind, i) => (
+                                <li key={i}>{ind}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-slate-500 text-[11px] italic bg-white p-3 rounded-xl border border-slate-200">
+                        No automated AI fraud analysis is stored for this transaction. Please manually inspect the 12-digit UTR against your merchant bank statement.
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="p-2.5 bg-amber-50 rounded-xl border border-amber-200 text-[11px] text-amber-900 flex items-start gap-2">
+                  <ShieldCheck className="w-3.5 h-3.5 text-amber-700 shrink-0 mt-0.5" />
+                  <p>
+                    <strong>Mandatory Protocol:</strong> AI assessment is a preliminary risk check only. Never mark an order paid based only on a screenshot or AI recommendation. Direct bank account ledger verification is required before confirming payment and dispatching goods.
+                  </p>
+                </div>
+              </div>
+
+              {/* Transaction Metrics */}
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Payment Gateway:</span>
+                  <span className="font-bold text-slate-900 capitalize">
+                    {pMethod.replace('_', ' ').toUpperCase()}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Payable Amount:</span>
+                  <strong className="text-[#0b5c37] font-extrabold text-sm tabular-nums">
+                    {formatPrice(Number(viewingPaymentOrder.total_amount))}
+                  </strong>
+                </div>
+                <div className="flex justify-between items-center pt-1 border-t border-slate-200">
+                  <span className="text-slate-500">12-Digit UTR Reference:</span>
+                  <div className="inline-flex items-center gap-1.5 font-mono font-bold text-slate-900 bg-white px-2.5 py-1 rounded-lg border border-slate-200">
+                    <span>{utrRef}</span>
+                    {utrRef !== 'N/A' && (
+                      <button
+                        onClick={() => {
+                          navigator.clipboard?.writeText(utrRef);
+                          showToast(`Copied UTR: ${utrRef}`, 'success');
+                        }}
+                        className="text-slate-400 hover:text-slate-700 cursor-pointer"
+                        title="Copy UTR"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Customer:</span>
+                  <span className="font-semibold text-slate-900">
+                    {viewingPaymentOrder.shipping_address?.fullName || viewingPaymentOrder.customer_name || 'Customer'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Contact Email:</span>
+                  <span className="font-mono text-slate-700">
+                    {viewingPaymentOrder.guest_email || viewingPaymentOrder.user_id || 'N/A'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Submitted Timestamp:</span>
+                  <span className="text-slate-700">
+                    {viewingPaymentOrder.created_at ? new Date(viewingPaymentOrder.created_at).toLocaleString() : 'N/A'}
+                  </span>
+                </div>
+                {raw.verifiedAt && (
+                  <div className="flex justify-between items-center pt-1 border-t border-slate-200">
+                    <span className="text-slate-500">Verified At / By:</span>
+                    <span className="text-slate-700 text-[11px]">
+                      {new Date(raw.verifiedAt).toLocaleString()} ({raw.verifiedBy || 'Administrator'})
+                    </span>
+                  </div>
+                )}
+                {raw.adminNotes && (
+                  <div className="pt-1 border-t border-slate-200 text-slate-600">
+                    <span className="text-slate-500 block mb-0.5">Admin Ledger Notes:</span>
+                    <p className="bg-white p-2 rounded-lg border border-slate-200 text-[11px] font-mono">{raw.adminNotes}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Order Items Preview */}
+              <div className="space-y-2">
+                <span className="text-xs font-bold text-slate-700 uppercase font-mono tracking-wider">
+                  Order Items ({viewingPaymentOrder.order_items?.length || 1})
+                </span>
+                <div className="divide-y divide-slate-100 max-h-36 overflow-y-auto border border-slate-200 rounded-xl p-2 bg-slate-50 text-xs">
+                  {(viewingPaymentOrder.order_items || []).map((it: any, idx: number) => (
+                    <div key={idx} className="py-1.5 flex justify-between">
+                      <span className="text-slate-800 font-medium">{it.product_name} × {it.quantity}</span>
+                      <span className="font-mono text-slate-900 font-bold">{formatPrice(it.total_price || it.unit_price * it.quantity)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setViewingPaymentOrder(null)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
+                >
+                  Close
+                </button>
+                {!isVerified && !isRejected && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const target = viewingPaymentOrder;
+                        setViewingPaymentOrder(null);
+                        setRequestingScreenshotOrder(target);
+                        setRequestMessage('');
+                      }}
+                      className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold text-xs rounded-xl border border-amber-200 cursor-pointer"
+                    >
+                      Request Clearer Receipt
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const target = viewingPaymentOrder;
+                        setViewingPaymentOrder(null);
+                        setRejectingOrder(target);
+                        setRejectionReason('');
+                      }}
+                      className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 cursor-pointer"
+                    >
+                      Reject Payment
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const target = viewingPaymentOrder;
+                        setViewingPaymentOrder(null);
+                        setVerifyingOrder(target);
+                        setAdminNotes('');
+                      }}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl cursor-pointer shadow-xs"
+                    >
+                      Reconcile &amp; Verify UTR
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* --------------------------------------------------------------------- */}
+      {/* MODAL 2B: MANUAL UPI VERIFICATION MODAL */}
       {/* --------------------------------------------------------------------- */}
       {verifyingOrder && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
@@ -3085,7 +3888,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                 <span>Strict Security Protocol</span>
               </div>
               <p className="text-[11px] leading-relaxed">
-                Confirm that this 12-digit UTR reference appears in your merchant bank account statement before approving.
+                Confirm that this 12-digit UTR reference appears in your merchant bank account statement before approving. Never approve solely based on customer claims.
               </p>
             </div>
 
@@ -3098,30 +3901,54 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                 </strong>
               </div>
               <div className="flex justify-between">
+                <span className="text-slate-500">Payment Gateway:</span>
+                <strong className="text-slate-900">
+                  {(verifyingOrder.paymentMethod || verifyingOrder.payment_records?.[0]?.payment_method || '').includes('phonepe')
+                    ? 'PhonePe (UPI)'
+                    : 'Google Pay (UPI)'}
+                </strong>
+              </div>
+              <div className="flex justify-between">
                 <span className="text-slate-500">Customer:</span>
                 <strong className="text-slate-900">
                   {verifyingOrder.shipping_address?.fullName || verifyingOrder.guest_email || 'Customer'}
                 </strong>
               </div>
-              <div className="flex justify-between pt-1 border-t border-slate-200">
-                <span className="text-slate-500">Submitted UTR Number:</span>
-                <span className="font-mono font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-                  {verifyingOrder.payment_records?.[0]?.transaction_reference ||
-                    verifyingOrder.transactionReference ||
-                    'N/A'}
-                </span>
+              <div className="flex justify-between items-center pt-1 border-t border-slate-200">
+                <span className="text-slate-500">Submitted 12-Digit UTR:</span>
+                <div className="inline-flex items-center gap-1.5">
+                  <span className="font-mono font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                    {verifyingOrder.payment_records?.[0]?.transaction_reference ||
+                      verifyingOrder.transactionReference ||
+                      'N/A'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const ref = verifyingOrder.payment_records?.[0]?.transaction_reference || verifyingOrder.transactionReference;
+                      if (ref) {
+                        navigator.clipboard?.writeText(ref);
+                        showToast(`Copied UTR: ${ref}`, 'success');
+                      }
+                    }}
+                    className="text-slate-400 hover:text-slate-700 p-0.5 cursor-pointer"
+                    title="Copy UTR"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             </div>
 
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
-                Admin Audit Notes / Bank Reference
+                Admin Audit Notes / Bank Ledger Reference
               </label>
               <input
                 type="text"
                 value={adminNotes}
                 onChange={(e) => setAdminNotes(e.target.value)}
-                placeholder="e.g. Verified with Merchant HDFC statement at 11:45 AM"
+                placeholder="e.g. Verified with Merchant UPI statement at 11:45 AM"
                 className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
               />
             </div>
@@ -3136,11 +3963,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               </button>
               <button
                 type="button"
-                onClick={handleRejectPendingPayment}
-                disabled={isProcessingVerify}
-                className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 cursor-pointer transition-colors disabled:opacity-50"
+                onClick={() => {
+                  const target = verifyingOrder;
+                  setVerifyingOrder(null);
+                  setRejectingOrder(target);
+                  setRejectionReason('');
+                }}
+                className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 cursor-pointer transition-colors"
               >
-                Reject (Invalid UTR)
+                Reject Payment
               </button>
               <button
                 type="button"
@@ -3151,15 +3982,333 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                 {isProcessingVerify ? (
                   <>
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Processing...</span>
+                    <span>Verifying...</span>
                   </>
                 ) : (
                   <>
                     <Check className="w-4 h-4" />
-                    <span>Confirm Credit &amp; Mark Paid</span>
+                    <span>Confirm Credit &amp; Mark Verified</span>
                   </>
                 )}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --------------------------------------------------------------------- */}
+      {/* MODAL 2C: REJECT PAYMENT MODAL */}
+      {/* --------------------------------------------------------------------- */}
+      {rejectingOrder && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-lg w-full border border-slate-200 shadow-2xl p-6 sm:p-7 space-y-5 my-8 text-slate-900">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-slate-900">Reject Payment Reference</h3>
+                <p className="text-xs text-slate-500">Order #{rejectingOrder.order_number || rejectingOrder.id}</p>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 space-y-1">
+              <p className="font-bold">Transaction Rejection Warning</p>
+              <p className="text-[11px] leading-relaxed">
+                Rejecting this transaction will mark the payment as <strong>Rejected</strong> and cancel the associated order. The customer will be informed that the UTR could not be reconciled.
+              </p>
+            </div>
+
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Order Amount:</span>
+                <strong className="text-slate-900 font-bold">{formatPrice(Number(rejectingOrder.total_amount))}</strong>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Submitted UTR:</span>
+                <span className="font-mono font-bold text-rose-700">
+                  {rejectingOrder.payment_records?.[0]?.transaction_reference || rejectingOrder.transactionReference || 'N/A'}
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Rejection Reason (Required)
+              </label>
+              <textarea
+                rows={3}
+                required
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                placeholder="e.g. 12-digit UTR not found in merchant bank ledger / amount mismatch"
+                className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-rose-500 focus:bg-white resize-none"
+              />
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setRejectingOrder(null)}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleRejectPendingPayment}
+                disabled={isProcessingVerify}
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isProcessingVerify ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Rejecting...</span>
+                  </>
+                ) : (
+                  <>
+                    <AlertCircle className="w-4 h-4" />
+                    <span>Confirm Rejection</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --------------------------------------------------------------------- */}
+      {/* MODAL 2D: MERCHANT UPI SETTINGS CONFIGURATION MODAL */}
+      {/* --------------------------------------------------------------------- */}
+      {isMerchantSettingsOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-lg w-full border border-slate-200 shadow-2xl p-6 sm:p-7 space-y-5 my-8 text-slate-900 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-100 text-[#0b5c37] flex items-center justify-center shrink-0">
+                  <Settings className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900">Merchant UPI Configuration</h3>
+                  <p className="text-xs text-slate-500">Update verified store UPI ID, QR, and dynamic checkout settings</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMerchantSettingsOpen(false)}
+                className="text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveMerchantSettings} className="space-y-4 text-xs">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Merchant UPI ID <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={merchantSettingsForm.merchant_upi_id}
+                  onChange={(e) => setMerchantSettingsForm({ ...merchantSettingsForm, merchant_upi_id: e.target.value })}
+                  placeholder="e.g. shopcart.merchant@okaxis"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-mono focus:outline-none focus:border-emerald-500 focus:bg-white"
+                />
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  The verified VPA handle displayed to customers on checkout.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Merchant Business Name <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={merchantSettingsForm.merchant_name}
+                  onChange={(e) => setMerchantSettingsForm({ ...merchantSettingsForm, merchant_name: e.target.value })}
+                  placeholder="e.g. Shop Cart Online Store"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Merchant UPI Registered Phone Number
+                </label>
+                <input
+                  type="text"
+                  value={merchantSettingsForm.merchant_upi_number}
+                  onChange={(e) => setMerchantSettingsForm({ ...merchantSettingsForm, merchant_upi_number: e.target.value })}
+                  placeholder="e.g. +91 98765 43210"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-mono focus:outline-none focus:border-emerald-500 focus:bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Merchant QR Code Image URL
+                </label>
+                <input
+                  type="text"
+                  value={merchantSettingsForm.qr_image_url}
+                  onChange={(e) => setMerchantSettingsForm({ ...merchantSettingsForm, qr_image_url: e.target.value })}
+                  placeholder="e.g. /assets/aistudio/qr_eeef5752.jpeg"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-mono text-[11px] focus:outline-none focus:border-emerald-500 focus:bg-white"
+                />
+              </div>
+
+              <div className="flex items-center gap-2.5 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                <input
+                  type="checkbox"
+                  id="enable_dynamic_qr"
+                  checked={merchantSettingsForm.enable_dynamic_qr}
+                  onChange={(e) => setMerchantSettingsForm({ ...merchantSettingsForm, enable_dynamic_qr: e.target.checked })}
+                  className="accent-[#0b5c37] w-4 h-4 cursor-pointer"
+                />
+                <label htmlFor="enable_dynamic_qr" className="cursor-pointer font-bold text-slate-800 text-xs">
+                  Enable Dynamic Order-Linked QR Codes
+                  <span className="block text-[11px] font-normal text-slate-500">
+                    Automatically encodes the exact payable order amount and order reference into the QR code for seamless scanning.
+                  </span>
+                </label>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Custom Payment Instructions for Customers
+                </label>
+                <textarea
+                  rows={2}
+                  value={merchantSettingsForm.instructions || ''}
+                  onChange={(e) => setMerchantSettingsForm({ ...merchantSettingsForm, instructions: e.target.value })}
+                  placeholder="Instructions displayed to customers during checkout..."
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white resize-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsMerchantSettingsOpen(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingMerchantSettings}
+                  className="px-5 py-2 bg-[#0b5c37] hover:bg-[#08482b] text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {isSavingMerchantSettings ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving Settings...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Save Configuration</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --------------------------------------------------------------------- */}
+      {/* MODAL 2E: REQUEST REPLACEMENT RECEIPT MODAL */}
+      {/* --------------------------------------------------------------------- */}
+      {requestingScreenshotOrder && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-lg w-full border border-slate-200 shadow-2xl p-6 sm:p-7 space-y-4 my-8 text-slate-900">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                <FileImage className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-slate-900">Request Replacement Receipt</h3>
+                <p className="text-xs text-slate-500">Order #{requestingScreenshotOrder.order_number || requestingScreenshotOrder.id}</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600">
+              Notify the customer to upload a clearer or full payment receipt screenshot showing the 12-digit UPI UTR reference number and transfer status.
+            </p>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Instructions for Customer
+              </label>
+              <textarea
+                rows={3}
+                value={requestMessage}
+                onChange={(e) => setRequestMessage(e.target.value)}
+                placeholder="e.g. Your uploaded receipt was cropped and the 12-digit UTR is unreadable. Please upload a full screenshot showing the bank transaction details."
+                className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white resize-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setRequestingScreenshotOrder(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSendScreenshotRequest}
+                disabled={isSendingScreenshotRequest}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {isSendingScreenshotRequest ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Sending Request...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Send Request to Customer</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --------------------------------------------------------------------- */}
+      {/* MODAL 2F: ADMIN ZOOM SCREENSHOT PREVIEW */}
+      {/* --------------------------------------------------------------------- */}
+      {adminZoomScreenshot && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-2xl w-full p-5 space-y-4 shadow-2xl animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <h3 className="text-xs font-bold text-slate-900 flex items-center gap-2">
+                <FileImage className="w-4 h-4 text-[#0b5c37]" />
+                <span>Payment Receipt High-Resolution Inspection</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setAdminZoomScreenshot(null)}
+                className="text-slate-400 hover:text-slate-700 text-xs font-bold p-1 cursor-pointer"
+              >
+                ✕ Close
+              </button>
+            </div>
+            <div className="max-h-[75vh] overflow-auto rounded-2xl bg-slate-900 flex items-center justify-center p-3 border border-slate-800">
+              <img
+                src={adminZoomScreenshot}
+                alt="Full Resolution Payment Receipt"
+                className="max-h-[70vh] w-auto object-contain rounded-lg"
+              />
             </div>
           </div>
         </div>
@@ -3170,7 +4319,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       {/* --------------------------------------------------------------------- */}
       {isAddProductOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl max-w-xl w-full border border-slate-200 shadow-2xl p-6 sm:p-7 space-y-5 my-8 text-slate-900">
+          <div className="bg-white rounded-3xl max-w-3xl w-full border border-slate-200 shadow-2xl p-6 sm:p-7 space-y-5 my-8 text-slate-900 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
               <div className="flex items-center gap-2">
                 <ShoppingBag className="w-5 h-5 text-[#0b5c37]" />
@@ -3298,6 +4447,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                 </div>
               </div>
 
+              {/* Dedicated 4-Slot Product Image Gallery */}
+              <div className="border-t border-slate-200 pt-3">
+                <ProductImageGalleryEditor
+                  images={prodImages}
+                  onChange={setProdImages}
+                  productId="new-product"
+                />
+              </div>
+
               <div className="flex gap-2 pt-3 border-t border-slate-200">
                 <button
                   type="button"
@@ -3323,7 +4481,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       {/* --------------------------------------------------------------------- */}
       {editingProduct && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl max-w-xl w-full border border-slate-200 shadow-2xl p-6 sm:p-7 space-y-5 my-8 text-slate-900">
+          <div className="bg-white rounded-3xl max-w-3xl w-full border border-slate-200 shadow-2xl p-6 sm:p-7 space-y-5 my-8 text-slate-900 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
               <div className="flex items-center gap-2">
                 <Edit className="w-5 h-5 text-[#0b5c37]" />
@@ -3421,6 +4579,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-[#0b5c37] font-mono focus:bg-white"
                   />
                 </div>
+              </div>
+
+              {/* Dedicated 4-Slot Product Image Gallery */}
+              <div className="border-t border-slate-200 pt-3">
+                <ProductImageGalleryEditor
+                  images={editingProductImages}
+                  onChange={setEditingProductImages}
+                  productId={editingProduct.id}
+                />
               </div>
 
               <div className="flex gap-2 pt-3 border-t border-slate-200">

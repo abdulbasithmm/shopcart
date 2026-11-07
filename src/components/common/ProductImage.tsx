@@ -7,6 +7,7 @@ interface ProductImageProps {
   size?: 'sm' | 'md' | 'lg' | 'xl';
   showBadge?: boolean;
   selectedColor?: string;
+  imageUrl?: string;
 }
 
 export const ProductImage: React.FC<ProductImageProps> = ({
@@ -15,8 +16,11 @@ export const ProductImage: React.FC<ProductImageProps> = ({
   size = 'md',
   showBadge = true,
   selectedColor,
+  imageUrl,
 }) => {
+  const [imgError, setImgError] = React.useState(false);
   const activeColor = selectedColor || product.colors?.[0]?.hex || '#0f172a';
+  const effectiveImageUrl = !imgError ? (imageUrl || (product.images && product.images[0]) || product.image) : null;
 
   // Specific bespoke vector art for each product category & type
   const renderVisual = () => {
@@ -475,7 +479,17 @@ export const ProductImage: React.FC<ProductImageProps> = ({
     >
       {/* Inner visual canvas */}
       <div className="w-full h-full flex items-center justify-center">
-        {renderVisual()}
+        {effectiveImageUrl ? (
+          <img
+            src={effectiveImageUrl}
+            alt={product.name}
+            className="w-full h-full object-contain select-none"
+            loading="lazy"
+            onError={() => setImgError(true)}
+          />
+        ) : (
+          renderVisual()
+        )}
       </div>
     </div>
   );

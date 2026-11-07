@@ -16,7 +16,7 @@
     "audit": "tsx scripts/run-production-audit.ts"
   },
   "dependencies": {
-    "@google/genai": "^2.4.0",
+    "@google/genai": "^3.0.0",
     "@paypal/paypal-js": "^11.3.0",
     "@supabase/supabase-js": "^2.118.0",
     "@tailwindcss/vite": "^4.3.3",

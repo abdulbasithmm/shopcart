@@ -289,15 +289,6 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto">
-            {isAdmin && (
-              <button
-                onClick={() => onNavigate('admin')}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-emerald-600 text-xs font-bold rounded-xl transition-all border border-slate-700 flex items-center gap-1.5 cursor-pointer shadow-xs"
-              >
-                <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                <span>Admin Portal</span>
-              </button>
-            )}
             <button
               onClick={() => onNavigate('shop')}
               className="px-4 py-2 bg-[#0b5c37] hover:bg-[#08482b] text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-emerald-900/10 flex items-center gap-1.5 cursor-pointer"
@@ -682,10 +673,12 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
                             className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider shrink-0 ${
                               ord.paymentStatus === 'verified'
                                 ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                : ord.paymentStatus === 'rejected'
+                                ? 'bg-rose-100 text-rose-800 border border-rose-200'
                                 : 'bg-amber-100 text-amber-800 border border-amber-200'
                             }`}
                           >
-                            {ord.paymentMethod === 'paypal' ? 'PayPal' : 'Google Pay QR'}: {ord.paymentStatus === 'verified' ? 'Paid' : 'Pending'}
+                            {(ord.paymentMethod?.includes('phonepe') ? 'PhonePe' : 'Google Pay')}: {ord.paymentStatus === 'verified' ? 'Verified & Paid' : ord.paymentStatus === 'rejected' ? 'Rejected' : 'Waiting for Verification'}
                           </span>
                         </div>
                       </div>

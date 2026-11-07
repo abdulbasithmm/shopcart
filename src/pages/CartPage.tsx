@@ -780,13 +780,10 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
                 </div>
               </div>
 
-              {/* Payment methods icons/strip */}
-              <div className="pt-2 border-t border-slate-100 flex items-center justify-center gap-3 text-slate-400 text-[11px] font-semibold">
-                <span className="px-2 py-1 rounded bg-slate-100">VISA</span>
-                <span className="px-2 py-1 rounded bg-slate-100">Mastercard</span>
-                <span className="px-2 py-1 rounded bg-slate-100">AMEX</span>
-                <span className="px-2 py-1 rounded bg-slate-100">Apple Pay</span>
-                <span className="px-2 py-1 rounded bg-slate-100">PayPal</span>
+              {/* Supported Payment Methods (Exclusively Google Pay & PhonePe UPI) */}
+              <div className="pt-2 border-t border-slate-100 flex items-center justify-center gap-2 text-slate-700 text-[11px] font-bold">
+                <span className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-200">Google Pay (UPI)</span>
+                <span className="px-2.5 py-1 rounded-lg bg-purple-50 text-purple-700 border border-purple-200">PhonePe (UPI)</span>
               </div>
             </div>
           </div>

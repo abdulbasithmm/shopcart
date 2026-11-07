@@ -598,7 +598,7 @@ export const FAQ_ITEMS: FAQItem[] = [
   },
   {
     question: 'Which payment methods are accepted?',
-    answer: 'We accept UPI (Google Pay, PhonePe, Paytm), Credit & Debit cards (Visa, MasterCard, RuPay), Net Banking, EMI, and PayPal.',
+    answer: 'We exclusively accept Google Pay (UPI) and PhonePe (UPI) payments. Payments are secured and verified with your 12-digit transaction reference (UTR).',
   },
 ];
 

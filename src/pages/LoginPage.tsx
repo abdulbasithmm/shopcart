@@ -242,38 +242,25 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
           </div>
         ) : (
           <>
-            {/* 1-Click Demo Login Banner */}
-            <div className="p-3.5 bg-emerald-50 rounded-2xl border border-emerald-200/80 flex flex-col gap-2">
+            {/* Customer Quick Sign-in Option */}
+            <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-200/80 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-xs text-emerald-950">
                 <Zap className="w-4 h-4 text-[#0b5c37] shrink-0" />
-                <span className="leading-tight">
-                  Quick testing? Choose a pre-configured account:
+                <span className="leading-tight text-emerald-900 font-medium">
+                  Testing storefront? Try customer demo:
                 </span>
               </div>
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    quickDemoLogin(false);
-                    showToast('Logged in as Customer (Alex Morgan)', 'success');
-                    onNavigate('account');
-                  }}
-                  className="px-2.5 py-1.5 bg-[#0b5c37] hover:bg-[#08482b] text-white text-[11px] font-bold rounded-lg shadow-2xs transition-colors cursor-pointer text-center"
-                >
-                  Customer Demo
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    quickDemoLogin(true);
-                    showToast('Logged in as Admin (Sarah Connor)', 'info');
-                    onNavigate('account');
-                  }}
-                  className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold rounded-lg shadow-2xs transition-colors cursor-pointer text-center"
-                >
-                  Admin Demo
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  quickDemoLogin(false);
+                  showToast('Logged in as Customer (Alex Morgan)', 'success');
+                  onNavigate('account');
+                }}
+                className="px-3 py-1.5 bg-[#0b5c37] hover:bg-[#08482b] text-white text-[11px] font-bold rounded-lg shadow-2xs transition-colors cursor-pointer text-center shrink-0"
+              >
+                Customer Demo
+              </button>
             </div>
 
             {/* Main Sign In Form */}

@@ -169,24 +169,6 @@ export const AccessDeniedPage: React.FC<AccessDeniedPageProps> = ({ onNavigate }
               )}
             </div>
           </div>
-
-          {/* Quick Demo Switcher (For evaluators) */}
-          <div className="pt-3 border-t border-slate-800/80">
-            <div className="p-3 bg-slate-800/60 rounded-xl border border-slate-700/60 flex items-center justify-between gap-3">
-              <div className="text-[11px] text-slate-400">
-                <span className="text-slate-300 font-semibold block">Testing Shop Cart?</span>
-                <span>Switch to preconfigured Admin profile</span>
-              </div>
-              <button
-                type="button"
-                onClick={handleDemoAdmin}
-                className="px-3 py-1.5 bg-[#0b5c37] hover:bg-[#08482b] text-white text-xs font-bold rounded-lg transition-colors cursor-pointer shrink-0 flex items-center gap-1 shadow-sm"
-              >
-                <Key className="w-3 h-3" />
-                <span>Demo Admin</span>
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>

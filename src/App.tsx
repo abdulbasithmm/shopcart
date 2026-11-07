@@ -26,10 +26,12 @@ import { AdminPage, AdminSection } from './pages/AdminPage';
 import { AdminLoginPage } from './pages/AdminLoginPage';
 import { AccessDeniedPage } from './pages/AccessDeniedPage';
 
-// Helper to parse current browser URL (supporting both pathnames and hashes)
+// Helper to parse current browser URL (supporting both single-domain /admin/* and admin.* subdomains)
 function parseCurrentRoute(): { page: PageView; productId?: string; adminSection?: AdminSection } {
   if (typeof window === 'undefined') return { page: 'home' };
 
+  const hostname = window.location.hostname.toLowerCase();
+  const isAdminSubdomain = hostname.startsWith('admin.');
   const pathname = window.location.pathname.toLowerCase().replace(/\/$/, '');
   const hash = window.location.hash.toLowerCase().replace(/^#\/?/, '').replace(/\/$/, '');
 
@@ -38,7 +40,33 @@ function parseCurrentRoute(): { page: PageView; productId?: string; adminSection
     return { page: 'reset-password' };
   }
 
-  // 2. Admin Login route: /admin/login or #/admin/login or #admin-login
+  // 2. Admin subdomain routing (e.g. admin.shopcart.com)
+  if (isAdminSubdomain) {
+    if (pathname === '/login' || hash === 'login') {
+      return { page: 'admin-login' };
+    }
+    const cleanSub = pathname.replace(/^\//, '') || hash;
+    if (!cleanSub || cleanSub === 'dashboard') {
+      return { page: 'admin', adminSection: 'dashboard' };
+    }
+    const subSectionMap: Record<string, AdminSection> = {
+      orders: 'orders',
+      products: 'products',
+      categories: 'categories',
+      customers: 'customers',
+      inventory: 'inventory',
+      payments: 'payments',
+      analytics: 'analytics',
+      profile: 'settings',
+      settings: 'settings',
+    };
+    if (subSectionMap[cleanSub]) {
+      return { page: 'admin', adminSection: subSectionMap[cleanSub] };
+    }
+    return { page: 'admin', adminSection: 'dashboard' };
+  }
+
+  // 3. Admin Login route: /admin/login or #/admin/login or #admin-login
   if (
     pathname === '/admin/login' ||
     pathname === '/admin-login' ||
@@ -48,7 +76,7 @@ function parseCurrentRoute(): { page: PageView; productId?: string; adminSection
     return { page: 'admin-login' };
   }
 
-  // 3. Admin section routes: /admin/dashboard, /admin/orders, /admin/products, etc.
+  // 4. Admin section routes: /admin/dashboard, /admin/orders, /admin/products, etc.
   if (pathname === '/admin/dashboard' || pathname === '/admin') {
     return { page: 'admin', adminSection: 'dashboard' };
   }
@@ -72,7 +100,7 @@ function parseCurrentRoute(): { page: PageView; productId?: string; adminSection
     return { page: 'admin', adminSection: parsedAdminSec };
   }
 
-  // 4. Access Denied route
+  // 5. Access Denied route
   if (
     pathname === '/access-denied' ||
     pathname === '/admin/unauthorized' ||
@@ -82,7 +110,7 @@ function parseCurrentRoute(): { page: PageView; productId?: string; adminSection
     return { page: 'access-denied' };
   }
 
-  // 5. Product Detail check
+  // 6. Product Detail check
   if (hash.startsWith('product-')) {
     const prodId = hash.replace('product-', '');
     return { page: 'product', productId: prodId };
@@ -92,7 +120,7 @@ function parseCurrentRoute(): { page: PageView; productId?: string; adminSection
     return { page: 'product', productId: prodId };
   }
 
-  // 6. Common storefront pages
+  // 7. Common storefront pages
   const candidate = (hash || pathname.replace(/^\//, '')) as PageView;
   if (
     [
@@ -162,6 +190,9 @@ function AppContent() {
       setAccountTab(params.tab as any);
     }
 
+    const hostname = typeof window !== 'undefined' ? window.location.hostname.toLowerCase() : '';
+    const isAdminSubdomain = hostname.startsWith('admin.');
+
     let targetPath = '/';
     let targetHash = '';
 
@@ -170,13 +201,13 @@ function AppContent() {
       targetPath = `/product/${params.productId}`;
       targetHash = `product-${params.productId}`;
     } else if (page === 'admin-login') {
-      targetPath = '/admin/login';
-      targetHash = '/admin/login';
+      targetPath = isAdminSubdomain ? '/login' : '/admin/login';
+      targetHash = isAdminSubdomain ? '/login' : '/admin/login';
     } else if (page === 'admin') {
       const sec = params?.adminSection || adminSection || 'dashboard';
       const secPath = sec === 'settings' ? 'profile' : sec;
-      targetPath = `/admin/${secPath}`;
-      targetHash = `/admin/${secPath}`;
+      targetPath = isAdminSubdomain ? `/${secPath}` : `/admin/${secPath}`;
+      targetHash = isAdminSubdomain ? `/${secPath}` : `/admin/${secPath}`;
       setAdminSection(sec);
     } else if (page === 'access-denied') {
       targetPath = '/access-denied';
@@ -231,7 +262,6 @@ function AppContent() {
           currentPage={currentPage}
           onNavigate={handleNavigate}
           onSearch={handleSearchFromHeader}
-          onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
         />
       )}
 
@@ -312,7 +342,6 @@ function AppContent() {
       {!isAdminRoute && (
         <Footer
           onNavigate={handleNavigate}
-          onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
         />
       )}
 

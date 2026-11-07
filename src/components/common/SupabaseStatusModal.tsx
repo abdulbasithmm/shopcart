@@ -283,7 +283,7 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ isOpen
         name: 'public.payment_records',
         category: 'Reconciliation',
         status: payErr ? 'error' : 'passed',
-        message: payErr ? payErr.message : 'Accessible (Stores PayPal capture and Google Pay UTR audit records)',
+        message: payErr ? payErr.message : 'Accessible (Stores Google Pay & PhonePe UPI UTR audit records)',
       });
 
       // 9. Wishlist

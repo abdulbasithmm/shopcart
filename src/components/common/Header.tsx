@@ -93,22 +93,10 @@ export const Header: React.FC<HeaderProps> = ({
             </span>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0 ml-auto">
-            {/* Database status indicator badge */}
-            <button
-              onClick={() => onOpenSupabaseModal?.()}
-              className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-md text-[9px] sm:text-[10px] font-bold tracking-wider uppercase border cursor-pointer transition-all ${
-                isSupabaseConfigured()
-                  ? 'bg-emerald-950/90 text-emerald-300 border-emerald-500/50 hover:bg-emerald-900 shadow-xs'
-                  : 'bg-amber-950/90 text-amber-300 border-amber-500/50 hover:bg-amber-900 shadow-xs'
-              }`}
-              title="Click to view database connection status and enter Supabase credentials"
-            >
-              <span className={`w-1.5 h-1.5 rounded-full ${isSupabaseConfigured() ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-              <span className="hidden sm:inline">{isSupabaseConfigured() ? 'LIVE SUPABASE' : 'LOCAL STORAGE FALLBACK'}</span>
-              <span className="sm:hidden">{isSupabaseConfigured() ? 'LIVE' : 'FALLBACK'}</span>
-            </button>
-
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-auto">
+            <span className="hidden sm:inline text-[10px] text-emerald-200/90 font-semibold">
+              Free Express Delivery on orders over ₹499
+            </span>
             <button
               onClick={() => onNavigate('shop')}
               className="px-2.5 sm:px-3.5 py-0.5 sm:py-1 bg-white hover:bg-slate-100 text-[#093d22] text-[10px] sm:text-[11px] font-bold rounded-md shadow-xs transition-colors shrink-0 cursor-pointer"
@@ -341,28 +329,6 @@ export const Header: React.FC<HeaderProps> = ({
                         </span>
                       )}
                     </button>
-                    <button
-                      onClick={() => {
-                        setIsUserMenuOpen(false);
-                        onNavigate('admin-login');
-                      }}
-                      className="w-full text-left px-2 py-1.5 hover:bg-slate-50 rounded-md font-medium text-[#0b5c37] hover:text-[#08482b] flex items-center justify-between"
-                    >
-                      <span>Merchant / Staff Portal</span>
-                      <ShieldCheck className="w-3.5 h-3.5" />
-                    </button>
-                    {onOpenSupabaseModal && (
-                      <button
-                        onClick={() => {
-                          setIsUserMenuOpen(false);
-                          onOpenSupabaseModal();
-                        }}
-                        className="w-full text-left px-2 py-1.5 hover:bg-slate-50 rounded-md font-medium text-slate-700 flex items-center justify-between"
-                      >
-                        <span>Database Setup</span>
-                        <Database className="w-3.5 h-3.5 text-slate-400" />
-                      </button>
-                    )}
                   </div>
 
                   {isAuthenticated && (
@@ -429,8 +395,8 @@ export const Header: React.FC<HeaderProps> = ({
           <button onClick={() => onNavigate('shop', { category: 'Electronics' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer py-1">
             Shop Cart TV
           </button>
-          <button onClick={() => onNavigate('admin-login')} className="hover:text-[#0b5c37] transition-colors cursor-pointer font-semibold text-[#0b5c37] py-1">
-            Sell
+          <button onClick={() => onNavigate('shop', { query: 'trending' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer font-semibold text-[#0b5c37] py-1">
+            Trending Deals
           </button>
           <button onClick={() => onNavigate('shop', { query: 'bestseller' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer py-1">
             Best Sellers
@@ -504,15 +470,6 @@ export const Header: React.FC<HeaderProps> = ({
                 className="w-full text-left py-2 text-sm text-slate-700"
               >
                 Customer Service
-              </button>
-              <button
-                onClick={() => {
-                  onNavigate('admin-login');
-                  setIsMobileMenuOpen(false);
-                }}
-                className="w-full text-left py-2 text-sm font-bold text-[#0b5c37]"
-              >
-                Merchant Staff Portal
               </button>
             </div>
           </div>

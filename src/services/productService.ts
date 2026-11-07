@@ -31,6 +31,12 @@ export function mapSupabaseProductToDomain(row: any, inventoryCount?: number): P
     visualType: row.visual_type || 'headphones',
     accentColor: row.accent_color || '#f97316',
     tags: Array.isArray(row.tags) ? row.tags : [],
+    images: Array.isArray(row.images)
+      ? row.images
+      : (typeof row.images === 'string' && row.images.startsWith('[')
+        ? JSON.parse(row.images)
+        : (row.image_url ? [row.image_url] : [])),
+    image: (Array.isArray(row.images) && row.images[0]) || row.image_url || undefined,
   };
 }
 
@@ -233,10 +239,93 @@ export async function fetchProductById(productId: string): Promise<{ product: Pr
 }
 
 /**
+ * Validate and upload a product image to Supabase Storage bucket 'product-images'.
+ * Gracefully falls back to local data URL if storage is unconfigured or offline.
+ */
+export async function uploadProductImage(
+  file: File,
+  productId: string,
+  slotIndex: number
+): Promise<{ url: string; error?: string }> {
+  // 1. Validation: Allowed formats
+  const validMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+  if (!validMimes.includes(file.type.toLowerCase())) {
+    return {
+      url: '',
+      error: `Invalid file format: "${file.type || 'unknown'}". Please upload JPG, JPEG, PNG, or WEBP images.`,
+    };
+  }
+
+  // 2. Validation: Max 5MB file size
+  const maxBytes = 5 * 1024 * 1024; // 5MB
+  if (file.size > maxBytes) {
+    const sizeInMB = (file.size / (1024 * 1024)).toFixed(1);
+    return {
+      url: '',
+      error: `File is too large (${sizeInMB} MB). Maximum allowed size is 5 MB.`,
+    };
+  }
+
+  // Helper to convert to base64 Data URL
+  const toDataUrl = (): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = (err) => reject(err);
+      reader.readAsDataURL(file);
+    });
+
+  // If Supabase is configured, attempt real upload to Supabase Storage 'product-images' bucket
+  if (isSupabaseConfigured()) {
+    try {
+      const cleanExt = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const filePath = `products/${productId}/slot-${slotIndex}-${Date.now()}.${cleanExt}`;
+
+      const { data: uploadData, error: uploadErr } = await supabase.storage
+        .from('product-images')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true,
+          contentType: file.type,
+        });
+
+      if (!uploadErr && uploadData?.path) {
+        const { data: pubData } = supabase.storage
+          .from('product-images')
+          .getPublicUrl(uploadData.path);
+
+        if (pubData?.publicUrl) {
+          return { url: pubData.publicUrl };
+        }
+      }
+
+      console.warn('Supabase storage upload fallback to base64:', uploadErr?.message);
+      // Fallback to Data URL if bucket is not yet provisioned on user's remote project
+      const dataUrl = await toDataUrl();
+      return { url: dataUrl };
+    } catch (err: any) {
+      console.warn('Storage exception, using base64 preview:', err);
+      const dataUrl = await toDataUrl();
+      return { url: dataUrl };
+    }
+  }
+
+  // Local / Demo mode fallback: Instant base64 Data URL
+  try {
+    const dataUrl = await toDataUrl();
+    return { url: dataUrl };
+  } catch (err: any) {
+    return { url: '', error: err.message || 'Failed to read image file' };
+  }
+}
+
+/**
  * Admin: Add a new product to Supabase
  */
 export async function createAdminProduct(productData: Partial<Product>, stock = 10): Promise<{ success: boolean; error?: string }> {
   const prodId = productData.id || `eko-prod-${Date.now()}`;
+  const images = Array.isArray(productData.images) ? productData.images.filter(Boolean) : [];
+  const mainImage = images[0] || productData.image || null;
 
   if (!isSupabaseConfigured()) {
     const newProd: Product = {
@@ -262,6 +351,8 @@ export async function createAdminProduct(productData: Partial<Product>, stock = 
       visualType: productData.visualType || 'headphones',
       accentColor: productData.accentColor || '#f97316',
       tags: productData.tags || ['New', 'Featured'],
+      images,
+      image: mainImage || undefined,
     };
     PRODUCTS.unshift(newProd);
     return { success: true };
@@ -294,6 +385,8 @@ export async function createAdminProduct(productData: Partial<Product>, stock = 
       visual_type: productData.visualType || 'headphones',
       accent_color: productData.accentColor || '#f97316',
       tags: productData.tags || ['New'],
+      images,
+      image_url: mainImage,
     });
 
     if (prodErr) {
@@ -327,6 +420,10 @@ export async function updateAdminProduct(productId: string, updates: Partial<Pro
         stockCount: stock !== undefined ? stock : PRODUCTS[idx].stockCount,
         inStock: stock !== undefined ? stock > 0 : PRODUCTS[idx].inStock,
       };
+      if (updates.images) {
+        PRODUCTS[idx].images = updates.images;
+        PRODUCTS[idx].image = updates.images[0] || undefined;
+      }
     }
     return { success: true };
   }
@@ -343,6 +440,11 @@ export async function updateAdminProduct(productId: string, updates: Partial<Pro
     if (updates.shortDescription !== undefined) payload.short_description = updates.shortDescription;
     if (updates.fullDescription !== undefined) payload.full_description = updates.fullDescription;
     if (updates.visualType !== undefined) payload.visual_type = updates.visualType;
+    if (updates.images !== undefined) {
+      const cleanImages = updates.images.filter(Boolean);
+      payload.images = cleanImages;
+      payload.image_url = cleanImages[0] || null;
+    }
 
     const { error } = await supabase.from('products').update(payload).eq('id', productId);
     if (error) return { success: false, error: error.message };

@@ -64,9 +64,15 @@ CREATE TABLE IF NOT EXISTS public.products (
     visual_type TEXT DEFAULT 'headphones' NOT NULL,
     accent_color TEXT DEFAULT '#f97316' NOT NULL,
     tags JSONB DEFAULT '[]'::jsonb NOT NULL,
+    image_url TEXT,
+    images JSONB DEFAULT '[]'::jsonb NOT NULL,
     created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+
+-- Ensure columns exist if table was already created
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS image_url TEXT;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS images JSONB DEFAULT '[]'::jsonb NOT NULL;
 
 -- Create search index for fast filtering
 CREATE INDEX IF NOT EXISTS idx_products_category ON public.products(category_name);
@@ -214,21 +220,62 @@ CREATE TABLE IF NOT EXISTS public.order_items (
 CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON public.order_items(order_id);
 
 -- ==============================================================================
--- 9. PAYMENT RECORDS TABLE
+-- 9. PAYMENT RECORDS TABLE (Google Pay UPI & PhonePe UPI)
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.payment_records (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     order_id UUID REFERENCES public.orders(id) ON DELETE CASCADE NOT NULL,
-    payment_method TEXT NOT NULL CHECK (payment_method IN ('paypal', 'gpay_qr', 'credit_card', 'cash_on_delivery')),
+    payment_method TEXT NOT NULL,
     amount NUMERIC(10, 2) NOT NULL CHECK (amount >= 0),
-    currency TEXT DEFAULT 'USD' NOT NULL,
-    payment_status TEXT DEFAULT 'pending' CHECK (payment_status IN ('pending', 'verified', 'failed', 'refunded')),
+    currency TEXT DEFAULT 'INR' NOT NULL,
+    payment_status TEXT DEFAULT 'pending_admin_verification',
     transaction_reference TEXT,
+    screenshot_url TEXT,
+    ai_analysis JSONB DEFAULT '{}'::jsonb,
+    ai_confidence_score NUMERIC(5, 2),
+    ai_recommendation TEXT,
+    suspicious_indicators JSONB DEFAULT '[]'::jsonb,
+    verified_at TIMESTAMPTZ,
+    verified_by TEXT,
+    rejection_reason TEXT,
     raw_details JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
+-- Ensure columns exist if table was already created
+ALTER TABLE public.payment_records ADD COLUMN IF NOT EXISTS screenshot_url TEXT;
+ALTER TABLE public.payment_records ADD COLUMN IF NOT EXISTS ai_analysis JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE public.payment_records ADD COLUMN IF NOT EXISTS ai_confidence_score NUMERIC(5, 2);
+ALTER TABLE public.payment_records ADD COLUMN IF NOT EXISTS ai_recommendation TEXT;
+ALTER TABLE public.payment_records ADD COLUMN IF NOT EXISTS suspicious_indicators JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.payment_records ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+ALTER TABLE public.payment_records ADD COLUMN IF NOT EXISTS verified_by TEXT;
+ALTER TABLE public.payment_records ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+
+-- Drop check constraints to allow all Universal UPI methods and flexible statuses
+ALTER TABLE public.payment_records DROP CONSTRAINT IF EXISTS payment_records_payment_method_check;
+ALTER TABLE public.payment_records DROP CONSTRAINT IF EXISTS payment_records_payment_status_check;
+
 CREATE INDEX IF NOT EXISTS idx_payment_records_order ON public.payment_records(order_id);
+CREATE INDEX IF NOT EXISTS idx_payment_records_utr ON public.payment_records(transaction_reference);
+
+-- ==============================================================================
+-- 9b. MERCHANT PAYMENT SETTINGS TABLE (Configurable by Admin)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.merchant_payment_settings (
+    id TEXT PRIMARY KEY DEFAULT 'default',
+    merchant_upi_id TEXT NOT NULL DEFAULT 'shopcart.merchant@okaxis',
+    merchant_name TEXT NOT NULL DEFAULT 'Shopcart Online Store',
+    merchant_upi_number TEXT DEFAULT '+91 98765 43210',
+    qr_image_url TEXT DEFAULT '/assets/aistudio/qr_eeef5752.jpeg',
+    enable_dynamic_qr BOOLEAN DEFAULT true,
+    instructions TEXT DEFAULT 'Scan the merchant QR code with Google Pay, PhonePe, Paytm, BHIM, or any UPI app. After paying, upload the screenshot and 12-digit UTR reference.',
+    updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+INSERT INTO public.merchant_payment_settings (id, merchant_upi_id, merchant_name, merchant_upi_number, qr_image_url, enable_dynamic_qr)
+VALUES ('default', 'shopcart.merchant@okaxis', 'Shopcart Online Store', '+91 98765 43210', '/assets/aistudio/qr_eeef5752.jpeg', true)
+ON CONFLICT (id) DO NOTHING;
 
 -- ==============================================================================
 -- 10. PRODUCT REVIEWS TABLE
@@ -1172,4 +1219,71 @@ VALUES
 ('a1111111-1111-4111-8111-111111111115', 'eko-prod-4', 'Vikram Rathore', 5, 'Extremely comfortable for morning running', 'The hyper-cushion sole absorbs impact very well on asphalt roads. Lightweight breathable mesh prevents sweat build up.', true, 11, NOW() - INTERVAL '15 days'),
 ('a1111111-1111-4111-8111-111111111116', 'eko-prod-5', 'Meera Nambiar', 5, 'Induction base works like a charm', 'Heats evenly, does not burn lentils, and the safety valve gives great peace of mind. Genuine 304 food-grade steel.', true, 27, NOW() - INTERVAL '8 days')
 ON CONFLICT (id) DO NOTHING;
+ 
+-- ==============================================================================
+-- 15. STORAGE BUCKET: product-images & RLS POLICIES
+-- ==============================================================================
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+    'product-images',
+    'product-images',
+    true,
+    5242880, -- 5 MB limit
+    ARRAY['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+)
+ON CONFLICT (id) DO UPDATE SET
+    public = true,
+    file_size_limit = 5242880,
+    allowed_mime_types = ARRAY['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+
+-- 1. Public Read Access: Anyone can view product images
+DROP POLICY IF EXISTS "Public Read Product Images" ON storage.objects;
+CREATE POLICY "Public Read Product Images"
+ON storage.objects FOR SELECT
+USING (bucket_id = 'product-images');
+
+-- 2. Admin Insert Access: Only authenticated admins can upload
+DROP POLICY IF EXISTS "Admin Upload Product Images" ON storage.objects;
+CREATE POLICY "Admin Upload Product Images"
+ON storage.objects FOR INSERT
+WITH CHECK (
+    bucket_id = 'product-images'
+    AND (
+        auth.role() = 'authenticated'
+        AND EXISTS (
+            SELECT 1 FROM public.profiles
+            WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+        )
+    )
+);
+
+-- 3. Admin Update Access: Only authenticated admins can update
+DROP POLICY IF EXISTS "Admin Update Product Images" ON storage.objects;
+CREATE POLICY "Admin Update Product Images"
+ON storage.objects FOR UPDATE
+USING (
+    bucket_id = 'product-images'
+    AND (
+        auth.role() = 'authenticated'
+        AND EXISTS (
+            SELECT 1 FROM public.profiles
+            WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+        )
+    )
+);
+
+-- 4. Admin Delete Access: Only authenticated admins can delete
+DROP POLICY IF EXISTS "Admin Delete Product Images" ON storage.objects;
+CREATE POLICY "Admin Delete Product Images"
+ON storage.objects FOR DELETE
+USING (
+    bucket_id = 'product-images'
+    AND (
+        auth.role() = 'authenticated'
+        AND EXISTS (
+            SELECT 1 FROM public.profiles
+            WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+        )
+    )
+);
 

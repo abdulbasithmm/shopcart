@@ -48,6 +48,8 @@ export interface Product {
     | string;
   accentColor: string;
   tags: string[];
+  images?: string[]; // 4 views: [Front/Main, Back, Left Side, Right Side]
+  image?: string; // Main primary image URL
 }
 
 export interface CartItem {
@@ -121,14 +123,68 @@ export interface OrderItem {
   product?: Product;
 }
 
+export type PaymentStatus =
+  | 'awaiting_payment'
+  | 'screenshot_submitted'
+  | 'ai_analyzed'
+  | 'pending_admin_verification'
+  | 'verified'
+  | 'rejected'
+  | 'failed'
+  | 'refunded'
+  | 'pending_verification'
+  | 'pending';
+
+export type UpiProvider =
+  | 'all_upi'
+  | 'gpay_upi'
+  | 'phonepe_upi'
+  | 'paytm_upi'
+  | 'bhim_upi'
+  | 'other_upi';
+
+export interface AIScreenshotAnalysis {
+  screenshot_status: 'valid_success' | 'payment_failed' | 'tampered' | 'unclear' | 'not_a_receipt';
+  extracted_utr: string;
+  extracted_amount: number | null;
+  extracted_merchant: string;
+  extracted_app: string;
+  extracted_timestamp: string;
+  amount_matches: boolean;
+  merchant_matches: boolean;
+  suspicious_indicators: string[];
+  confidence_score: number; // 0 - 100
+  recommended_action: 'DETAILS_MATCH' | 'REVIEW_REQUIRED' | 'POSSIBLE_FRAUD';
+  ai_summary: string;
+  analyzed_at?: string;
+}
+
+export interface MerchantPaymentSettings {
+  merchant_upi_id: string;
+  merchant_name: string;
+  merchant_upi_number: string;
+  qr_image_url: string;
+  enable_dynamic_qr: boolean;
+  instructions?: string;
+  updated_at?: string;
+}
+
 export interface PaymentRecord {
   id?: string;
   order_id?: string;
-  payment_method: 'paypal' | 'gpay_qr' | 'credit_card' | 'cash_on_delivery';
+  payment_method: string;
   amount: number;
   currency: string;
-  payment_status: 'pending' | 'verified' | 'failed' | 'refunded';
+  payment_status: PaymentStatus;
   transaction_reference?: string | null;
+  screenshot_url?: string | null;
+  ai_analysis?: AIScreenshotAnalysis | null;
+  ai_confidence_score?: number | null;
+  ai_recommendation?: string | null;
+  suspicious_indicators?: string[] | null;
+  verified_at?: string | null;
+  verified_by?: string | null;
+  rejection_reason?: string | null;
   created_at?: string;
   raw_details?: Record<string, any>;
 }
@@ -162,9 +218,11 @@ export interface Order {
   shipment_updates?: ShipmentUpdate[];
   order_items?: OrderItem[];
   payment_records?: PaymentRecord[];
-  paymentMethod?: 'paypal' | 'gpay_qr' | 'credit_card' | 'cash_on_delivery';
-  paymentStatus?: 'pending' | 'verified' | 'failed' | 'refunded';
+  paymentMethod?: string;
+  paymentStatus?: PaymentStatus;
   transactionReference?: string | null;
+  screenshotUrl?: string | null;
+  aiAnalysis?: AIScreenshotAnalysis | null;
   created_at: string;
   updated_at?: string;
 }

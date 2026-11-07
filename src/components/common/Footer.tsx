@@ -90,15 +90,6 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenSupabaseModal 
                     Shop Cart Innovation
                   </button>
                 </li>
-                <li className="pt-2">
-                  <button
-                    onClick={() => onNavigate('admin-login')}
-                    className="text-[#38bdf8] hover:underline font-semibold flex items-center gap-1 cursor-pointer"
-                  >
-                    <Lock className="w-3 h-3" />
-                    <span>Staff &amp; Admin Portal</span>
-                  </button>
-                </li>
               </ul>
             </div>
 
@@ -163,18 +154,18 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenSupabaseModal 
               <ul className="space-y-2 text-[#ccc]">
                 <li>
                   <button
-                    onClick={() => onNavigate('admin-login')}
+                    onClick={() => onNavigate('contact')}
                     className="hover:underline transition-colors text-left cursor-pointer text-emerald-400 font-semibold"
                   >
-                    Sell on Shop Cart
+                    Partner with Shop Cart
                   </button>
                 </li>
                 <li>
                   <button
-                    onClick={() => onNavigate('admin-login')}
+                    onClick={() => onNavigate('contact')}
                     className="hover:underline transition-colors text-left cursor-pointer"
                   >
-                    Sell under Brand Accelerator
+                    Merchant Onboarding Guide
                   </button>
                 </li>
                 <li>
@@ -248,14 +239,6 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenSupabaseModal 
                     Help &amp; Customer Service
                   </button>
                 </li>
-                <li className="pt-2">
-                  <button
-                    onClick={() => onOpenSupabaseModal?.()}
-                    className="text-[#38bdf8] hover:underline font-semibold flex items-center gap-1 cursor-pointer"
-                  >
-                    <span>⚡ Supabase Database Setup</span>
-                  </button>
-                </li>
               </ul>
             </div>
           </div>
@@ -316,9 +299,9 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenSupabaseModal 
               <p className="font-bold text-white hover:underline">Shopbop</p>
               <p className="text-[#888]">Designer Fashion Brands</p>
             </div>
-            <div onClick={() => onNavigate('admin-login')} className="cursor-pointer hover:text-white">
+            <div onClick={() => onNavigate('shop')} className="cursor-pointer hover:text-white">
               <p className="font-bold text-white hover:underline">Shop Cart Business</p>
-              <p className="text-[#888]">Everything For Your Business</p>
+              <p className="text-[#888]">Bulk orders &amp; wholesale savings</p>
             </div>
             <div onClick={() => onNavigate('shop')} className="cursor-pointer hover:text-white">
               <p className="font-bold text-white hover:underline">Prime Now</p>

@@ -369,8 +369,8 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
               <div className="space-y-1.5 pt-1">
                 <div className="flex justify-between">
                   <span className="text-slate-500">Method:</span>
-                  <span className="font-semibold text-slate-800 uppercase text-[11px]">
-                    {order.paymentMethod === 'paypal' ? 'PayPal Gateway' : 'Google Pay UPI QR'}
+                  <span className="font-semibold text-slate-800 text-[11px]">
+                    {order.paymentMethod?.includes('phonepe') ? 'PhonePe (UPI)' : 'Google Pay (UPI)'}
                   </span>
                 </div>
                 <div className="flex justify-between">

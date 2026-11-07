@@ -80,13 +80,41 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
     };
   }, [productId]);
 
-  // Gallery view angles definition
-  const galleryViews = useMemo(() => [
-    { id: 'hero', name: 'Studio Hero', label: 'Perspective View', transform: 'scale(1)' },
-    { id: 'profile', name: 'Profile Angle', label: 'Side Profile', transform: 'rotate(-4deg) scale(0.98)' },
-    { id: 'macro', name: 'Material Macro', label: 'Detail Focus', transform: 'scale(1.25)' },
-    { id: 'lifestyle', name: 'Studio Context', label: 'Ambient View', transform: 'rotate(3deg) scale(1.02)' },
-  ], []);
+  // Gallery view angles definition (supports uploaded 4 product images: Front, Back, Left Side, Right Side)
+  const galleryViews = useMemo(() => {
+    const slotNames = [
+      { id: 'front', name: 'Front View', label: 'Front View (Main Image)' },
+      { id: 'back', name: 'Back View', label: 'Back View' },
+      { id: 'left', name: 'Left Side', label: 'Left Side View' },
+      { id: 'right', name: 'Right Side', label: 'Right Side View' },
+    ];
+
+    if (product.images && product.images.length > 0) {
+      return product.images.map((url, idx) => ({
+        id: slotNames[idx]?.id || `view-${idx}`,
+        name: slotNames[idx]?.name || `Angle ${idx + 1}`,
+        label: slotNames[idx]?.label || `View ${idx + 1}`,
+        imageUrl: url,
+        transform: 'scale(1)',
+      }));
+    }
+
+    if (product.image) {
+      return [
+        { id: 'front', name: 'Front View', label: 'Front View (Main Image)', imageUrl: product.image, transform: 'scale(1)' },
+        { id: 'profile', name: 'Profile Angle', label: 'Side Profile', transform: 'rotate(-4deg) scale(0.98)' },
+        { id: 'macro', name: 'Material Macro', label: 'Detail Focus', transform: 'scale(1.25)' },
+        { id: 'lifestyle', name: 'Studio Context', label: 'Ambient View', transform: 'rotate(3deg) scale(1.02)' },
+      ];
+    }
+
+    return [
+      { id: 'hero', name: 'Studio Hero', label: 'Perspective View', transform: 'scale(1)' },
+      { id: 'profile', name: 'Profile Angle', label: 'Side Profile', transform: 'rotate(-4deg) scale(0.98)' },
+      { id: 'macro', name: 'Material Macro', label: 'Detail Focus', transform: 'scale(1.25)' },
+      { id: 'lifestyle', name: 'Studio Context', label: 'Ambient View', transform: 'rotate(3deg) scale(1.02)' },
+    ];
+  }, [product.images, product.image]);
 
   // Component States
   const [selectedColor, setSelectedColor] = useState(initialProduct.colors[0]?.name || '');
@@ -338,12 +366,13 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   title={view.label}
                 >
                   <div className="w-14 sm:w-full h-14 sm:h-16 rounded-xl bg-slate-50 flex items-center justify-center overflow-hidden">
-                    <div style={{ transform: view.transform }}>
+                    <div style={{ transform: view.transform }} className="w-full h-full flex items-center justify-center">
                       <ProductImage
                         product={product}
                         size="sm"
                         showBadge={false}
                         selectedColor={activeColorObj?.hex}
+                        imageUrl={view.imageUrl}
                       />
                     </div>
                   </div>
@@ -369,8 +398,8 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   style={{
                     transformOrigin: `${zoomCoords.x}% ${zoomCoords.y}%`,
                     transform: isZooming
-                      ? `scale(2.2) ${galleryViews[activeGalleryIndex].transform}`
-                      : galleryViews[activeGalleryIndex].transform,
+                      ? `scale(2.2) ${(galleryViews[activeGalleryIndex] || galleryViews[0]).transform}`
+                      : (galleryViews[activeGalleryIndex] || galleryViews[0]).transform,
                     transition: isZooming ? 'transform 0.05s ease-out' : 'transform 0.3s ease-out',
                   }}
                 >
@@ -378,6 +407,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                     product={product}
                     size="xl"
                     selectedColor={activeColorObj?.hex}
+                    imageUrl={(galleryViews[activeGalleryIndex] || galleryViews[0])?.imageUrl}
                   />
                 </div>
 
@@ -1343,7 +1373,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
             <div className="w-full h-96 sm:h-[450px] flex items-center justify-center p-8 overflow-hidden">
               <div
                 style={{
-                  transform: `scale(${lightboxScale}) ${galleryViews[activeGalleryIndex].transform}`,
+                  transform: `scale(${lightboxScale}) ${(galleryViews[activeGalleryIndex] || galleryViews[0]).transform}`,
                   transition: 'transform 0.2s ease-out',
                 }}
               >
@@ -1352,6 +1382,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
                   size="xl"
                   showBadge={false}
                   selectedColor={activeColorObj?.hex}
+                  imageUrl={(galleryViews[activeGalleryIndex] || galleryViews[0])?.imageUrl}
                 />
               </div>
             </div>

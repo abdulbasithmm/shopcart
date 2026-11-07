@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { PageView } from '../types';
 import { verifyUserRole } from '../services/profileService';
+import { supabase } from '../lib/supabase';
 import { AccessDeniedPage } from '../pages/AccessDeniedPage';
 
 interface AdminGuardProps {
@@ -26,7 +27,7 @@ export const AdminGuard: React.FC<AdminGuardProps> = ({ children, onNavigate }) 
     const checkPrivilege = async () => {
       setIsVerifying(true);
 
-      // 1. Unauthenticated visitor -> redirect to Admin Login page (Requirement 7)
+      // 1. Unauthenticated visitor -> redirect to Admin Login page
       if (!isAuthenticated || !user) {
         if (isMounted) {
           setHasAdminPrivilege(false);
@@ -36,7 +37,7 @@ export const AdminGuard: React.FC<AdminGuardProps> = ({ children, onNavigate }) 
         return;
       }
 
-      // 2. Reject obvious customer state immediately and redirect to Unauthorized Access page (Requirement 6)
+      // 2. Reject obvious customer state immediately and redirect to Unauthorized Access page
       if (user.role !== 'admin') {
         if (isMounted) {
           setHasAdminPrivilege(false);
@@ -55,12 +56,33 @@ export const AdminGuard: React.FC<AdminGuardProps> = ({ children, onNavigate }) 
         return;
       }
 
-      // 4. Real Supabase Backend verification: query public.profiles directly to enforce database authorization (Requirement 4 & 5)
+      // 4. Server-Authoritative & Database Role Verification (Never trust browser-supplied role)
       if (isSupabaseBackend) {
         try {
-          const verifiedRole = await verifyUserRole(user.id);
+          // A. Check active JWT with server-side endpoint
+          let isServerVerifiedAdmin = false;
+          try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.access_token) {
+              const res = await fetch('/api/admin/verify-clearance', {
+                headers: {
+                  Authorization: `Bearer ${session.access_token}`,
+                },
+              });
+              const json = await res.json();
+              if (json.authorized && json.role === 'admin') {
+                isServerVerifiedAdmin = true;
+              }
+            }
+          } catch (apiErr) {
+            console.warn('Server clearance check error:', apiErr);
+          }
+
+          // B. Query public.profiles directly in PostgreSQL via RLS
+          const verifiedDbRole = await verifyUserRole(user.id);
+
           if (isMounted) {
-            if (verifiedRole === 'admin') {
+            if (isServerVerifiedAdmin || verifiedDbRole === 'admin') {
               setHasAdminPrivilege(true);
             } else {
               setHasAdminPrivilege(false);
