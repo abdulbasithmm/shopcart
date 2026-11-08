@@ -115,9 +115,11 @@ export interface OrderItem {
   order_id?: string;
   product_id?: string;
   product_name: string;
+  product_image?: string | null;
   unit_price: number;
   quantity: number;
   total_price: number;
+  line_total?: number;
   selected_color?: string | null;
   selected_size?: string | null;
   product?: Product;
@@ -189,11 +191,31 @@ export interface PaymentRecord {
   raw_details?: Record<string, any>;
 }
 
+export interface OrderShippingAddress {
+  fullName: string;
+  phone: string;
+  email?: string;
+  houseBuilding?: string;
+  streetArea?: string;
+  street: string;
+  apartment?: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  pinCode?: string;
+  country: string;
+  landmark?: string;
+  deliveryInstructions?: string;
+}
+
 export interface Order {
   id: string;
   order_number: string;
   user_id?: string | null;
   guest_email?: string | null;
+  customer_name?: string | null;
+  customer_email?: string | null;
+  customer_phone?: string | null;
   status: OrderStatus;
   subtotal: number;
   discount_amount: number;
@@ -201,16 +223,7 @@ export interface Order {
   tax_amount: number;
   total_amount: number;
   coupon_code?: string | null;
-  shipping_address: {
-    fullName: string;
-    street: string;
-    apartment?: string;
-    city: string;
-    state: string;
-    postalCode: string;
-    country: string;
-    phone: string;
-  };
+  shipping_address: OrderShippingAddress;
   customer_notes?: string | null;
   tracking_number?: string | null;
   carrier?: string | null;
@@ -223,6 +236,14 @@ export interface Order {
   transactionReference?: string | null;
   screenshotUrl?: string | null;
   aiAnalysis?: AIScreenshotAnalysis | null;
+  screenshot_url?: string | null;
+  ai_analysis?: AIScreenshotAnalysis | null;
+  ai_confidence_score?: number | null;
+  ai_recommendation?: string | null;
+  suspicious_indicators?: string[] | null;
+  verified_at?: string | null;
+  verified_by?: string | null;
+  rejection_reason?: string | null;
   created_at: string;
   updated_at?: string;
 }

@@ -50,31 +50,42 @@ export type PaymentMethodType =
 
 export interface CheckoutFormState {
   fullName: string;
+  phone: string; // 10-digit Indian Mobile Number
   email: string;
-  phone: string;
-  address: string;
-  apartment: string;
+  houseBuilding: string; // House / Flat / Building Name
+  streetArea: string; // Street / Road / Area / Locality
   city: string;
   state: string;
-  postalCode: string;
+  pinCode: string; // 6-digit Indian PIN Code
+  landmark: string; // Optional
+  deliveryInstructions: string; // Optional
   country: string;
-  deliveryNotes: string;
-  billingSameAsDelivery: boolean;
   paymentMethod: PaymentMethodType;
   upiTransactionRef: string;
+  // Backward compatibility fields
+  address?: string;
+  apartment?: string;
+  postalCode?: string;
+  deliveryNotes?: string;
+  billingSameAsDelivery?: boolean;
 }
 
 export interface CheckoutFormErrors {
   fullName?: string;
-  email?: string;
   phone?: string;
-  address?: string;
+  email?: string;
+  houseBuilding?: string;
+  streetArea?: string;
   city?: string;
   state?: string;
-  postalCode?: string;
+  pinCode?: string;
+  landmark?: string;
+  deliveryInstructions?: string;
   country?: string;
   paymentMethod?: string;
   upiTransactionRef?: string;
+  address?: string;
+  postalCode?: string;
 }
 
 export interface CompletedOrderState {
@@ -161,16 +172,21 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
   // Form Fields State
   const [formData, setFormData] = useState<CheckoutFormState>({
-    fullName: user ? user.name : 'Alex Morgan',
-    email: user ? user.email : 'alex.morgan@shopcart.com',
-    phone: user?.phone || '+1 (555) 349-8291',
-    address: user?.address ? user.address.street : '742 Evergreen Terrace',
-    apartment: 'Apt 4B',
-    city: user?.address ? user.address.city : 'Seattle',
-    state: user?.address ? user.address.state : 'WA',
-    postalCode: user?.address ? user.address.zipCode : '98101',
-    country: user?.address?.country || 'United States',
-    deliveryNotes: '',
+    fullName: user ? user.name : 'Rahul Sharma',
+    phone: user?.phone || '9876543210',
+    email: user ? user.email : 'rahul.sharma@example.in',
+    houseBuilding: 'Flat 402, Lotus Tower',
+    streetArea: 'MG Road, Indiranagar',
+    city: user?.address ? user.address.city : 'Bengaluru',
+    state: user?.address ? user.address.state : 'Karnataka',
+    pinCode: user?.address ? user.address.zipCode : '560038',
+    landmark: 'Near Indiranagar Metro Station',
+    deliveryInstructions: 'Please call on arrival.',
+    country: 'India',
+    address: 'Flat 402, Lotus Tower, MG Road, Indiranagar',
+    apartment: 'Flat 402, Lotus Tower',
+    postalCode: '560038',
+    deliveryNotes: 'Please call on arrival.',
     billingSameAsDelivery: true,
     paymentMethod: 'all_upi',
     upiTransactionRef: '',
@@ -301,39 +317,66 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         phone: prev.phone || user.phone || '',
         address: prev.address || user.address?.street || '',
         city: prev.city || user.address?.city || '',
-        state: prev.state || user.address?.state || '',
-        postalCode: prev.postalCode || user.address?.zipCode || '',
-        country: prev.country || user.address?.country || 'United States',
+        state: prev.state || user.address?.state || 'Karnataka',
+        city: prev.city || user.address?.city || 'Bengaluru',
+        pinCode: prev.pinCode || user.address?.zipCode || '560038',
+        country: 'India',
       }));
     }
   }, [user]);
 
-  // Validation function
+  // Validation function for delivery details and 12-digit UPI UTR
   const validateForm = (data: CheckoutFormState): CheckoutFormErrors => {
     const errs: CheckoutFormErrors = {};
 
-    if (!data.fullName.trim()) errs.fullName = 'Full legal name is required';
-    if (!data.email.trim()) {
-      errs.email = 'Email address is required';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email.trim())) {
-      errs.email = 'Please provide a valid email format';
+    if (!data.fullName.trim()) {
+      errs.fullName = 'Full legal name is required';
     }
 
+    // 10-digit Indian Mobile Number validation
+    const cleanPhone = data.phone.replace(/[\s\-\+\(\)]/g, '').replace(/^91/, '');
     if (!data.phone.trim()) {
-      errs.phone = 'Phone number is required for shipping updates';
+      errs.phone = 'Mobile number is required for dispatch notifications';
+    } else if (cleanPhone.length !== 10 || !/^[6-9]\d{9}$/.test(cleanPhone)) {
+      errs.phone = 'Please enter a valid 10-digit Indian mobile number (e.g. 9876543210)';
     }
 
-    if (!data.address.trim()) errs.address = 'Street delivery address is required';
-    if (!data.city.trim()) errs.city = 'City is required';
-    if (!data.state.trim()) errs.state = 'State / Province is required';
-    if (!data.postalCode.trim()) errs.postalCode = 'Postal / ZIP code is required';
-    if (!data.country.trim()) errs.country = 'Country is required';
+    if (!data.email.trim()) {
+      errs.email = 'Email address is required for invoice delivery';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email.trim())) {
+      errs.email = 'Please provide a valid email address';
+    }
 
+    if (!data.houseBuilding.trim()) {
+      errs.houseBuilding = 'House / Flat / Building name or number is required';
+    }
+
+    if (!data.streetArea.trim()) {
+      errs.streetArea = 'Street / Road / Area / Sector name is required';
+    }
+
+    if (!data.city.trim()) {
+      errs.city = 'City / Town name is required';
+    }
+
+    if (!data.state.trim()) {
+      errs.state = 'State / Union Territory is required';
+    }
+
+    // 6-digit Indian PIN Code validation
+    const cleanPin = (data.pinCode || '').trim();
+    if (!cleanPin) {
+      errs.pinCode = '6-digit PIN code is required';
+    } else if (!/^\d{6}$/.test(cleanPin)) {
+      errs.pinCode = 'Please enter a valid 6-digit Indian postal PIN code (e.g. 560001)';
+    }
+
+    // 12-digit UPI UTR Reference validation
     const cleanUtr = (data.upiTransactionRef || '').replace(/[\s-]/g, '').trim();
     if (!cleanUtr) {
-      errs.upiTransactionRef = '12-digit UPI Transaction Reference (UTR) is required to verify your payment';
+      errs.upiTransactionRef = '12-digit UPI Transaction Reference (UTR) is required to verify payment';
     } else if (cleanUtr.length !== 12 || !/^[0-9A-Za-z]{12}$/.test(cleanUtr)) {
-      errs.upiTransactionRef = 'Please enter a valid 12-digit UPI UTR number (e.g. 431029482910)';
+      errs.upiTransactionRef = 'Please enter a valid 12-digit alphanumeric UPI UTR reference (e.g. 431029482910)';
     }
 
     return errs;
@@ -372,19 +415,19 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
   // Generate unique order reference
   const [currentOrderNumber] = useState(() => `SC-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`);
 
-  // UPI SUBMISSION HANDLER (GOOGLE PAY & PHONEPE)
+  // UPI SUBMISSION HANDLER (GOOGLE PAY & PHONEPE & UNIVERSAL UPI)
   const handleUPIOrderSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const allTouched: Record<string, boolean> = {
       fullName: true,
-      email: true,
       phone: true,
-      address: true,
+      email: true,
+      houseBuilding: true,
+      streetArea: true,
       city: true,
       state: true,
-      postalCode: true,
-      country: true,
+      pinCode: true,
       upiTransactionRef: true,
     };
     setTouched(allTouched);
@@ -393,42 +436,16 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     setErrors(validationErrors);
 
     if (Object.keys(validationErrors).length > 0) {
-      showToast('Please provide all delivery details and a valid 12-digit UPI UTR number', 'error');
+      showToast('Please complete all required delivery fields and enter a valid 12-digit UPI UTR.', 'error');
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const cleanRef = (formData.upiTransactionRef || '').replace(/[\s-]/g, '').trim();
+      const cleanRef = (formData.upiTransactionRef || '').replace(/[\s-]/g, '').trim().toUpperCase();
+      const cleanPhone = formData.phone.replace(/[\s\-\+\(\)]/g, '').replace(/^91/, '');
 
-      // Duplicate UTR check
-      if (isSupabaseConfigured()) {
-        try {
-          const { data: existingPay } = await supabase
-            .from('payment_records')
-            .select('id, transaction_reference')
-            .eq('transaction_reference', cleanRef)
-            .maybeSingle();
-
-          if (existingPay) {
-            showToast('This UPI UTR reference has already been submitted. Please check your transaction details.', 'error');
-            setIsSubmitting(false);
-            return;
-          }
-        } catch {
-          // Non-fatal if query check fails
-        }
-      } else {
-        const localOrders: any[] = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
-        const isDuplicate = localOrders.some((o: any) => o.transactionReference === cleanRef);
-        if (isDuplicate) {
-          showToast('This UPI UTR reference has already been submitted for another order.', 'error');
-          setIsSubmitting(false);
-          return;
-        }
-      }
-
-      // 1. Save order with canonical paymentStatus: 'pending_admin_verification'
+      // 1. Submit order via Secure Backend Order Creation API
       const orderRes = await createOrder({
         orderNumber: currentOrderNumber,
         user,
@@ -442,15 +459,21 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         couponCode: coupon ? coupon.code : undefined,
         shippingAddress: {
           fullName: formData.fullName.trim(),
-          street: formData.address.trim(),
-          apartment: formData.apartment.trim() || undefined,
+          phone: cleanPhone,
+          email: formData.email.trim(),
+          houseBuilding: formData.houseBuilding.trim(),
+          streetArea: formData.streetArea.trim(),
+          street: `${formData.houseBuilding.trim()}, ${formData.streetArea.trim()}`,
+          apartment: formData.houseBuilding.trim(),
           city: formData.city.trim(),
           state: formData.state.trim(),
-          postalCode: formData.postalCode.trim(),
-          country: formData.country.trim(),
-          phone: formData.phone.trim(),
+          postalCode: formData.pinCode.trim(),
+          pinCode: formData.pinCode.trim(),
+          landmark: (formData.landmark || '').trim(),
+          deliveryInstructions: (formData.deliveryInstructions || '').trim(),
+          country: formData.country || 'India',
         },
-        customerNotes: formData.deliveryNotes.trim() || undefined,
+        customerNotes: (formData.deliveryInstructions || '').trim() || undefined,
         paymentMethod: formData.paymentMethod,
         paymentStatus: 'pending_admin_verification',
         transactionReference: cleanRef,
@@ -458,22 +481,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         aiAnalysis: aiAnalysis || undefined,
       });
 
-      // 2. Notify backend server with screenshot & AI fraud audit
-      try {
-        await fetch('/api/payments/record-upi', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            orderNumber: currentOrderNumber,
-            upiTransactionRef: cleanRef,
-            amount: finalPayableTotal,
-            paymentMethod: formData.paymentMethod,
-            screenshotBase64: screenshotPreview || undefined,
-            aiAnalysis: aiAnalysis || undefined,
-          }),
-        });
-      } catch (beErr) {
-        console.warn('Backend notification error:', beErr);
+      if (!orderRes.success) {
+        throw new Error(orderRes.errorMessage || 'Failed to submit order. Please verify your details and retry.');
       }
 
       setCompletedOrder({
@@ -492,8 +501,9 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         aiAnalysis: aiAnalysis || null,
       });
 
+      // Clear cart only after confirmed order creation
       clearCart();
-      showToast('Your payment details and screenshot are submitted for admin verification.', 'info');
+      showToast('Order placed successfully! Details submitted for administrative ledger verification.', 'success');
     } catch (err: any) {
       showToast(err.message || 'Error submitting order', 'error');
     } finally {
@@ -501,25 +511,30 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     }
   };
 
-  // Demo auto-fill helper
+  // Demo auto-fill helper with Indian delivery address
   const handleLoadDemoProfile = () => {
     setFormData({
-      fullName: 'Alex Morgan',
-      email: 'alex.morgan@shopcart.com',
-      phone: '+1 (555) 349-8291',
-      address: '742 Evergreen Terrace',
-      apartment: 'Suite 402',
-      city: 'Seattle',
-      state: 'WA',
-      postalCode: '98101',
-      country: 'United States',
-      deliveryNotes: 'Leave with concierge.',
+      fullName: 'Rahul Sharma',
+      phone: '9876543210',
+      email: 'rahul.sharma@example.in',
+      houseBuilding: 'Flat 402, Lotus Tower',
+      streetArea: 'MG Road, Indiranagar',
+      city: 'Bengaluru',
+      state: 'Karnataka',
+      pinCode: '560038',
+      landmark: 'Near Indiranagar Metro Station',
+      deliveryInstructions: 'Please call on arrival; leave with building security if unavailable.',
+      country: 'India',
+      address: 'Flat 402, Lotus Tower, MG Road, Indiranagar',
+      apartment: 'Flat 402, Lotus Tower',
+      postalCode: '560038',
+      deliveryNotes: 'Please call on arrival.',
       billingSameAsDelivery: true,
       paymentMethod: formData.paymentMethod,
       upiTransactionRef: '431029482910',
     });
     setErrors({});
-    showToast('Applied sample customer profile & 12-digit sample UTR', 'info');
+    showToast('Applied sample Indian delivery details & 12-digit sample UTR', 'info');
   };
 
   // Empty cart fallback

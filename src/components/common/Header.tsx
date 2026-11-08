@@ -9,20 +9,17 @@ import {
   ChevronDown,
   LogOut,
   Package,
-  ShieldCheck,
   Sparkles,
   Smartphone,
   Laptop,
   Shirt,
   Home,
-  Database,
   ArrowRight,
 } from 'lucide-react';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
 import { PageView } from '../../types';
 import { PRODUCTS, CATEGORIES } from '../../data/mockData';
-import { isSupabaseConfigured } from '../../lib/supabase';
 import { AmazonLogo } from './AmazonLogo';
 import { formatPrice } from '../../utils/format';
 
@@ -30,14 +27,12 @@ interface HeaderProps {
   currentPage: PageView;
   onNavigate: (page: PageView, params?: { productId?: string; category?: string; query?: string; tab?: string }) => void;
   onSearch: (query: string, category: string) => void;
-  onOpenSupabaseModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   currentPage,
   onNavigate,
   onSearch,
-  onOpenSupabaseModal,
 }) => {
   const { cartCount, setIsCartDrawerOpen, wishlist } = useCart();
   const { user, isAuthenticated, logout } = useAuth();

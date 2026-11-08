@@ -21,11 +21,17 @@ export interface CreateOrderParams {
     fullName: string;
     street: string;
     apartment?: string;
+    houseBuilding?: string;
+    streetArea?: string;
     city: string;
     state: string;
     postalCode: string;
+    pinCode?: string;
     country: string;
     phone: string;
+    email?: string;
+    landmark?: string;
+    deliveryInstructions?: string;
   };
   customerNotes?: string;
   paymentMethod: string;
@@ -70,76 +76,141 @@ export async function createOrder(params: CreateOrderParams): Promise<OrderResul
     params.paymentStatus === 'verified'
   );
 
-  if (!isConnected) {
-    // When Supabase is not configured yet, record order in localStorage for local testing
-    try {
-      const localOrders: Order[] = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
-      const newOrder: Order = {
-        id: `local-${Date.now()}`,
-        order_number: params.orderNumber,
-        user_id: params.user?.id || null,
-        guest_email: params.guestEmail || params.shippingAddress.fullName || null,
-        status: initialStatus,
-        subtotal: params.subtotal,
-        discount_amount: params.discountAmount,
-        shipping_fee: params.shippingFee,
-        tax_amount: params.taxAmount,
-        total_amount: params.totalAmount,
-        coupon_code: params.couponCode || null,
-        shipping_address: params.shippingAddress,
-        customer_notes: params.customerNotes || null,
-        tracking_number: trackingNumber,
-        carrier: carrier,
-        estimated_delivery_date: estimatedDeliveryISO,
-        shipment_updates: initialShipmentUpdates,
-        paymentMethod: params.paymentMethod,
-        paymentStatus: params.paymentStatus,
-        transactionReference: params.transactionReference || null,
-        screenshotUrl: params.screenshotUrl || null,
-        aiAnalysis: params.aiAnalysis || null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        order_items: params.cart.map((item) => ({
-          product_id: item.product.id,
-          product_name: item.product.name,
-          unit_price: item.product.price,
+  // 1. Primary path: Call Secure Backend Order Creation API
+  try {
+    const res = await fetch('/api/orders/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        orderNumber: params.orderNumber,
+        userId: params.user?.id && !params.user.id.startsWith('usr-') ? params.user.id : null,
+        customerName: params.shippingAddress.fullName,
+        customerEmail: params.guestEmail || params.shippingAddress.email || params.user?.email || '',
+        customerPhone: params.shippingAddress.phone || params.user?.phone || '',
+        houseBuilding: params.shippingAddress.houseBuilding || params.shippingAddress.apartment || params.shippingAddress.street,
+        streetArea: params.shippingAddress.streetArea || params.shippingAddress.street,
+        city: params.shippingAddress.city,
+        state: params.shippingAddress.state,
+        pinCode: params.shippingAddress.pinCode || params.shippingAddress.postalCode,
+        landmark: params.shippingAddress.landmark || '',
+        deliveryInstructions: params.shippingAddress.deliveryInstructions || params.customerNotes || '',
+        country: params.shippingAddress.country || 'India',
+        cartItems: params.cart.map((item) => ({
+          productId: item.product.id,
+          productName: item.product.name,
+          productImage: item.product.image || item.product.images?.[0] || null,
           quantity: item.quantity,
-          total_price: Number((item.product.price * item.quantity).toFixed(2)),
-          selected_color: item.selectedColor || null,
-          selected_size: item.selectedSize || null,
-          product: item.product,
+          unitPrice: item.product.price,
+          totalPrice: Number((item.product.price * item.quantity).toFixed(2)),
+          selectedColor: item.selectedColor || null,
+          selectedSize: item.selectedSize || null,
         })),
-        payment_records: [
-          {
-            id: `pay-${Date.now()}`,
-            payment_method: params.paymentMethod,
-            amount: params.totalAmount,
-            currency: 'INR',
-            payment_status: params.paymentStatus,
-            transaction_reference: params.transactionReference || null,
-            screenshot_url: params.screenshotUrl || null,
-            ai_analysis: params.aiAnalysis || null,
-            ai_confidence_score: params.aiAnalysis?.confidence_score || null,
-            ai_recommendation: params.aiAnalysis?.recommended_action || null,
-            suspicious_indicators: params.aiAnalysis?.suspicious_indicators || [],
-            created_at: new Date().toISOString(),
-          },
-        ],
-      };
-      localOrders.unshift(newOrder);
-      localStorage.setItem('shopcart_orders', JSON.stringify(localOrders));
-    } catch {
-      // Ignore storage errors
-    }
+        pricing: {
+          subtotal: params.subtotal,
+          discountAmount: params.discountAmount,
+          shippingFee: params.shippingFee,
+          taxAmount: params.taxAmount,
+          totalAmount: params.totalAmount,
+          couponCode: params.couponCode,
+        },
+        paymentMethod: params.paymentMethod,
+        transactionReference: params.transactionReference,
+        screenshotBase64: params.screenshotUrl?.startsWith('data:') ? params.screenshotUrl : undefined,
+        screenshotUrl: !params.screenshotUrl?.startsWith('data:') ? params.screenshotUrl : undefined,
+        aiAnalysis: params.aiAnalysis,
+        customerNotes: params.customerNotes,
+      }),
+    });
 
-    return {
-      success: true,
-      orderId: `local-${Date.now()}`,
-      orderNumber: params.orderNumber,
-      isStoredInSupabase: false,
-      trackingNumber,
-      estimatedDeliveryDate: estimatedDeliveryISO,
-    };
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success) {
+        // Cache locally for instant availability
+        try {
+          const localOrders: Order[] = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
+          const newOrder: Order = {
+            id: data.orderId || `ord-${Date.now()}`,
+            order_number: params.orderNumber,
+            user_id: params.user?.id || null,
+            guest_email: params.guestEmail || params.shippingAddress.email || null,
+            customer_name: params.shippingAddress.fullName,
+            customer_email: params.guestEmail || params.shippingAddress.email || null,
+            customer_phone: params.shippingAddress.phone,
+            status: initialStatus,
+            subtotal: params.subtotal,
+            discount_amount: params.discountAmount,
+            shipping_fee: params.shippingFee,
+            tax_amount: params.taxAmount,
+            total_amount: params.totalAmount,
+            coupon_code: params.couponCode || null,
+            shipping_address: params.shippingAddress,
+            customer_notes: params.customerNotes || null,
+            tracking_number: data.trackingNumber || trackingNumber,
+            carrier: data.carrier || carrier,
+            estimated_delivery_date: data.estimatedDeliveryDate || estimatedDeliveryISO,
+            shipment_updates: initialShipmentUpdates,
+            paymentMethod: params.paymentMethod,
+            paymentStatus: params.paymentStatus,
+            transactionReference: params.transactionReference || null,
+            screenshotUrl: params.screenshotUrl || null,
+            aiAnalysis: params.aiAnalysis || null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            order_items: params.cart.map((item) => ({
+              product_id: item.product.id,
+              product_name: item.product.name,
+              product_image: item.product.image || item.product.images?.[0] || null,
+              unit_price: item.product.price,
+              quantity: item.quantity,
+              total_price: Number((item.product.price * item.quantity).toFixed(2)),
+              line_total: Number((item.product.price * item.quantity).toFixed(2)),
+              selected_color: item.selectedColor || null,
+              selected_size: item.selectedSize || null,
+              product: item.product,
+            })),
+            payment_records: [
+              {
+                id: `pay-${Date.now()}`,
+                payment_method: params.paymentMethod,
+                amount: params.totalAmount,
+                currency: 'INR',
+                payment_status: params.paymentStatus,
+                transaction_reference: params.transactionReference || null,
+                screenshot_url: params.screenshotUrl || null,
+                ai_analysis: params.aiAnalysis || null,
+                ai_confidence_score: params.aiAnalysis?.confidence_score || null,
+                ai_recommendation: params.aiAnalysis?.recommended_action || null,
+                suspicious_indicators: params.aiAnalysis?.suspicious_indicators || [],
+                created_at: new Date().toISOString(),
+              },
+            ],
+          };
+          localOrders.unshift(newOrder);
+          localStorage.setItem('shopcart_orders', JSON.stringify(localOrders));
+        } catch {
+          // Non-fatal
+        }
+
+        return {
+          success: true,
+          orderId: data.orderId,
+          orderNumber: params.orderNumber,
+          isStoredInSupabase: data.isStoredInSupabase ?? true,
+          trackingNumber: data.trackingNumber || trackingNumber,
+          estimatedDeliveryDate: data.estimatedDeliveryDate || estimatedDeliveryISO,
+        };
+      }
+    } else {
+      const errData = await res.json().catch(() => ({}));
+      if (errData.error) {
+        throw new Error(errData.error);
+      }
+    }
+  } catch (apiErr: any) {
+    console.warn('Backend order creation endpoint warning, falling back to direct client client:', apiErr?.message);
+    if (apiErr?.message && apiErr.message.includes('Duplicate UTR')) {
+      throw apiErr;
+    }
   }
 
   try {
@@ -392,6 +463,27 @@ export async function fetchAllAdminOrders(): Promise<Order[]> {
     localOrders = [];
   }
 
+  // 1. Primary path: Fetch from server-authoritative Admin Orders endpoint
+  try {
+    const res = await fetch('/api/admin/orders');
+    if (res.ok) {
+      const json = await res.json();
+      if (json.success && Array.isArray(json.orders)) {
+        const orderMap = new Map<string, Order>();
+        localOrders.forEach((o) => orderMap.set(o.order_number || o.id, o));
+        json.orders.forEach((o: any) => {
+          const norm = normalizeOrderRecord(o);
+          orderMap.set(norm.order_number || norm.id, norm);
+        });
+        return Array.from(orderMap.values()).sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+      }
+    }
+  } catch (apiErr) {
+    console.warn('Backend /api/admin/orders failed, trying direct Supabase:', apiErr);
+  }
+
   if (!isSupabaseConfigured()) {
     return localOrders;
   }
@@ -426,9 +518,13 @@ export async function fetchAllAdminOrders(): Promise<Order[]> {
 function normalizeOrderRecord(row: any): Order {
   const normStatus = normalizeOrderStatus(row.status);
   const payRecord = row.payment_records?.[0] || {};
+  const shipAddr = row.shipping_address || {};
 
   return {
     ...row,
+    customer_name: row.customer_name || shipAddr.fullName || row.guest_email || 'Customer',
+    customer_email: row.customer_email || shipAddr.email || row.guest_email || null,
+    customer_phone: row.customer_phone || shipAddr.phone || null,
     status: normStatus,
     paymentMethod: row.payment_method || row.paymentMethod || payRecord.payment_method || 'all_upi',
     paymentStatus: row.payment_status || row.paymentStatus || payRecord.payment_status || (normStatus === 'confirmed' || normStatus === 'shipped' || normStatus === 'delivered' ? 'verified' : 'pending_admin_verification'),
@@ -441,6 +537,7 @@ function normalizeOrderRecord(row: any): Order {
     verified_at: row.verified_at || payRecord.verified_at || null,
     verified_by: row.verified_by || payRecord.verified_by || null,
     rejection_reason: row.rejection_reason || payRecord.rejection_reason || null,
+    shipping_address: shipAddr,
     shipment_updates: Array.isArray(row.shipment_updates) && row.shipment_updates.length > 0
       ? row.shipment_updates
       : createInitialShipmentUpdates(new Date(row.created_at || Date.now()), payRecord.payment_status === 'verified'),

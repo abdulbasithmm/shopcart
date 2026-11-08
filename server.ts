@@ -129,250 +129,645 @@ app.use('/api/admin', async (req: Request, res: Response, next) => {
   next();
 });
 
-// Helper: Get PayPal OAuth Access Token
-async function getPayPalAccessToken(): Promise<string | null> {
-  if (!PAYPAL_CLIENT_ID || !PAYPAL_CLIENT_SECRET || PAYPAL_CLIENT_ID === 'sb') {
-    return null;
-  }
+// In-memory orders store cache to guarantee instant data availability and sync
+const serverOrdersStore = new Map<string, any>();
 
-  try {
-    const auth = Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_CLIENT_SECRET}`).toString('base64');
-    const response = await fetch(`${PAYPAL_BASE_URL}/v1/oauth2/token`, {
-      method: 'POST',
-      body: 'grant_type=client_credentials',
-      headers: {
-        Authorization: `Basic ${auth}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
+// Helper to generate standard shipment milestones
+function createInitialShipmentMilestones(orderDate: Date = new Date(), isVerified: boolean = false) {
+  const milestones = [
+    {
+      id: `milestone-placed-${Date.now()}`,
+      status: 'order_placed',
+      title: 'Order Placed & Awaiting Verification',
+      description: 'Customer submitted UPI payment reference. Awaiting manual admin confirmation.',
+      location: 'Shopcart Fulfillment Center',
+      timestamp: orderDate.toISOString(),
+    },
+  ];
+
+  if (isVerified) {
+    const verifiedTime = new Date(orderDate.getTime() + 5 * 60 * 1000);
+    milestones.push({
+      id: `milestone-conf-${Date.now() + 1}`,
+      status: 'confirmed',
+      title: 'Payment Confirmed',
+      description: 'Payment verified against merchant bank statement. Order approved for packing.',
+      location: 'Shopcart Accounts & Audit',
+      timestamp: verifiedTime.toISOString(),
     });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.warn('PayPal OAuth failed:', errText);
-      return null;
-    }
-
-    const data = await response.json();
-    return data.access_token || null;
-  } catch (err) {
-    console.warn('Error fetching PayPal token:', err);
-    return null;
   }
+
+  return milestones;
 }
 
 // -----------------------------------------------------------------------------
-// API ROUTES
+// RETIRED PAYPAL NOTICE (All other payment methods removed)
 // -----------------------------------------------------------------------------
-
-// 1. Get PayPal Client ID for frontend SDK loading
-app.get('/api/paypal/client-id', (_req: Request, res: Response) => {
-  res.json({
-    clientId: PAYPAL_CLIENT_ID,
-    environment: PAYPAL_ENVIRONMENT,
-    isRealCredentialsConfigured: !!(PAYPAL_CLIENT_SECRET && PAYPAL_CLIENT_ID !== 'sb'),
+app.all('/api/paypal/*', (_req: Request, res: Response) => {
+  return res.status(410).json({
+    error: 'PayPal checkout has been completely retired. Shopcart operates strictly with Universal UPI payments (Google Pay, PhonePe, Paytm, BHIM, Cred, and all UPI applications).',
+    supportedPaymentMethods: ['google_pay', 'phonepe', 'paytm', 'bhim', 'all_upi'],
   });
 });
 
-// 2. Create PayPal Order (Backend Authoritative)
-app.post('/api/paypal/create-order', async (req: Request, res: Response) => {
+// -----------------------------------------------------------------------------
+// SECURE ORDER CREATION & DATABASE PERSISTENCE API
+// Customer Checkout -> Secure Order Creation API -> Supabase PostgreSQL
+// -----------------------------------------------------------------------------
+app.post('/api/orders/create', async (req: Request, res: Response) => {
   try {
-    const { orderNumber, totalAmount, items, currency = 'USD' } = req.body;
+    const {
+      orderNumber,
+      userId,
+      customerName,
+      customerEmail,
+      customerPhone,
+      houseBuilding,
+      streetArea,
+      city,
+      state,
+      pinCode,
+      landmark,
+      deliveryInstructions,
+      country = 'India',
+      cartItems = [],
+      pricing = {},
+      paymentMethod = 'all_upi',
+      transactionReference,
+      screenshotBase64,
+      screenshotUrl: providedScreenshotUrl,
+      aiAnalysis,
+      customerNotes,
+    } = req.body;
 
-    if (!totalAmount || Number(totalAmount) <= 0) {
-      return res.status(400).json({ error: 'Invalid order amount' });
+    // 1. Validate Required Fields
+    if (!orderNumber) {
+      return res.status(400).json({ error: 'Order Number is required.' });
     }
 
-    const formattedAmount = Number(totalAmount).toFixed(2);
-    const accessToken = await getPayPalAccessToken();
+    if (!customerName || !customerName.trim()) {
+      return res.status(400).json({ error: 'Customer Full Name is required.' });
+    }
 
-    // A) If real PayPal API credentials are configured, create order via PayPal REST API
-    if (accessToken) {
-      const response = await fetch(`${PAYPAL_BASE_URL}/v2/checkout/orders`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-          'PayPal-Request-Id': `order-${orderNumber}-${Date.now()}`,
-        },
-        body: JSON.stringify({
-          intent: 'CAPTURE',
-          purchase_units: [
-            {
-              reference_id: orderNumber || `SHOPCART-${Date.now()}`,
-              description: `Shopcart Order ${orderNumber || ''}`,
-              amount: {
-                currency_code: currency,
-                value: formattedAmount,
-                breakdown: {
-                  item_total: {
-                    currency_code: currency,
-                    value: formattedAmount,
-                  },
-                },
-              },
-              items: (items || []).map((it: any) => ({
-                name: (it.name || 'Shopcart Item').substring(0, 127),
-                unit_amount: {
-                  currency_code: currency,
-                  value: Number(it.price).toFixed(2),
-                },
-                quantity: String(it.quantity || 1),
-              })),
-            },
-          ],
-        }),
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!customerEmail || !emailRegex.test(customerEmail.trim())) {
+      return res.status(400).json({ error: 'A valid customer email address is required.' });
+    }
+
+    // Validate Indian 10-digit mobile number
+    const cleanPhone = (customerPhone || '').replace(/[\s\-\+\(\)]/g, '').replace(/^91/, '');
+    if (!cleanPhone || cleanPhone.length !== 10 || !/^[6-9]\d{9}$/.test(cleanPhone)) {
+      return res.status(400).json({
+        error: 'Please enter a valid 10-digit Indian mobile number (e.g., 9876543210).',
       });
-
-      const paypalOrder = await response.json();
-
-      if (!response.ok) {
-        console.error('PayPal create order error:', paypalOrder);
-        return res.status(response.status).json({
-          error: paypalOrder.message || 'PayPal order creation failed',
-          details: paypalOrder.details,
-        });
-      }
-
-      return res.json({ id: paypalOrder.id, status: paypalOrder.status });
     }
 
-    // B) Sandbox / Demo fallback if live client secret has not been provided in secrets panel yet
-    // Generates a valid sandbox token ID and verifies it in the capture step
-    const simulatedOrderId = `PAYPAL-TEST-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-    return res.json({
-      id: simulatedOrderId,
-      status: 'CREATED',
-      simulated: true,
-      message: 'Running in PayPal Sandbox verification mode. To connect live PayPal account, provide PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET.',
+    // Validate Delivery Address
+    if (!houseBuilding || !houseBuilding.trim()) {
+      return res.status(400).json({ error: 'House or Building name/number is required.' });
+    }
+
+    if (!streetArea || !streetArea.trim()) {
+      return res.status(400).json({ error: 'Street or Area name is required.' });
+    }
+
+    if (!city || !city.trim()) {
+      return res.status(400).json({ error: 'City is required.' });
+    }
+
+    if (!state || !state.trim()) {
+      return res.status(400).json({ error: 'State is required.' });
+    }
+
+    // Validate 6-digit Indian PIN Code
+    const cleanPin = (pinCode || '').trim();
+    if (!cleanPin || !/^\d{6}$/.test(cleanPin)) {
+      return res.status(400).json({
+        error: 'Please enter a valid 6-digit Indian postal PIN code (e.g., 560001).',
+      });
+    }
+
+    // Validate Cart Items
+    if (!Array.isArray(cartItems) || cartItems.length === 0) {
+      return res.status(400).json({ error: 'Cart cannot be empty when creating an order.' });
+    }
+
+    // Validate 12-digit UPI UTR reference
+    const cleanUtr = (transactionReference || aiAnalysis?.extracted_utr || '').replace(/[\s-]/g, '').trim().toUpperCase();
+    if (!cleanUtr || cleanUtr.length !== 12 || !/^[0-9A-Z]{12}$/.test(cleanUtr)) {
+      return res.status(400).json({
+        error: 'A valid 12-digit alphanumeric UPI Transaction Reference (UTR) is required to verify your payment.',
+      });
+    }
+
+    // 2. Prevent Duplicate UTR Submission
+    if (recordedUtrMemory.has(cleanUtr)) {
+      return res.status(409).json({
+        error: `Duplicate UTR Reference: The 12-digit transaction ID "${cleanUtr}" has already been submitted for another order.`,
+      });
+    }
+
+    // 3. Process Receipt Screenshot
+    let finalScreenshotUrl = providedScreenshotUrl || '';
+    if (screenshotBase64 && !finalScreenshotUrl.startsWith('/uploads/')) {
+      try {
+        const cleanData = screenshotBase64.replace(/^data:image\/[a-zA-Z+]+;base64,/, '');
+        const filename = `receipt_${orderNumber}_${Date.now()}.png`;
+        const filePath = path.join(UPLOADS_DIR, filename);
+        fs.writeFileSync(filePath, Buffer.from(cleanData, 'base64'));
+        finalScreenshotUrl = `/uploads/screenshots/${filename}`;
+      } catch (saveErr) {
+        console.warn('Could not save screenshot image to disk:', saveErr);
+      }
+    }
+
+    // 4. Compute Shipping Details & Milestones
+    const trackingNumber = `SC-TRK-${Math.floor(1000000000 + Math.random() * 9000000000)}`;
+    const carrier = 'Shop Cart Express';
+    const estDate = new Date();
+    estDate.setDate(estDate.getDate() + 4);
+    const estimatedDeliveryISO = estDate.toISOString();
+    const initialMilestones = createInitialShipmentMilestones(new Date(), false);
+
+    // Build Comprehensive Shipping Address JSON
+    const shippingAddressObj = {
+      fullName: customerName.trim(),
+      phone: cleanPhone,
+      email: customerEmail.trim(),
+      houseBuilding: houseBuilding.trim(),
+      streetArea: streetArea.trim(),
+      street: `${houseBuilding.trim()}, ${streetArea.trim()}`,
+      apartment: houseBuilding.trim(),
+      city: city.trim(),
+      state: state.trim(),
+      postalCode: cleanPin,
+      pinCode: cleanPin,
+      landmark: (landmark || '').trim(),
+      deliveryInstructions: (deliveryInstructions || '').trim(),
+      country: country || 'India',
+    };
+
+    const subtotal = Number(pricing.subtotal || 0);
+    const discountAmount = Number(pricing.discountAmount || 0);
+    const shippingFee = Number(pricing.shippingFee || 0);
+    const taxAmount = Number(pricing.taxAmount || 0);
+    const totalAmount = Number(pricing.totalAmount || 0);
+    const couponCode = pricing.couponCode || null;
+
+    let orderId = `ord-${Date.now()}`;
+    let isStoredInSupabase = false;
+
+    // 5. Database Persistence in Supabase PostgreSQL
+    if (supabase) {
+      try {
+        // Prevent duplicate UTR in database
+        const { data: existingPay } = await supabase
+          .from('payment_records')
+          .select('id, transaction_reference')
+          .eq('transaction_reference', cleanUtr)
+          .maybeSingle();
+
+        if (existingPay) {
+          recordedUtrMemory.add(cleanUtr);
+          return res.status(409).json({
+            error: `Duplicate UTR Reference: The 12-digit transaction ID "${cleanUtr}" has already been recorded in database.`,
+          });
+        }
+
+        const isValidUuid = userId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
+
+        const baseOrderPayload: any = {
+          order_number: orderNumber,
+          user_id: isValidUuid ? userId : null,
+          guest_email: customerEmail.trim(),
+          status: 'order_placed',
+          subtotal,
+          discount_amount: discountAmount,
+          shipping_fee: shippingFee,
+          tax_amount: taxAmount,
+          total_amount: totalAmount,
+          coupon_code: couponCode,
+          shipping_address: shippingAddressObj,
+          customer_notes: customerNotes || null,
+          tracking_number: trackingNumber,
+          carrier,
+          estimated_delivery_date: estimatedDeliveryISO,
+          shipment_updates: initialMilestones,
+        };
+
+        // Attempt insert with extended customer columns
+        let { data: insertedOrder, error: insertErr } = await supabase
+          .from('orders')
+          .insert({
+            ...baseOrderPayload,
+            customer_name: customerName.trim(),
+            customer_email: customerEmail.trim(),
+            customer_phone: cleanPhone,
+            payment_method: paymentMethod,
+            payment_status: 'pending_admin_verification',
+          })
+          .select('id')
+          .single();
+
+        // Fallback to base columns if schema doesn't have extended columns yet
+        if (insertErr) {
+          console.warn('Extended columns insert warning, falling back to base schema:', insertErr.message);
+          const fallback = await supabase
+            .from('orders')
+            .insert(baseOrderPayload)
+            .select('id')
+            .single();
+
+          if (!fallback.error && fallback.data) {
+            insertedOrder = fallback.data;
+            insertErr = null;
+          } else {
+            console.warn('Orders table base insert warning:', fallback.error?.message);
+          }
+        }
+
+        if (insertedOrder) {
+          orderId = insertedOrder.id;
+          isStoredInSupabase = true;
+
+          // Insert Order Items
+          const orderItemsRows = cartItems.map((item: any) => ({
+            order_id: orderId,
+            product_id: item.productId || item.product?.id || null,
+            product_name: item.productName || item.product?.name || 'Shopcart Item',
+            unit_price: Number(item.unitPrice || item.product?.price || 0),
+            quantity: Number(item.quantity || 1),
+            total_price: Number(item.totalPrice || (item.unitPrice * item.quantity) || 0),
+            selected_color: item.selectedColor || null,
+            selected_size: item.selectedSize || null,
+          }));
+
+          const { error: itemsErr } = await supabase.from('order_items').insert(orderItemsRows);
+          if (itemsErr) {
+            console.warn('order_items insert warning:', itemsErr.message);
+          }
+
+          // Insert Payment Record
+          const { error: paymentErr } = await supabase.from('payment_records').insert({
+            order_id: orderId,
+            payment_method: paymentMethod,
+            amount: totalAmount,
+            currency: 'INR',
+            payment_status: 'pending_admin_verification',
+            transaction_reference: cleanUtr,
+            screenshot_url: finalScreenshotUrl || null,
+            ai_analysis: aiAnalysis || null,
+            ai_confidence_score: aiAnalysis?.confidence_score || null,
+            ai_recommendation: aiAnalysis?.recommended_action || null,
+            suspicious_indicators: aiAnalysis?.suspicious_indicators || [],
+            raw_details: {
+              customerName: customerName.trim(),
+              customerEmail: customerEmail.trim(),
+              customerPhone: cleanPhone,
+              upiTransactionRef: cleanUtr,
+              paymentMethod,
+              submittedAt: new Date().toISOString(),
+              screenshotUrl: finalScreenshotUrl,
+              aiAnalysis,
+              shippingAddress: shippingAddressObj,
+              status: 'Awaiting Bank Ledger Verification by Administrator',
+            },
+          });
+
+          if (paymentErr) {
+            console.warn('payment_records insert warning:', paymentErr.message);
+          }
+
+          // Best-effort stock decrement
+          for (const item of cartItems) {
+            const pId = item.productId || item.product?.id;
+            const qty = Number(item.quantity || 1);
+            if (pId) {
+              try {
+                const { data: inv } = await supabase
+                  .from('inventory')
+                  .select('stock_count')
+                  .eq('product_id', pId)
+                  .maybeSingle();
+
+                if (inv && inv.stock_count >= qty) {
+                  await supabase
+                    .from('inventory')
+                    .update({ stock_count: Math.max(0, inv.stock_count - qty) })
+                    .eq('product_id', pId);
+                }
+              } catch {
+                // Non-fatal
+              }
+            }
+          }
+        }
+      } catch (dbErr: any) {
+        console.warn('Supabase order creation exception:', dbErr?.message);
+      }
+    }
+
+    // Cache clean UTR to block instant duplicates
+    recordedUtrMemory.add(cleanUtr);
+
+    // 6. Cache Order in Server Memory Store
+    const fullOrderRecord = {
+      id: orderId,
+      order_number: orderNumber,
+      user_id: userId || null,
+      guest_email: customerEmail.trim(),
+      customer_name: customerName.trim(),
+      customer_email: customerEmail.trim(),
+      customer_phone: cleanPhone,
+      status: 'order_placed',
+      subtotal,
+      discount_amount: discountAmount,
+      shipping_fee: shippingFee,
+      tax_amount: taxAmount,
+      total_amount: totalAmount,
+      coupon_code: couponCode,
+      shipping_address: shippingAddressObj,
+      customer_notes: customerNotes || null,
+      tracking_number: trackingNumber,
+      carrier,
+      estimated_delivery_date: estimatedDeliveryISO,
+      shipment_updates: initialMilestones,
+      paymentMethod,
+      paymentStatus: 'pending_admin_verification',
+      transactionReference: cleanUtr,
+      screenshot_url: finalScreenshotUrl || null,
+      ai_analysis: aiAnalysis || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      order_items: cartItems.map((item: any) => ({
+        id: `item-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        order_id: orderId,
+        product_id: item.productId || item.product?.id || null,
+        product_name: item.productName || item.product?.name || 'Shopcart Item',
+        product_image: item.productImage || item.product?.image || item.product?.images?.[0] || null,
+        unit_price: Number(item.unitPrice || item.product?.price || 0),
+        quantity: Number(item.quantity || 1),
+        total_price: Number(item.totalPrice || (item.unitPrice * item.quantity) || 0),
+        line_total: Number(item.totalPrice || (item.unitPrice * item.quantity) || 0),
+        selected_color: item.selectedColor || null,
+        selected_size: item.selectedSize || null,
+      })),
+      payment_records: [
+        {
+          id: `pay-${orderId}`,
+          order_id: orderId,
+          payment_method: paymentMethod,
+          amount: totalAmount,
+          currency: 'INR',
+          payment_status: 'pending_admin_verification',
+          transaction_reference: cleanUtr,
+          screenshot_url: finalScreenshotUrl || null,
+          ai_analysis: aiAnalysis || null,
+          ai_confidence_score: aiAnalysis?.confidence_score || null,
+          ai_recommendation: aiAnalysis?.recommended_action || null,
+          suspicious_indicators: aiAnalysis?.suspicious_indicators || [],
+          created_at: new Date().toISOString(),
+        },
+      ],
+    };
+
+    serverOrdersStore.set(orderNumber, fullOrderRecord);
+
+    return res.status(201).json({
+      success: true,
+      orderId,
+      orderNumber,
+      trackingNumber,
+      carrier,
+      estimatedDeliveryDate: estimatedDeliveryISO,
+      paymentStatus: 'pending_admin_verification',
+      isStoredInSupabase,
+      message: 'Order created successfully. Details recorded for administrative bank ledger verification.',
     });
   } catch (err: any) {
-    console.error('Exception in create-order:', err);
-    return res.status(500).json({ error: err.message || 'Internal server error creating PayPal order' });
+    console.error('Exception in /api/orders/create:', err);
+    return res.status(500).json({ error: err.message || 'Internal server error creating order' });
   }
 });
 
-// 3. Capture PayPal Order (Backend Authoritative Verification)
-app.post('/api/paypal/capture-order', async (req: Request, res: Response) => {
+// -----------------------------------------------------------------------------
+// ADMIN ORDERS MANAGEMENT APIS
+// Admin Dashboard -> /api/admin/orders -> Supabase PostgreSQL
+// -----------------------------------------------------------------------------
+app.get('/api/admin/orders', async (_req: Request, res: Response) => {
   try {
-    const { paypalOrderId, orderNumber, orderDetails } = req.body;
+    const ordersMap = new Map<string, any>();
 
-    if (!paypalOrderId) {
-      return res.status(400).json({ error: 'Missing paypalOrderId' });
-    }
+    // 1. Populate from server memory cache
+    serverOrdersStore.forEach((ord, num) => {
+      ordersMap.set(num, ord);
+    });
 
-    let isVerified = false;
-    let transactionId = '';
-    let captureStatus = '';
-    let payerEmail = '';
-    let rawResponse: any = {};
-
-    const accessToken = await getPayPalAccessToken();
-
-    if (accessToken && !paypalOrderId.startsWith('PAYPAL-TEST-')) {
-      // Real PayPal API Capture
-      const response = await fetch(`${PAYPAL_BASE_URL}/v2/checkout/orders/${paypalOrderId}/capture`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
-
-      rawResponse = await response.json();
-
-      if (!response.ok) {
-        console.error('PayPal capture error:', rawResponse);
-        return res.status(response.status).json({
-          success: false,
-          error: rawResponse.message || 'Payment capture failed at PayPal',
-        });
-      }
-
-      // Check official PayPal status
-      captureStatus = rawResponse.status; // Must be 'COMPLETED'
-      if (captureStatus === 'COMPLETED') {
-        isVerified = true;
-        const captureUnit = rawResponse.purchase_units?.[0]?.payments?.captures?.[0];
-        transactionId = captureUnit?.id || rawResponse.id;
-        payerEmail = rawResponse.payer?.email_address || '';
-      }
-    } else {
-      // Sandbox / Simulated verified capture
-      isVerified = true;
-      captureStatus = 'COMPLETED';
-      transactionId = `CAPTURE-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
-      payerEmail = orderDetails?.customer?.email || 'verified.buyer@sandbox.paypal.com';
-      rawResponse = {
-        id: transactionId,
-        status: 'COMPLETED',
-        source: 'PAYPAL_SANDBOX_VERIFIED',
-        payer: { email_address: payerEmail },
-        capture_time: new Date().toISOString(),
-      };
-    }
-
-    if (!isVerified || captureStatus !== 'COMPLETED') {
-      return res.status(400).json({
-        success: false,
-        verified: false,
-        error: 'PayPal did not authorize or complete this transaction.',
-      });
-    }
-
-    // Connect and save payment record in Supabase
-    if (supabase && orderNumber) {
+    // 2. Query Supabase PostgreSQL if connected
+    if (supabase) {
       try {
-        // Find existing order by order_number
-        const { data: orderRow } = await supabase
+        const { data: dbOrders, error: ordErr } = await supabase
           .from('orders')
-          .select('id, total_amount')
-          .eq('order_number', orderNumber)
-          .maybeSingle();
+          .select('*, order_items(*), payment_records(*)')
+          .order('created_at', { ascending: false });
 
-        if (orderRow) {
-          // Update order status to processing
-          await supabase
-            .from('orders')
-            .update({
-              status: 'processing',
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', orderRow.id);
+        if (ordErr) {
+          console.warn('Error querying orders in /api/admin/orders:', ordErr.message);
+        } else if (dbOrders) {
+          dbOrders.forEach((row: any) => {
+            const pay = row.payment_records?.[0] || {};
+            const shipAddr = row.shipping_address || {};
 
-          // Insert or update verified payment record
-          await supabase.from('payment_records').insert({
-            order_id: orderRow.id,
-            payment_method: 'paypal',
-            amount: orderRow.total_amount,
-            currency: 'USD',
-            payment_status: 'verified',
-            transaction_reference: transactionId,
-            raw_details: {
-              paypalOrderId,
-              captureStatus,
-              transactionId,
-              payerEmail,
-              verifiedAt: new Date().toISOString(),
-              raw: rawResponse,
-            },
+            const normalizedOrder = {
+              ...row,
+              customer_name: row.customer_name || shipAddr.fullName || row.guest_email || 'Customer',
+              customer_email: row.customer_email || shipAddr.email || row.guest_email || '',
+              customer_phone: row.customer_phone || shipAddr.phone || '',
+              paymentMethod: row.payment_method || pay.payment_method || 'all_upi',
+              paymentStatus: row.payment_status || pay.payment_status || 'pending_admin_verification',
+              transactionReference: row.transaction_reference || pay.transaction_reference || null,
+              screenshot_url: row.screenshot_url || pay.screenshot_url || null,
+              ai_analysis: row.ai_analysis || pay.ai_analysis || null,
+              ai_confidence_score: row.ai_confidence_score ?? pay.ai_confidence_score ?? null,
+              ai_recommendation: row.ai_recommendation || pay.ai_recommendation || null,
+              suspicious_indicators: row.suspicious_indicators || pay.suspicious_indicators || [],
+              verified_at: row.verified_at || pay.verified_at || null,
+              verified_by: row.verified_by || pay.verified_by || null,
+              rejection_reason: row.rejection_reason || pay.rejection_reason || null,
+              shipping_address: shipAddr,
+            };
+
+            ordersMap.set(row.order_number || row.id, normalizedOrder);
           });
         }
+      } catch (dbErr: any) {
+        console.warn('Exception querying Supabase orders:', dbErr?.message);
+      }
+    }
+
+    const allOrders = Array.from(ordersMap.values()).sort(
+      (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+    );
+
+    return res.json({
+      success: true,
+      count: allOrders.length,
+      orders: allOrders,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to fetch admin orders' });
+  }
+});
+
+// Update Order Status (Confirmed, Shipped, Delivered, etc.)
+app.patch('/api/admin/orders/:orderId/status', async (req: Request, res: Response) => {
+  try {
+    const { orderId } = req.params;
+    const { status, note, location = 'Shopcart Fulfillment Center' } = req.body;
+
+    const validStatuses = [
+      'order_placed',
+      'confirmed',
+      'processing',
+      'packed',
+      'shipped',
+      'out_for_delivery',
+      'delivered',
+      'cancelled',
+      'returned',
+      'refunded',
+    ];
+
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ error: `Invalid order status: ${status}` });
+    }
+
+    const timestamp = new Date().toISOString();
+    const milestone = {
+      id: `milestone-${Date.now()}`,
+      status,
+      title: `Status: ${status.replace(/_/g, ' ').toUpperCase()}`,
+      description: note || `Order updated to ${status.replace(/_/g, ' ')}`,
+      location,
+      timestamp,
+    };
+
+    // Update in memory cache
+    serverOrdersStore.forEach((ord) => {
+      if (ord.id === orderId || ord.order_number === orderId) {
+        ord.status = status;
+        ord.updated_at = timestamp;
+        if (!Array.isArray(ord.shipment_updates)) ord.shipment_updates = [];
+        ord.shipment_updates.unshift(milestone);
+      }
+    });
+
+    // Update in Supabase
+    if (supabase) {
+      try {
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
+        let query = supabase.from('orders').update({
+          status,
+          updated_at: timestamp,
+        });
+
+        if (isUuid) {
+          query = query.eq('id', orderId);
+        } else {
+          query = query.eq('order_number', orderId);
+        }
+
+        await query;
       } catch (dbErr) {
-        console.warn('Error saving PayPal payment to Supabase:', dbErr);
+        console.warn('DB update order status error:', dbErr);
       }
     }
 
     return res.json({
       success: true,
-      verified: true,
-      status: 'COMPLETED',
-      transactionId,
-      payerEmail,
-      message: 'Payment successfully captured and verified through PayPal backend.',
+      status,
+      updatedAt: timestamp,
+      message: `Order status updated to ${status}`,
     });
   } catch (err: any) {
-    console.error('Exception in capture-order:', err);
-    return res.status(500).json({ error: err.message || 'Internal server error capturing PayPal payment' });
+    return res.status(500).json({ error: err.message || 'Failed to update order status' });
+  }
+});
+
+// Update Order Shipment & Tracking
+app.patch('/api/admin/orders/:orderId/shipping', async (req: Request, res: Response) => {
+  try {
+    const { orderId } = req.params;
+    const { carrier, trackingNumber, estimatedDeliveryDate } = req.body;
+
+    const timestamp = new Date().toISOString();
+
+    // Update memory cache
+    serverOrdersStore.forEach((ord) => {
+      if (ord.id === orderId || ord.order_number === orderId) {
+        if (carrier) ord.carrier = carrier;
+        if (trackingNumber) ord.tracking_number = trackingNumber;
+        if (estimatedDeliveryDate) ord.estimated_delivery_date = estimatedDeliveryDate;
+        ord.updated_at = timestamp;
+      }
+    });
+
+    if (supabase) {
+      try {
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
+        const updatePayload: any = { updated_at: timestamp };
+        if (carrier) updatePayload.carrier = carrier;
+        if (trackingNumber) updatePayload.tracking_number = trackingNumber;
+        if (estimatedDeliveryDate) updatePayload.estimated_delivery_date = estimatedDeliveryDate;
+
+        let query = supabase.from('orders').update(updatePayload);
+        if (isUuid) {
+          query = query.eq('id', orderId);
+        } else {
+          query = query.eq('order_number', orderId);
+        }
+        await query;
+      } catch (dbErr) {
+        console.warn('DB update shipping error:', dbErr);
+      }
+    }
+
+    return res.json({
+      success: true,
+      carrier,
+      trackingNumber,
+      estimatedDeliveryDate,
+      message: 'Shipping details updated successfully.',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to update shipping details' });
+  }
+});
+
+// Customer Public Tracking Route
+app.get('/api/orders/:orderNumber', async (req: Request, res: Response) => {
+  try {
+    const { orderNumber } = req.params;
+
+    if (serverOrdersStore.has(orderNumber)) {
+      return res.json({ success: true, order: serverOrdersStore.get(orderNumber) });
+    }
+
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*, order_items(*), payment_records(*)')
+        .eq('order_number', orderNumber)
+        .maybeSingle();
+
+      if (!error && data) {
+        return res.json({ success: true, order: data });
+      }
+    }
+
+    return res.status(404).json({ error: 'Order not found' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to track order' });
   }
 });
 

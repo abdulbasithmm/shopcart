@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
 import {
   Globe,
-  Lock,
-  ShieldCheck,
   Truck,
   RotateCcw,
   Headphones,
@@ -15,10 +13,9 @@ import { AmazonLogo } from './AmazonLogo';
 
 interface FooterProps {
   onNavigate: (page: PageView, params?: { category?: string }) => void;
-  onOpenSupabaseModal?: () => void;
 }
 
-export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenSupabaseModal }) => {
+export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
   const { showToast } = useToast();
   const [email, setEmail] = useState('');
   const [subscribed, setSubscribed] = useState(false);
