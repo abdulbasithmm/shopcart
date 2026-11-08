@@ -68,13 +68,15 @@ function parseCurrentRoute(): { page: PageView; productId?: string; adminSection
     return { page: 'admin', adminSection: 'dashboard' };
   }
 
-  // 3. Admin Login route: /admin/login or /admin-login or #/admin/login or #admin/login or #admin-login
+  // 3. Admin Login route: /admin/login or /admin-login or #/admin/login or #admin/login or #admin-login or query-appended hashes
   if (
     pathname === '/admin/login' ||
     pathname === '/admin-login' ||
     hash === 'admin/login' ||
     hash === '/admin/login' ||
-    hash === 'admin-login'
+    hash === 'admin-login' ||
+    hash.includes('admin/login') ||
+    hash.includes('admin-login')
   ) {
     return { page: 'admin-login' };
   }
@@ -155,18 +157,40 @@ function AppContent() {
 
   // Synchronize with URL pathname and hash for browser back/forward and direct links
   useEffect(() => {
-    // Normalize URL if duplicate hash is present (e.g., /admin/dashboard#/admin/dashboard)
-    try {
-      const rawHash = window.location.hash;
-      const rawPath = window.location.pathname;
-      if (rawHash && rawPath.startsWith('/admin') && (rawHash.includes('admin') || rawHash.includes('dashboard'))) {
-        window.history.replaceState(null, '', rawPath);
+    // Canonical URL normalization (e.g., converts https://shopcart-olive.vercel.app/?utm_source=chatgpt.com#/admin/login to https://shopcart-olive.vercel.app/admin/login)
+    const normalizeUrl = () => {
+      try {
+        const rawHash = (window.location.hash || '').toLowerCase();
+        const rawPath = (window.location.pathname || '/').toLowerCase();
+        const rawSearch = window.location.search || '';
+
+        if (rawHash.includes('admin/login') || rawHash.includes('admin-login')) {
+          if (window.location.pathname !== '/admin/login' || rawHash || rawSearch) {
+            window.history.replaceState(null, '', '/admin/login');
+          }
+        } else if (
+          rawHash.includes('admin/dashboard') ||
+          rawHash === '#admin' ||
+          rawHash === '#/admin' ||
+          (rawPath.startsWith('/admin') && rawHash.includes('admin'))
+        ) {
+          const target = rawPath.startsWith('/admin') && rawPath !== '/admin' ? rawPath : '/admin/dashboard';
+          window.history.replaceState(null, '', target);
+        } else if (rawHash.includes('admin/')) {
+          const secMatch = rawHash.match(/admin\/([a-z-]+)/);
+          if (secMatch && secMatch[1]) {
+            window.history.replaceState(null, '', `/admin/${secMatch[1]}`);
+          }
+        }
+      } catch {
+        // Ignore in restricted iframes
       }
-    } catch {
-      // Ignore
-    }
+    };
+
+    normalizeUrl();
 
     const handleLocationChange = () => {
+      normalizeUrl();
       const route = parseCurrentRoute();
       setCurrentPage(route.page);
       if (route.productId) {

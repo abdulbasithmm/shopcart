@@ -78,7 +78,9 @@ function simulateParseRoute(rawPath: string, rawHash: string = ''): { page: stri
     pathname === '/admin-login' ||
     hash === 'admin/login' ||
     hash === '/admin/login' ||
-    hash === 'admin-login'
+    hash === 'admin-login' ||
+    hash.includes('admin/login') ||
+    hash.includes('admin-login')
   ) {
     return { page: 'admin-login' };
   }
@@ -117,12 +119,38 @@ function simulateParseRoute(rawPath: string, rawHash: string = ''): { page: stri
   return { page: 'home' };
 }
 
+// Canonical URL Normalizer simulation
+function simulateCanonicalNormalizer(urlStr: string): string {
+  const url = new URL(urlStr, 'https://shopcart-olive.vercel.app');
+  const rawHash = (url.hash || '').toLowerCase();
+  const rawPath = (url.pathname || '/').toLowerCase();
+
+  if (rawHash.includes('admin/login') || rawHash.includes('admin-login')) {
+    return 'https://shopcart-olive.vercel.app/admin/login';
+  } else if (
+    rawHash.includes('admin/dashboard') ||
+    rawHash === '#admin' ||
+    rawHash === '#/admin' ||
+    (rawPath.startsWith('/admin') && rawHash.includes('admin'))
+  ) {
+    const target = rawPath.startsWith('/admin') && rawPath !== '/admin' ? rawPath : '/admin/dashboard';
+    return `https://shopcart-olive.vercel.app${target}`;
+  } else if (rawHash.includes('admin/')) {
+    const secMatch = rawHash.match(/admin\/([a-z-]+)/);
+    if (secMatch && secMatch[1]) {
+      return `https://shopcart-olive.vercel.app/admin/${secMatch[1]}`;
+    }
+  }
+  return url.origin + url.pathname;
+}
+
 // Test cases
 const testCases = [
   { path: '/admin/login', hash: '', expectedPage: 'admin-login', label: 'Direct /admin/login' },
   { path: '/admin-login', hash: '', expectedPage: 'admin-login', label: 'Direct /admin-login' },
   { path: '/', hash: '#/admin/login', expectedPage: 'admin-login', label: 'Hash #/admin/login' },
   { path: '/', hash: '#admin-login', expectedPage: 'admin-login', label: 'Hash #admin-login' },
+  { path: '/?utm_source=chatgpt.com', hash: '#/admin/login', expectedPage: 'admin-login', label: 'ChatGPT Referral /?utm_source=chatgpt.com#/admin/login' },
   { path: '/admin', hash: '', expectedPage: 'admin', expectedSec: 'dashboard', label: 'Direct /admin' },
   { path: '/admin/dashboard', hash: '', expectedPage: 'admin', expectedSec: 'dashboard', label: 'Direct /admin/dashboard' },
   { path: '/admin/dashboard', hash: '#/admin/dashboard', expectedPage: 'admin', expectedSec: 'dashboard', label: 'Legacy duplicate /admin/dashboard#/admin/dashboard' },
@@ -145,6 +173,13 @@ for (const tc of testCases) {
   const secMatch = tc.expectedSec ? result.adminSection === tc.expectedSec : true;
   assert(pageMatch && secMatch, `${tc.label} -> page: '${result.page}', section: '${result.adminSection || '-'}'`);
 }
+
+// Canonical URL transformation verification
+const normalizedChatGPTUrl = simulateCanonicalNormalizer('https://shopcart-olive.vercel.app/?utm_source=chatgpt.com#/admin/login');
+assert(
+  normalizedChatGPTUrl === 'https://shopcart-olive.vercel.app/admin/login',
+  `Canonical Normalizer transforms https://shopcart-olive.vercel.app/?utm_source=chatgpt.com#/admin/login -> ${normalizedChatGPTUrl}`
+);
 
 // -------------------------------------------------------------
 // 4. Verify Admin Guard & Role Checks in Codebase
