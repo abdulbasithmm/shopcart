@@ -34,13 +34,24 @@ if (fs.existsSync(vercelConfigPath)) {
 
   if (parsed) {
     assert(Array.isArray(parsed.rewrites), 'vercel.json contains rewrites array');
-    const spaRewrite = parsed.rewrites?.find(
-      (r: any) => (r.source === '/(.*)' || r.source === '/:path*') && r.destination === '/index.html'
+    const adminLoginRewrite = parsed.rewrites?.find(
+      (r: any) => r.source === '/admin/login' && r.destination === '/index.html'
     );
-    assert(!!spaRewrite, 'vercel.json rewrites all client routes to /index.html (fixes Vercel 404)');
-    assert(parsed.cleanUrls === true, 'vercel.json has cleanUrls enabled');
+    assert(!!adminLoginRewrite, 'vercel.json has explicit rewrite for /admin/login -> /index.html');
+    const adminCatchAllRewrite = parsed.rewrites?.find(
+      (r: any) => r.source === '/admin/:match*' && r.destination === '/index.html'
+    );
+    assert(!!adminCatchAllRewrite, 'vercel.json has explicit rewrite for /admin/:match* -> /index.html');
+    const wildcardRewrite = parsed.rewrites?.find(
+      (r: any) => (r.source === '/(.*)' || r.source?.includes('(?!api/')) && r.destination === '/index.html'
+    );
+    assert(!!wildcardRewrite, 'vercel.json rewrites wildcard client routes to /index.html (fixes Vercel 404)');
   }
 }
+
+// Check public/vercel.json
+const publicVercelJson = path.resolve(process.cwd(), 'public/vercel.json');
+assert(fs.existsSync(publicVercelJson), 'public/vercel.json exists for dist/ bundling');
 
 // -------------------------------------------------------------
 // 2. Validate public/_redirects Static Fallback

@@ -499,6 +499,35 @@ export async function fetchAllAdminOrders(): Promise<Order[]> {
       return localOrders;
     }
 
+    if (data && data.length > 0) {
+      const missingProdIds = new Set<string>();
+      data.forEach((o: any) => {
+        (o.order_items || []).forEach((it: any) => {
+          if (it.product_id && !it.product_image) missingProdIds.add(it.product_id);
+        });
+      });
+      if (missingProdIds.size > 0) {
+        try {
+          const { data: prods } = await supabase
+            .from('products')
+            .select('id, name, price, image_url, images')
+            .in('id', Array.from(missingProdIds));
+          if (prods) {
+            const pMap = new Map(prods.map((p) => [p.id, p]));
+            data.forEach((o: any) => {
+              (o.order_items || []).forEach((it: any) => {
+                if (it.product_id && !it.product) {
+                  it.product = pMap.get(it.product_id);
+                }
+              });
+            });
+          }
+        } catch {
+          // Ignore
+        }
+      }
+    }
+
     const remoteOrders = (data || []).map(normalizeOrderRecord);
     const orderMap = new Map<string, Order>();
     localOrders.forEach((o) => orderMap.set(o.order_number, o));
@@ -517,17 +546,75 @@ export async function fetchAllAdminOrders(): Promise<Order[]> {
  */
 function normalizeOrderRecord(row: any): Order {
   const normStatus = normalizeOrderStatus(row.status);
-  const payRecord = row.payment_records?.[0] || {};
+  const payRecord = (row.payment_records && row.payment_records[0]) || {};
   const shipAddr = row.shipping_address || {};
+
+  // Normalize ordered items with images, IDs, quantities, and prices
+  const rawItems = Array.isArray(row.order_items) ? row.order_items : [];
+  const normalizedItems = rawItems.map((it: any) => {
+    const prod = it.product || {};
+    const img =
+      it.product_image ||
+      prod.image_url ||
+      (Array.isArray(prod.images) && prod.images.length > 0 ? prod.images[0] : null) ||
+      null;
+
+    const unitPrice = Number(it.unit_price || prod.price || 0);
+    const qty = Number(it.quantity || 1);
+    const totalPrice = Number(it.total_price || (unitPrice * qty) || 0);
+
+    return {
+      id: it.id,
+      order_id: it.order_id,
+      product_id: it.product_id || prod.id,
+      product_name: it.product_name || prod.name || 'Product',
+      product_image: img,
+      unit_price: unitPrice,
+      quantity: qty,
+      total_price: totalPrice,
+      line_total: totalPrice,
+      selected_color: it.selectedColor || it.selected_color || null,
+      selected_size: it.selectedSize || it.selected_size || null,
+      product: prod,
+    };
+  });
+
+  // Strict payment status: never automatically mark pending as verified
+  const rawPayStatus = row.payment_status || row.paymentStatus || payRecord.payment_status;
+  const paymentStatus = rawPayStatus || 'pending_admin_verification';
+
+  // Normalize full customer delivery address
+  const cleanAddress = {
+    fullName: row.customer_name || shipAddr.fullName || shipAddr.name || row.guest_email || 'Customer',
+    phone: row.customer_phone || shipAddr.phone || shipAddr.mobile || '',
+    email: row.customer_email || shipAddr.email || row.guest_email || '',
+    houseBuilding: shipAddr.houseBuilding || shipAddr.apartment || '',
+    streetArea: shipAddr.streetArea || shipAddr.street || '',
+    street: shipAddr.street || shipAddr.streetArea || '',
+    apartment: shipAddr.apartment || shipAddr.houseBuilding || '',
+    city: shipAddr.city || '',
+    state: shipAddr.state || '',
+    postalCode: shipAddr.pinCode || shipAddr.postalCode || '',
+    pinCode: shipAddr.pinCode || shipAddr.postalCode || '',
+    country: shipAddr.country || 'India',
+    landmark: shipAddr.landmark || '',
+    deliveryInstructions: shipAddr.deliveryInstructions || shipAddr.instructions || row.customer_notes || '',
+  };
 
   return {
     ...row,
-    customer_name: row.customer_name || shipAddr.fullName || row.guest_email || 'Customer',
-    customer_email: row.customer_email || shipAddr.email || row.guest_email || null,
-    customer_phone: row.customer_phone || shipAddr.phone || null,
+    customer_name: cleanAddress.fullName,
+    customer_email: cleanAddress.email || null,
+    customer_phone: cleanAddress.phone || null,
     status: normStatus,
+    subtotal: Number(row.subtotal || (Number(row.total_amount || 0) - Number(row.shipping_fee || 0))),
+    shipping_fee: Number(row.shipping_fee || 0),
+    discount_amount: Number(row.discount_amount || 0),
+    tax_amount: Number(row.tax_amount || 0),
+    total_amount: Number(row.total_amount || 0),
+    order_items: normalizedItems,
     paymentMethod: row.payment_method || row.paymentMethod || payRecord.payment_method || 'all_upi',
-    paymentStatus: row.payment_status || row.paymentStatus || payRecord.payment_status || (normStatus === 'confirmed' || normStatus === 'shipped' || normStatus === 'delivered' ? 'verified' : 'pending_admin_verification'),
+    paymentStatus,
     transactionReference: row.transaction_reference || row.transactionReference || payRecord.transaction_reference || null,
     screenshot_url: row.screenshot_url || payRecord.screenshot_url || null,
     ai_analysis: row.ai_analysis || payRecord.ai_analysis || null,
@@ -537,10 +624,10 @@ function normalizeOrderRecord(row: any): Order {
     verified_at: row.verified_at || payRecord.verified_at || null,
     verified_by: row.verified_by || payRecord.verified_by || null,
     rejection_reason: row.rejection_reason || payRecord.rejection_reason || null,
-    shipping_address: shipAddr,
+    shipping_address: cleanAddress,
     shipment_updates: Array.isArray(row.shipment_updates) && row.shipment_updates.length > 0
       ? row.shipment_updates
-      : createInitialShipmentUpdates(new Date(row.created_at || Date.now()), payRecord.payment_status === 'verified'),
+      : createInitialShipmentUpdates(new Date(row.created_at || Date.now()), paymentStatus === 'verified'),
   };
 }
 

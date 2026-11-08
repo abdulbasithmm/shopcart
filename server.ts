@@ -566,23 +566,107 @@ app.get('/api/admin/orders', async (_req: Request, res: Response) => {
     // 2. Query Supabase PostgreSQL if connected
     if (supabase) {
       try {
-        const { data: dbOrders, error: ordErr } = await supabase
+        // Query orders with items and payment records
+        let dbOrders: any[] | null = null;
+
+        // Try primary join with products
+        const { data: joinedOrders, error: ordErr } = await supabase
           .from('orders')
-          .select('*, order_items(*), payment_records(*)')
+          .select('*, order_items(*, product:products(id, name, price, image_url, images, category_name)), payment_records(*)')
           .order('created_at', { ascending: false });
 
-        if (ordErr) {
-          console.warn('Error querying orders in /api/admin/orders:', ordErr.message);
-        } else if (dbOrders) {
+        if (!ordErr && joinedOrders) {
+          dbOrders = joinedOrders;
+        } else {
+          // Fallback if nested products join syntax varies
+          const { data: baseOrders, error: baseErr } = await supabase
+            .from('orders')
+            .select('*, order_items(*), payment_records(*)')
+            .order('created_at', { ascending: false });
+          if (!baseErr && baseOrders) {
+            dbOrders = baseOrders;
+          } else {
+            console.warn('Error querying orders in /api/admin/orders:', ordErr?.message || baseErr?.message);
+          }
+        }
+
+        if (dbOrders && dbOrders.length > 0) {
+          // Fetch associated customer profiles
+          const userIds = Array.from(new Set(dbOrders.map((o: any) => o.user_id).filter(Boolean)));
+          const profileMap = new Map<string, any>();
+          if (userIds.length > 0) {
+            try {
+              const { data: profs } = await supabase
+                .from('profiles')
+                .select('id, full_name, email, phone, role, avatar_url, shipping_address')
+                .in('id', userIds);
+              if (profs) {
+                profs.forEach((p: any) => profileMap.set(p.id, p));
+              }
+            } catch (pErr) {
+              console.warn('Profiles query warning in /api/admin/orders:', pErr);
+            }
+          }
+
+          // Fetch products for items missing nested product data
+          const missingProductIds = new Set<string>();
+          dbOrders.forEach((o: any) => {
+            (o.order_items || []).forEach((it: any) => {
+              if (it.product_id && (!it.product || !it.product.image_url)) {
+                missingProductIds.add(it.product_id);
+              }
+            });
+          });
+
+          const productLookup = new Map<string, any>();
+          if (missingProductIds.size > 0) {
+            try {
+              const { data: prods } = await supabase
+                .from('products')
+                .select('id, name, price, image_url, images, category_name')
+                .in('id', Array.from(missingProductIds));
+              if (prods) {
+                prods.forEach((p: any) => productLookup.set(p.id, p));
+              }
+            } catch (prodErr) {
+              console.warn('Products lookup warning in /api/admin/orders:', prodErr);
+            }
+          }
+
           dbOrders.forEach((row: any) => {
             const pay = row.payment_records?.[0] || {};
             const shipAddr = row.shipping_address || {};
+            const custProfile = row.user_id ? profileMap.get(row.user_id) : null;
+
+            // Normalize items with complete product details and images
+            const normalizedItems = (row.order_items || []).map((it: any) => {
+              const prod = it.product || productLookup.get(it.product_id) || {};
+              const firstImg =
+                it.product_image ||
+                prod.image_url ||
+                (Array.isArray(prod.images) ? prod.images[0] : null) ||
+                '/placeholder-product.png';
+
+              return {
+                ...it,
+                product_id: it.product_id || prod.id,
+                product_name: it.product_name || prod.name || 'Shopcart Product',
+                product_image: firstImg,
+                unit_price: Number(it.unit_price || prod.price || 0),
+                quantity: Number(it.quantity || 1),
+                total_price: Number(it.total_price || (it.unit_price * it.quantity) || 0),
+                subtotal: Number(it.total_price || (it.unit_price * it.quantity) || 0),
+                product: prod,
+              };
+            });
 
             const normalizedOrder = {
               ...row,
-              customer_name: row.customer_name || shipAddr.fullName || row.guest_email || 'Customer',
-              customer_email: row.customer_email || shipAddr.email || row.guest_email || '',
-              customer_phone: row.customer_phone || shipAddr.phone || '',
+              customer_name: row.customer_name || shipAddr.fullName || custProfile?.full_name || row.guest_email || 'Customer',
+              customer_email: row.customer_email || shipAddr.email || custProfile?.email || row.guest_email || '',
+              customer_phone: row.customer_phone || shipAddr.phone || custProfile?.phone || '',
+              customer_profile: custProfile,
+              order_items: normalizedItems,
               paymentMethod: row.payment_method || pay.payment_method || 'all_upi',
               paymentStatus: row.payment_status || pay.payment_status || 'pending_admin_verification',
               transactionReference: row.transaction_reference || pay.transaction_reference || null,
