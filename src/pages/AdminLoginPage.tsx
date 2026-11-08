@@ -22,7 +22,7 @@ interface AdminLoginPageProps {
 }
 
 export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onNavigate }) => {
-  const { quickDemoLogin, refreshProfile } = useAuth();
+  const { user, isAdmin, isLoading: authLoading, quickDemoLogin, refreshProfile } = useAuth();
   const { showToast } = useToast();
 
   const [email, setEmail] = useState('');
@@ -33,6 +33,13 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onNavigate }) =>
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
+
+  // If already authenticated with admin role, automatically transition to dashboard
+  React.useEffect(() => {
+    if (!authLoading && user && (isAdmin || user.role === 'admin')) {
+      onNavigate('admin');
+    }
+  }, [authLoading, user, isAdmin, onNavigate]);
 
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();

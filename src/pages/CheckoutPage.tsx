@@ -316,9 +316,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         email: prev.email || user.email,
         phone: prev.phone || user.phone || '',
         address: prev.address || user.address?.street || '',
-        city: prev.city || user.address?.city || '',
-        state: prev.state || user.address?.state || 'Karnataka',
         city: prev.city || user.address?.city || 'Bengaluru',
+        state: prev.state || user.address?.state || 'Karnataka',
         pinCode: prev.pinCode || user.address?.zipCode || '560038',
         country: 'India',
       }));

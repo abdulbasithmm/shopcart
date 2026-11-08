@@ -26,14 +26,16 @@ import { AdminPage, AdminSection } from './pages/AdminPage';
 import { AdminLoginPage } from './pages/AdminLoginPage';
 import { AccessDeniedPage } from './pages/AccessDeniedPage';
 
-// Helper to parse current browser URL (supporting both single-domain /admin/* and admin.* subdomains)
+// Helper to parse current browser URL (supporting single-domain /admin/*, hash fallbacks, and admin.* subdomains)
 function parseCurrentRoute(): { page: PageView; productId?: string; adminSection?: AdminSection } {
   if (typeof window === 'undefined') return { page: 'home' };
 
   const hostname = window.location.hostname.toLowerCase();
   const isAdminSubdomain = hostname.startsWith('admin.');
-  const pathname = window.location.pathname.toLowerCase().replace(/\/$/, '');
-  const hash = window.location.hash.toLowerCase().replace(/^#\/?/, '').replace(/\/$/, '');
+  const rawPath = window.location.pathname.toLowerCase();
+  const pathname = rawPath.split('?')[0].replace(/\/+$/, '') || '/';
+  const rawHash = window.location.hash.toLowerCase();
+  const hash = rawHash.split('?')[0].replace(/^#\/?/, '').replace(/\/+$/, '');
 
   // 1. Password recovery
   if (hash.includes('type=recovery') || hash.startsWith('reset-password') || pathname.startsWith('/reset-password')) {
@@ -66,23 +68,20 @@ function parseCurrentRoute(): { page: PageView; productId?: string; adminSection
     return { page: 'admin', adminSection: 'dashboard' };
   }
 
-  // 3. Admin Login route: /admin/login or #/admin/login or #admin-login
+  // 3. Admin Login route: /admin/login or /admin-login or #/admin/login or #admin/login or #admin-login
   if (
     pathname === '/admin/login' ||
     pathname === '/admin-login' ||
     hash === 'admin/login' ||
+    hash === '/admin/login' ||
     hash === 'admin-login'
   ) {
     return { page: 'admin-login' };
   }
 
-  // 4. Admin section routes: /admin/dashboard, /admin/orders, /admin/products, etc.
-  if (pathname === '/admin/dashboard' || pathname === '/admin') {
-    return { page: 'admin', adminSection: 'dashboard' };
-  }
-
+  // 4. Admin section routes helper: /admin, /admin/dashboard, /admin/orders, etc.
   const checkAdminSection = (pathStr: string): AdminSection | null => {
-    const clean = pathStr.replace(/^\//, '');
+    const clean = pathStr.replace(/^#\/?/, '').replace(/^\//, '').replace(/\/+$/, '');
     if (clean === 'admin' || clean === 'admin/dashboard') return 'dashboard';
     if (clean === 'admin/orders') return 'orders';
     if (clean === 'admin/products') return 'products';
@@ -156,6 +155,17 @@ function AppContent() {
 
   // Synchronize with URL pathname and hash for browser back/forward and direct links
   useEffect(() => {
+    // Normalize URL if duplicate hash is present (e.g., /admin/dashboard#/admin/dashboard)
+    try {
+      const rawHash = window.location.hash;
+      const rawPath = window.location.pathname;
+      if (rawHash && rawPath.startsWith('/admin') && (rawHash.includes('admin') || rawHash.includes('dashboard'))) {
+        window.history.replaceState(null, '', rawPath);
+      }
+    } catch {
+      // Ignore
+    }
+
     const handleLocationChange = () => {
       const route = parseCurrentRoute();
       setCurrentPage(route.page);
@@ -222,7 +232,6 @@ function AppContent() {
 
     try {
       window.history.pushState(null, '', targetPath);
-      window.location.hash = targetHash;
     } catch {
       window.location.hash = targetHash;
     }
@@ -245,7 +254,6 @@ function AppContent() {
     setCurrentPage('shop');
     try {
       window.history.pushState(null, '', '/shop');
-      window.location.hash = 'shop';
     } catch {
       window.location.hash = 'shop';
     }
@@ -326,7 +334,6 @@ function AppContent() {
                 const secPath = sec === 'settings' ? 'profile' : sec;
                 try {
                   window.history.pushState(null, '', `/admin/${secPath}`);
-                  window.location.hash = `/admin/${secPath}`;
                 } catch {
                   window.location.hash = `/admin/${secPath}`;
                 }

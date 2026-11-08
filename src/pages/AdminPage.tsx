@@ -129,7 +129,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     const secPath = sec === 'settings' ? 'profile' : sec;
     try {
       window.history.pushState(null, '', `/admin/${secPath}`);
-      window.location.hash = `/admin/${secPath}`;
     } catch {
       window.location.hash = `/admin/${secPath}`;
     }
