@@ -176,9 +176,10 @@ export const ShopPage: React.FC<ShopPageProps> = ({
         return b.id.localeCompare(a.id);
       }
       // 'popularity' (Default)
-      const aScore = (a.isBestSeller ? 100 : 0) + a.rating * 10 + a.reviewsCount * 0.1;
-      const bScore = (b.isBestSeller ? 100 : 0) + b.rating * 10 + b.reviewsCount * 0.1;
-      return bScore - aScore;
+      const aScore = (a.isBestSeller ? 100 : 0) + (a.isNewArrival ? 80 : 0) + (a.isFeatured ? 50 : 0) + a.rating * 10 + a.reviewsCount * 0.1;
+      const bScore = (b.isBestSeller ? 100 : 0) + (b.isNewArrival ? 80 : 0) + (b.isFeatured ? 50 : 0) + b.rating * 10 + b.reviewsCount * 0.1;
+      if (bScore !== aScore) return bScore - aScore;
+      return b.id.localeCompare(a.id);
     });
   }, [selectedCategory, searchQuery, selectedBrands, minPrice, maxPrice, minRating, inStockOnly, sortBy]);
 

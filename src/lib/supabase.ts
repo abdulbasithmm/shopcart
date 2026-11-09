@@ -29,8 +29,8 @@ try {
   // Ignore in SSR / strict sandbox
 }
 
-export const SUPABASE_URL = cachedUrl || envUrl;
-export const SUPABASE_ANON_KEY = cachedKey || envKey;
+export const SUPABASE_URL = cachedUrl || envUrl || 'https://kciglyawyagwtgkwsxau.supabase.co';
+export const SUPABASE_ANON_KEY = cachedKey || envKey || 'sb_publishable_9KTWhKGnHHGRmtmkaYz1eg_ib2A0bUp';
 
 // Validation helper
 export const isSupabaseConfigured = (): boolean => {

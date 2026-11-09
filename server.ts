@@ -30,8 +30,8 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 }
 
 // Supabase client initialization for server-side operations
-const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://kciglyawyagwtgkwsxau.supabase.co';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_9KTWhKGnHHGRmtmkaYz1eg_ib2A0bUp';
 const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
 
 // Server-side Gemini AI initialization (using official @google/genai SDK)
@@ -547,6 +547,122 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Exception in /api/orders/create:', err);
     return res.status(500).json({ error: err.message || 'Internal server error creating order' });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// PRODUCT MANAGEMENT APIS (Public & Admin)
+// Storefront -> /api/products -> Supabase PostgreSQL
+// Admin Dashboard -> /api/admin/products -> Supabase PostgreSQL
+// -----------------------------------------------------------------------------
+
+// Public: Fetch active products with inventory
+app.get('/api/products', async (_req: Request, res: Response) => {
+  try {
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*, inventory(stock_count)')
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
+
+      if (!error && data) {
+        return res.json({ products: data, source: 'supabase' });
+      }
+    }
+    return res.json({ products: [], source: 'fallback' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin: Fetch all products (active and inactive), newest first
+app.get('/api/admin/products', async (_req: Request, res: Response) => {
+  try {
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*, inventory(stock_count)')
+        .order('created_at', { ascending: false });
+
+      if (!error && data) {
+        return res.json({ products: data, source: 'supabase' });
+      }
+      if (error) {
+        return res.status(500).json({ error: error.message });
+      }
+    }
+    return res.json({ products: [], source: 'fallback' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin: Create product
+app.post('/api/admin/products', async (req: Request, res: Response) => {
+  try {
+    if (!supabase) {
+      return res.status(503).json({ error: 'Supabase client is not initialized on server' });
+    }
+
+    const { productRow, stock = 10 } = req.body;
+    if (!productRow || !productRow.name) {
+      return res.status(400).json({ error: 'Missing required product information' });
+    }
+
+    const prodId = productRow.id || `eko-prod-${Date.now()}`;
+    const payload = {
+      ...productRow,
+      id: prodId,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: inserted, error: prodErr } = await supabase
+      .from('products')
+      .insert(payload)
+      .select('*, inventory(stock_count)')
+      .maybeSingle();
+
+    if (prodErr) {
+      return res.status(400).json({ error: prodErr.message });
+    }
+
+    await supabase.from('inventory').upsert(
+      {
+        product_id: prodId,
+        stock_count: stock,
+        low_stock_threshold: 5,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'product_id' }
+    );
+
+    return res.json({ success: true, product: inserted || payload });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin: Delete product
+app.delete('/api/admin/products/:id', async (req: Request, res: Response) => {
+  try {
+    if (!supabase) {
+      return res.status(503).json({ error: 'Supabase client is not initialized on server' });
+    }
+    const productId = req.params.id;
+    try {
+      await supabase.from('inventory').delete().eq('product_id', productId);
+    } catch {
+      // ignore
+    }
+    const { error } = await supabase.from('products').delete().eq('id', productId);
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
   }
 });
 

@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { Product, PageView } from '../types';
 import { PRODUCTS, CATEGORIES } from '../data/mockData';
+import { fetchProducts } from '../services/productService';
 import { ProductImage } from '../components/common/ProductImage';
 import { useCart } from '../context/CartContext';
 import { useToast } from '../context/ToastContext';
@@ -53,8 +54,34 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onQuickView }) =
     return () => clearInterval(interval);
   }, [isHeroHovered]);
 
-  // Today's Deals from products
-  const todaysDeals = PRODUCTS.filter((p) => p.isSpecialOffer);
+  // Live Supabase products state
+  const [allProducts, setAllProducts] = useState<Product[]>(PRODUCTS);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadLiveProducts() {
+      setIsLoadingProducts(true);
+      try {
+        const res = await fetchProducts();
+        if (isMounted && res.products && res.products.length > 0) {
+          setAllProducts(res.products);
+        }
+      } catch (err) {
+        console.warn('Could not fetch live products for homepage:', err);
+      } finally {
+        if (isMounted) setIsLoadingProducts(false);
+      }
+    }
+    loadLiveProducts();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Today's Deals from live products
+  const specialOffers = allProducts.filter((p) => p.isSpecialOffer);
+  const todaysDeals = specialOffers.length > 0 ? specialOffers : allProducts.slice(0, 8);
   const dealsPerPage = 5;
   const totalDealsPages = Math.ceil(todaysDeals.length / dealsPerPage);
   const currentDeals = todaysDeals.slice(dealsPage * dealsPerPage, (dealsPage + 1) * dealsPerPage);
@@ -215,7 +242,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onQuickView }) =
                     title="AeroTune Studio Headphones"
                   >
                     <ProductImage
-                      product={PRODUCTS.find((p) => p.visualType === 'headphones') || PRODUCTS[0]}
+                      product={allProducts.find((p) => p.visualType === 'headphones') || allProducts[0]}
                       size="sm"
                       showBadge={false}
                     />
@@ -228,7 +255,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onQuickView }) =
                     title="Noise ColorFit Pro 4 Smartwatch"
                   >
                     <ProductImage
-                      product={PRODUCTS.find((p) => p.id === 'deal-prod-2') || PRODUCTS[1]}
+                      product={allProducts.find((p) => p.id === 'deal-prod-2') || allProducts[1]}
                       size="sm"
                       showBadge={false}
                     />
@@ -241,7 +268,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onQuickView }) =
                     title="Philips Kitchen Blender"
                   >
                     <ProductImage
-                      product={PRODUCTS.find((p) => p.visualType === 'blender') || PRODUCTS[7]}
+                      product={allProducts.find((p) => p.visualType === 'blender') || allProducts[7]}
                       size="sm"
                       showBadge={false}
                     />
@@ -807,7 +834,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onQuickView }) =
         </ScrollReveal>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
-          {PRODUCTS.slice(5).map((prod, idx) => (
+          {allProducts.slice(0, 12).map((prod, idx) => (
             <ScrollReveal
               key={prod.id}
               animation="fade-up"

@@ -69,6 +69,7 @@ import {
   deleteAdminProduct,
   updateAdminStock,
   fetchProducts,
+  fetchAdminProducts,
 } from '../services/productService';
 import { ProductImageGalleryEditor } from '../components/admin/ProductImageGalleryEditor';
 import {
@@ -297,8 +298,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         const adminOrders = await fetchAllAdminOrders();
         setOrders(adminOrders);
 
-        // 2. Fetch Products
-        const prodRes = await fetchProducts();
+        // 2. Fetch Products for Admin (all products including drafts, ordered newest first)
+        const prodRes = await fetchAdminProducts();
         if (prodRes.products && prodRes.products.length > 0) {
           setProducts(prodRes.products);
         }
@@ -928,7 +929,26 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         Number(prodForm.stockCount)
       );
 
-      if (res.success) {
+      if (res.success && res.product) {
+        showToast(`Product "${res.product.name}" created and synced with Supabase!`, 'success');
+        setProducts((prev) => [res.product!, ...prev.filter((p) => p.id !== res.product!.id)]);
+        setIsAddProductOpen(false);
+        setProdImages(['', '', '', '']);
+        setProdForm({
+          name: '',
+          brand: '',
+          category: 'Electronics',
+          price: 99.99,
+          originalPrice: 129.99,
+          discountPercentage: 23,
+          stockCount: 15,
+          visualType: 'headphones',
+          badge: 'New',
+          shortDescription: '',
+          fullDescription: '',
+        });
+        loadAdminData();
+      } else if (res.success) {
         showToast(`Product "${prodForm.name}" created and synced with Supabase!`, 'success');
         setIsAddProductOpen(false);
         setProdImages(['', '', '', '']);
@@ -947,7 +967,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         });
         loadAdminData();
       } else {
-        showToast(res.error || 'Failed to create product', 'error');
+        showToast(res.error || 'Failed to create product in database', 'error');
       }
     } catch (err: any) {
       showToast(err.message || 'Error saving product', 'error');
@@ -982,6 +1002,17 @@ export const AdminPage: React.FC<AdminPageProps> = ({
 
       if (res.success) {
         showToast(`Product "${editingProduct.name}" updated successfully!`, 'success');
+        if (res.product) {
+          setProducts((prev) => prev.map((p) => (p.id === editingProduct.id ? res.product! : p)));
+        } else {
+          setProducts((prev) =>
+            prev.map((p) =>
+              p.id === editingProduct.id
+                ? { ...p, ...editingProduct, images: cleanImages, image: cleanImages[0] }
+                : p
+            )
+          );
+        }
         setEditingProduct(null);
         setEditingProductImages(['', '', '', '']);
         loadAdminData();
@@ -1000,6 +1031,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       const res = await deleteAdminProduct(deletingProductId);
       if (res.success) {
         showToast('Product removed from catalog', 'success');
+        setProducts((prev) => prev.filter((p) => p.id !== deletingProductId));
         setDeletingProductId(null);
         loadAdminData();
       } else {
