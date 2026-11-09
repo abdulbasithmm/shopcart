@@ -1,0 +1,58 @@
+{
+  "packageId": "com.shopcart.app",
+  "host": "shopcart-olive.vercel.app",
+  "name": "ShopCart — Online Shopping Marketplace",
+  "launcherName": "ShopCart",
+  "themeColor": "#0b5c37",
+  "themeColorDark": "#042c18",
+  "navigationColor": "#0b5c37",
+  "navigationColorDark": "#042c18",
+  "navigationDividerColor": "#00000000",
+  "navigationDividerColorDark": "#00000000",
+  "backgroundColor": "#ffffff",
+  "enableNotifications": true,
+  "startUrl": "/",
+  "iconUrl": "https://shopcart-olive.vercel.app/pwa-512x512.png",
+  "maskableIconUrl": "https://shopcart-olive.vercel.app/pwa-maskable-512x512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./android.keystore",
+    "alias": "shopcart"
+  },
+  "appVersionCode": 1,
+  "appVersionName": "1.0.0",
+  "shortcuts": [
+    {
+      "name": "Shop Catalog",
+      "shortName": "Shop",
+      "url": "/shop",
+      "chosenIconUrl": "https://shopcart-olive.vercel.app/pwa-192x192.png"
+    },
+    {
+      "name": "My Orders",
+      "shortName": "Orders",
+      "url": "/account",
+      "chosenIconUrl": "https://shopcart-olive.vercel.app/pwa-192x192.png"
+    }
+  ],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://shopcart-olive.vercel.app/manifest.json",
+  "fallbackType": "customtabs",
+  "features": {
+    "locationDelegation": {
+      "enabled": false
+    },
+    "playBilling": {
+      "enabled": false
+    }
+  },
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://shopcart-olive.vercel.app/",
+  "minSdkVersion": 21,
+  "targetSdkVersion": 34
+}

@@ -22,6 +22,7 @@ import { PageView } from '../../types';
 import { PRODUCTS, CATEGORIES } from '../../data/mockData';
 import { AmazonLogo } from './AmazonLogo';
 import { formatPrice } from '../../utils/format';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface HeaderProps {
   currentPage: PageView;
@@ -227,6 +228,9 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Desktop Right Action Cluster: Flag, Account, Orders, Cart (shown on md+) */}
           <div className="hidden md:flex items-center gap-2 sm:gap-4 shrink-0 text-slate-800">
+            {/* PWA In-App Install Prompt */}
+            <PWAInstallButton variant="header" />
+
             {/* Language / Country Selector: Indian Flag EN */}
             <div className="relative hidden lg:block">
               <button
@@ -427,6 +431,11 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <X className="w-6 h-6" />
               </button>
+            </div>
+
+            {/* Mobile PWA Install CTA */}
+            <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-100">
+              <PWAInstallButton variant="compact" />
             </div>
 
             <div className="space-y-2">

@@ -63,6 +63,8 @@ export interface Database {
           visual_type: string;
           accent_color: string;
           tags: Json;
+          image_url: string | null;
+          images: Json;
           created_at: string;
           updated_at: string;
         };
@@ -93,6 +95,8 @@ export interface Database {
           visual_type?: string;
           accent_color?: string;
           tags?: Json;
+          image_url?: string | null;
+          images?: Json;
           created_at?: string;
           updated_at?: string;
         };
@@ -123,6 +127,8 @@ export interface Database {
           visual_type?: string;
           accent_color?: string;
           tags?: Json;
+          image_url?: string | null;
+          images?: Json;
           created_at?: string;
           updated_at?: string;
         };

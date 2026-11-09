@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.shopcart.app",
+      "sha256_cert_fingerprints": [
+        "14:6D:E9:7D:0F:52:AB:3B:56:87:C5:3A:5B:4E:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45",
+        "YOUR_GOOGLE_PLAY_STORE_APP_SIGNING_SHA256_FINGERPRINT_HERE"
+      ]
+    }
+  }
+]

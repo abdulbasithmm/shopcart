@@ -26,6 +26,7 @@ import { useCart } from '../context/CartContext';
 import { useToast } from '../context/ToastContext';
 import { formatPrice } from '../utils/format';
 import { ScrollReveal } from '../components/common/ScrollReveal';
+import { PWAInstallButton } from '../components/common/PWAInstallButton';
 
 interface HomePageProps {
   onNavigate: (page: PageView, params?: { productId?: string; category?: string }) => void;
@@ -870,6 +871,11 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onQuickView }) =
             </ScrollReveal>
           ))}
         </div>
+      </section>
+
+      {/* PWA Mobile App Download / Install Banner */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-12">
+        <PWAInstallButton variant="banner" />
       </section>
     </div>
   );

@@ -10,6 +10,7 @@ import {
 import { PageView } from '../../types';
 import { useToast } from '../../context/ToastContext';
 import { AmazonLogo } from './AmazonLogo';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface FooterProps {
   onNavigate: (page: PageView, params?: { category?: string }) => void;
@@ -312,6 +313,8 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
 
           <div className="pt-6 border-t border-[#232f3e] flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-[#888]">
             <div className="flex flex-wrap items-center justify-center gap-3">
+              <PWAInstallButton variant="footer" className="text-slate-400 hover:text-white" />
+              <span>·</span>
               <button onClick={() => showToast('Conditions of Use: All orders are subject to Shop Cart standard customer terms.', 'info')} className="hover:underline cursor-pointer">Conditions of Use &amp; Sale</button>
               <span>·</span>
               <button onClick={() => showToast('Privacy Notice: Your personal information is encrypted and never shared.', 'info')} className="hover:underline cursor-pointer">Privacy Notice</button>

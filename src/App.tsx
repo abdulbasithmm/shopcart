@@ -10,6 +10,7 @@ import { QuickViewModal } from './components/common/QuickViewModal';
 import { SupabaseStatusModal } from './components/common/SupabaseStatusModal';
 import { AdminGuard } from './components/AdminGuard';
 import { BackToTop } from './components/common/BackToTop';
+import { OfflineIndicator } from './components/common/OfflineIndicator';
 
 // Pages
 import { HomePage } from './pages/HomePage';
@@ -394,6 +395,9 @@ function AppContent() {
         isOpen={isSupabaseModalOpen}
         onClose={() => setIsSupabaseModalOpen(false)}
       />
+
+      {/* Offline Connectivity Notification */}
+      <OfflineIndicator />
 
       {/* Floating Back to Top Button */}
       <BackToTop />

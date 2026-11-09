@@ -74,6 +74,22 @@ CREATE TABLE IF NOT EXISTS public.products (
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS image_url TEXT;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS images JSONB DEFAULT '[]'::jsonb NOT NULL;
 
+-- Notify PostgREST to reload its schema cache immediately
+NOTIFY pgrst, 'reload schema';
+
+-- Dedicated function to allow refreshing PostgREST schema cache on demand
+CREATE OR REPLACE FUNCTION public.refresh_schema_cache()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    NOTIFY pgrst, 'reload schema';
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.refresh_schema_cache() TO anon, authenticated, service_role;
+
 -- Create search index for fast filtering
 CREATE INDEX IF NOT EXISTS idx_products_category ON public.products(category_name);
 CREATE INDEX IF NOT EXISTS idx_products_is_active ON public.products(is_active);

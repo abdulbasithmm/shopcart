@@ -20,7 +20,8 @@ import {
   Activity,
   Zap,
   CheckCheck,
-  Clock
+  Clock,
+  Sparkles
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 import {
@@ -31,6 +32,7 @@ import {
   clearRuntimeSupabaseConfig,
   supabase
 } from '../../lib/supabase';
+import { refreshSupabaseSchemaCache } from '../../services/productService';
 import { useToast } from '../../context/ToastContext';
 
 interface SupabaseStatusModalProps {
@@ -59,6 +61,8 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ isOpen
     productsCount?: number;
   } | null>(null);
   const [copiedSql, setCopiedSql] = useState(false);
+  const [isReloadingCache, setIsReloadingCache] = useState(false);
+  const [copiedImagesFix, setCopiedImagesFix] = useState(false);
   const [activeTab, setActiveTab] = useState<'connection' | 'diagnostics' | 'tables' | 'auth' | 'sql'>('connection');
 
   // Diagnostics state
@@ -330,6 +334,40 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ isOpen
       setTimeout(() => setCopiedSql(false), 3000);
     } catch {
       showToast('Failed to read SQL file. You can find it at supabase/schema.sql', 'warning');
+    }
+  };
+
+  const handleReloadSchemaCache = async () => {
+    setIsReloadingCache(true);
+    try {
+      const res = await refreshSupabaseSchemaCache();
+      if (res.success) {
+        showToast(res.message, 'success');
+      } else {
+        showToast(res.message, 'warning');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to reload schema cache', 'error');
+    } finally {
+      setIsReloadingCache(false);
+    }
+  };
+
+  const handleCopyImagesFixSql = async () => {
+    const fixSql = `-- 1. Add images JSONB and image_url columns if missing
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS images JSONB DEFAULT '[]'::jsonb NOT NULL;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS image_url TEXT;
+
+-- 2. Notify PostgREST to reload its schema cache immediately
+NOTIFY pgrst, 'reload schema';`;
+
+    try {
+      await navigator.clipboard.writeText(fixSql);
+      setCopiedImagesFix(true);
+      showToast('Images column fix SQL copied to clipboard! Run in Supabase SQL Editor.', 'success');
+      setTimeout(() => setCopiedImagesFix(false), 3000);
+    } catch {
+      showToast('Could not copy to clipboard', 'warning');
     }
   };
 
@@ -778,9 +816,49 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ isOpen
           {/* TAB 5: MIGRATION SQL */}
           {activeTab === 'sql' && (
             <div className="space-y-4">
+              {/* Quick Fix for "images column in schema cache" error */}
+              <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-200 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h4 className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 text-emerald-600" />
+                      Quick Fix: Products &quot;images&quot; Column &amp; PostgREST Cache
+                    </h4>
+                    <p className="text-[11px] text-emerald-800 mt-0.5">
+                      If adding/editing products returns <em>&quot;Could not find the &apos;images&apos; column in the schema cache&quot;</em>, run this 3-line SQL or click Reload Schema Cache:
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleCopyImagesFixSql}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-white hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-md text-[11px] font-bold shadow-2xs transition-colors cursor-pointer"
+                    >
+                      {copiedImagesFix ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedImagesFix ? 'Copied SQL!' : 'Copy 3-Line SQL'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isReloadingCache}
+                      onClick={handleReloadSchemaCache}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-[#0b5c37] hover:bg-[#074728] text-white rounded-md text-[11px] font-bold shadow-2xs transition-colors cursor-pointer disabled:opacity-60"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isReloadingCache ? 'animate-spin' : ''}`} />
+                      <span>{isReloadingCache ? 'Reloading...' : 'Reload Cache'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-2.5 bg-slate-900 text-emerald-400 font-mono text-[10px] rounded-lg overflow-x-auto leading-relaxed border border-emerald-900/40">
+                  <p>ALTER TABLE public.products ADD COLUMN IF NOT EXISTS images JSONB DEFAULT &apos;[]&apos;::jsonb NOT NULL;</p>
+                  <p>ALTER TABLE public.products ADD COLUMN IF NOT EXISTS image_url TEXT;</p>
+                  <p className="text-white">NOTIFY pgrst, &apos;reload schema&apos;;</p>
+                </div>
+              </div>
+
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-xs font-bold text-slate-900">PostgreSQL Schema &amp; RLS Migration Script</h3>
+                  <h3 className="text-xs font-bold text-slate-900">Full PostgreSQL Schema &amp; RLS Migration Script</h3>
                   <p className="text-[11px] text-slate-500">
                     Idempotent script located at <code className="font-mono text-[#0b5c37]">/supabase/schema.sql</code>.
                   </p>

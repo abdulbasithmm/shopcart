@@ -103,7 +103,7 @@
       "destination": "/index.html"
     },
     {
-      "source": "/((?!api/|assets/).*)",
+      "source": "/((?!api/|assets/|sw\\.js|registerSW\\.js|workbox|manifest|favicon|apple-touch|pwa-|\\.well-known).*)",
       "destination": "/index.html"
     }
   ]

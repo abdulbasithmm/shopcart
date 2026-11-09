@@ -31,12 +31,16 @@ export function mapSupabaseProductToDomain(row: any, inventoryCount?: number): P
     visualType: row.visual_type || 'headphones',
     accentColor: row.accent_color || '#f97316',
     tags: Array.isArray(row.tags) ? row.tags : [],
-    images: Array.isArray(row.images)
+    images: (Array.isArray(row.images) && row.images.length > 0)
       ? row.images
       : (typeof row.images === 'string' && row.images.startsWith('[')
         ? JSON.parse(row.images)
-        : (row.image_url ? [row.image_url] : [])),
-    image: (Array.isArray(row.images) && row.images[0]) || row.image_url || undefined,
+        : (Array.isArray(row.specs?._gallery_images) && row.specs._gallery_images.length > 0
+          ? row.specs._gallery_images
+          : (row.image_url ? [row.image_url] : []))),
+    image: (Array.isArray(row.images) && row.images[0]) ||
+      (Array.isArray(row.specs?._gallery_images) && row.specs._gallery_images[0]) ||
+      row.image_url || undefined,
   };
 }
 
@@ -320,7 +324,7 @@ export async function uploadProductImage(
 }
 
 /**
- * Admin: Add a new product to Supabase
+ * Admin: Add a new product to Supabase with full 4-image gallery support
  */
 export async function createAdminProduct(productData: Partial<Product>, stock = 10): Promise<{ success: boolean; error?: string }> {
   const prodId = productData.id || `eko-prod-${Date.now()}`;
@@ -359,8 +363,8 @@ export async function createAdminProduct(productData: Partial<Product>, stock = 
   }
 
   try {
-    // 1. Insert product row
-    const { error: prodErr } = await supabase.from('products').insert({
+    // 1. Prepare product row matching Supabase schema exactly
+    const productRow: any = {
       id: prodId,
       name: productData.name,
       brand: productData.brand || 'Shop Cart',
@@ -385,21 +389,66 @@ export async function createAdminProduct(productData: Partial<Product>, stock = 
       visual_type: productData.visualType || 'headphones',
       accent_color: productData.accentColor || '#f97316',
       tags: productData.tags || ['New'],
-      images,
+      images, // Stores full array of 4 gallery slots in JSONB column
       image_url: mainImage,
-    });
+    };
+
+    // Primary insert attempt using public.products.images JSONB column
+    let { error: prodErr } = await supabase.from('products').insert(productRow);
+
+    // Handle "Could not find the 'images' column of 'products' in the schema cache"
+    if (prodErr && prodErr.message && (prodErr.message.toLowerCase().includes("'images' column") || (prodErr as any).code === 'PGRST204')) {
+      console.warn("PostgREST schema cache missing 'images' column. Triggering schema reload & applying resilient fallback...");
+      
+      // Attempt schema reload RPC
+      try {
+        await supabase.rpc('refresh_schema_cache');
+      } catch {
+        // ignore if RPC not yet created
+      }
+
+      // Retry with images column in case reload immediately registered
+      const retryRes = await supabase.from('products').insert(productRow);
+      if (!retryRes.error) {
+        prodErr = null;
+      } else {
+        // Fallback: preserve all 4 gallery images by embedding them in specs._gallery_images and image_url
+        const fallbackRow = { ...productRow };
+        delete fallbackRow.images;
+        fallbackRow.image_url = mainImage;
+        fallbackRow.specs = {
+          ...(fallbackRow.specs || {}),
+          _gallery_images: images,
+        };
+
+        const fallbackRes = await supabase.from('products').insert(fallbackRow);
+        if (!fallbackRes.error) {
+          prodErr = null;
+        } else {
+          prodErr = fallbackRes.error;
+        }
+      }
+    }
 
     if (prodErr) {
       console.error('Error inserting product in Supabase:', prodErr);
       return { success: false, error: prodErr.message };
     }
 
-    // 2. Insert inventory row
-    await supabase.from('inventory').insert({
-      product_id: prodId,
-      stock_count: stock,
-      low_stock_threshold: 5,
-    });
+    // 2. Insert inventory row with onConflict handling
+    const { error: invErr } = await supabase.from('inventory').upsert(
+      {
+        product_id: prodId,
+        stock_count: stock,
+        low_stock_threshold: 5,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'product_id' }
+    );
+
+    if (invErr) {
+      console.warn('Inventory record upsert warning:', invErr.message);
+    }
 
     return { success: true };
   } catch (err: any) {
@@ -408,7 +457,7 @@ export async function createAdminProduct(productData: Partial<Product>, stock = 
 }
 
 /**
- * Admin: Update product details and inventory in Supabase
+ * Admin: Update product details and inventory in Supabase with 4-image gallery support
  */
 export async function updateAdminProduct(productId: string, updates: Partial<Product>, stock?: number): Promise<{ success: boolean; error?: string }> {
   if (!isSupabaseConfigured()) {
@@ -446,20 +495,87 @@ export async function updateAdminProduct(productId: string, updates: Partial<Pro
       payload.image_url = cleanImages[0] || null;
     }
 
-    const { error } = await supabase.from('products').update(payload).eq('id', productId);
+    let { error } = await supabase.from('products').update(payload).eq('id', productId);
+
+    // Handle "Could not find the 'images' column of 'products' in the schema cache" during update
+    if (error && error.message && (error.message.toLowerCase().includes("'images' column") || (error as any).code === 'PGRST204')) {
+      console.warn("PostgREST schema cache missing 'images' column during update. Applying resilient fallback...");
+      
+      try {
+        await supabase.rpc('refresh_schema_cache');
+      } catch {
+        // ignore
+      }
+
+      const retryRes = await supabase.from('products').update(payload).eq('id', productId);
+      if (!retryRes.error) {
+        error = null;
+      } else {
+        const fallbackPayload = { ...payload };
+        delete fallbackPayload.images;
+        fallbackPayload.image_url = (updates.images && updates.images.filter(Boolean)[0]) || null;
+        if (updates.images) {
+          fallbackPayload.specs = {
+            ...(updates.specs || {}),
+            _gallery_images: updates.images.filter(Boolean),
+          };
+        }
+        const fallbackRes = await supabase.from('products').update(fallbackPayload).eq('id', productId);
+        if (!fallbackRes.error) {
+          error = null;
+        } else {
+          error = fallbackRes.error;
+        }
+      }
+    }
+
     if (error) return { success: false, error: error.message };
 
     if (stock !== undefined) {
-      await supabase.from('inventory').upsert({
-        product_id: productId,
-        stock_count: stock,
-        updated_at: new Date().toISOString(),
-      });
+      await supabase.from('inventory').upsert(
+        {
+          product_id: productId,
+          stock_count: stock,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'product_id' }
+      );
     }
 
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message };
+  }
+}
+
+/**
+ * On-demand reload of Supabase / PostgREST schema cache
+ */
+export async function refreshSupabaseSchemaCache(): Promise<{ success: boolean; message: string }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, message: 'Supabase is not configured' };
+  }
+
+  try {
+    const { error: rpcErr } = await supabase.rpc('refresh_schema_cache');
+    if (!rpcErr) {
+      return { success: true, message: 'Schema cache refreshed successfully via NOTIFY pgrst, "reload schema"!' };
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    const { error: pingErr } = await supabase.from('products').select('id, name, image_url').limit(1);
+    if (!pingErr) {
+      return {
+        success: true,
+        message: 'Supabase products table connection verified. Run NOTIFY pgrst, "reload schema"; in SQL Editor if columns were recently modified.',
+      };
+    }
+    return { success: false, message: pingErr.message };
+  } catch (err: any) {
+    return { success: false, message: err.message || 'Failed to ping Supabase' };
   }
 }
 
