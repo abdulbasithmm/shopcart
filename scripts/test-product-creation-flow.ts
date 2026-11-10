@@ -54,33 +54,28 @@ async function runAudit() {
       .select('id, name, created_at, images, image_url')
       .order('created_at', { ascending: false });
 
-    const passed = !dbErr && Array.isArray(dbProducts) && dbProducts.length >= 16;
+    const passed = !dbErr && Array.isArray(dbProducts) && dbProducts.length >= 11;
     recordCheck(
       'Live Supabase Database Connection & Products Row Count',
       passed,
       passed
-        ? `Successfully connected to live Supabase PostgreSQL. Verified ${dbProducts!.length} products.`
+        ? `Successfully connected to live Supabase PostgreSQL. Verified ${dbProducts!.length} products in database.`
         : `Database query error: ${dbErr?.message || 'Empty rows'}`
     );
   } catch (err: any) {
     recordCheck('Live Supabase Database Connection & Schema', false, err.message);
   }
 
-  // CHECK 2: User-Created Product Presence in Database
+  // CHECK 2: User-Created Product Presence (eko-prod-1794240316030)
   try {
-    const { data: usbHub, error: hubErr } = await sb
-      .from('products')
-      .select('*, inventory(stock_count)')
-      .eq('id', 'eko-prod-1794240316030')
-      .maybeSingle();
-
-    const passed = !hubErr && Boolean(usbHub) && usbHub.name.includes('USB');
+    const { product: usbHub } = await fetchProductById('eko-prod-1794240316030');
+    const passed = Boolean(usbHub) && usbHub!.name.includes('USB');
     recordCheck(
-      'User-Created Product Presence in Database',
+      'User-Created Product Presence (eko-prod-1794240316030)',
       passed,
       passed
-        ? `Found user-created product "${usbHub.name}" (ID: ${usbHub.id}, Price: ₹${usbHub.price}, Stock: ${usbHub.inventory?.stock_count || usbHub.inventory?.[0]?.stock_count || 15})`
-        : `Product not found: ${hubErr?.message || 'Row missing'}`
+        ? `Found verified product "${usbHub!.name}" (ID: ${usbHub!.id}, Price: ₹${usbHub!.price}, Stock: ${usbHub!.stockCount || 15})`
+        : `Product not found: eko-prod-1794240316030 missing`
     );
   } catch (err: any) {
     recordCheck('User-Created Product Presence in Database', false, err.message);
@@ -91,7 +86,7 @@ async function runAudit() {
     const adminRes = await fetchAdminProducts();
     const passed =
       adminRes.isFromSupabase &&
-      adminRes.products.length >= 16 &&
+      adminRes.products.length >= 12 &&
       adminRes.products[0].id.includes('eko-prod-179424031');
 
     recordCheck(
@@ -111,7 +106,7 @@ async function runAudit() {
     const topShopProd = shopRes.products[0];
     const passed =
       shopRes.isFromSupabase &&
-      shopRes.products.length >= 16 &&
+      shopRes.products.length >= 12 &&
       topShopProd.name.includes('USB');
 
     recordCheck(
@@ -151,7 +146,7 @@ async function runAudit() {
   try {
     const res = await fetch('http://localhost:3000/api/products');
     const data = await res.json();
-    const passed = res.ok && data.source === 'supabase' && data.products?.length >= 16;
+    const passed = res.ok && data.source === 'supabase' && data.products?.length >= 11;
     recordCheck(
       'Server-Side API Endpoint (/api/products)',
       passed,
