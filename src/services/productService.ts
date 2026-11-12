@@ -84,92 +84,15 @@ export async function fetchCategories(): Promise<{ id: string; name: string; cou
   }
 }
 
-// Verified Production Product Catalog (ensures user-created items like 4-Port USB 3.0 Hub are always returned)
-export const VERIFIED_PRODUCTION_PRODUCTS: Product[] = [
-  {
-    id: 'eko-prod-1794240316030',
-    name: '4-Port USB 3.0 Hub',
-    brand: 'Shop Cart',
-    category: 'Electronics',
-    price: 299,
-    originalPrice: 399,
-    rating: 5.0,
-    reviewsCount: 18,
-    inStock: true,
-    stockCount: 15,
-    isFeatured: true,
-    isBestSeller: false,
-    isSpecialOffer: true,
-    isNewArrival: true,
-    claimedPercentage: 35,
-    discountPercentage: 25,
-    badge: 'Trending',
-    shortDescription: 'High-speed 4-port USB 3.0 data hub with individual power switches and LED indicators.',
-    fullDescription: 'Expand your connectivity with this high-speed 4-port USB 3.0 data hub. Features individual power switches and LED indicators for each port. Plug and play, backwards compatible with USB 2.0 and 1.1.',
-    features: [
-      '5 Gbps SuperSpeed data transfer',
-      'Individual power switches with LED status indicators',
-      'Built-in surge protection and over-current prevention',
-      'Compact travel-ready aluminum body',
-    ],
-    specs: {
-      'Interface': 'USB 3.0 Type-A',
-      'Ports': '4 Ports',
-      'Transfer Rate': 'Up to 5 Gbps',
-      'Cable Length': '60 cm',
-      'Power': 'Bus Powered with Optional DC 5V Input',
-    },
-    colors: [
-      { name: 'Space Gray', hex: '#4B5563' },
-      { name: 'Matte Black', hex: '#1F2937' },
-    ],
-    sizes: ['Standard (60cm cable)'],
-    visualType: 'headphones',
-    accentColor: '#3b82f6',
-    tags: ['Electronics', 'Accessories', 'USB Hub', 'USB 3.0', 'New'],
-    images: [
-      'https://images.unsplash.com/photo-1618384887929-16ec33fab9ef?w=800&auto=format&fit=crop&q=80',
-      'https://images.unsplash.com/photo-1544652478-6653e09f18a2?w=800&auto=format&fit=crop&q=80',
-      'https://images.unsplash.com/photo-1588702547919-26089e690ecc?w=800&auto=format&fit=crop&q=80',
-      'https://images.unsplash.com/photo-1593642632823-8f785ba67e45?w=800&auto=format&fit=crop&q=80',
-    ],
-    image: 'https://images.unsplash.com/photo-1618384887929-16ec33fab9ef?w=800&auto=format&fit=crop&q=80',
-  },
-];
-
-const LOCAL_STORAGE_PRODUCTS_KEY = 'shopcart_admin_created_products';
-
-export function getLocalCreatedProducts(): Product[] {
-  try {
-    if (typeof localStorage === 'undefined') return [];
-    const saved = localStorage.getItem(LOCAL_STORAGE_PRODUCTS_KEY);
-    return saved ? JSON.parse(saved) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function saveLocalCreatedProduct(p: Product): void {
-  try {
-    if (typeof localStorage === 'undefined') return;
-    const existing = getLocalCreatedProducts();
-    const filtered = existing.filter((item) => item.id !== p.id);
-    localStorage.setItem(LOCAL_STORAGE_PRODUCTS_KEY, JSON.stringify([p, ...filtered]));
-  } catch {
-    // ignore in sandbox
-  }
-}
-
-
 /**
- * Fetch products from Supabase with relational inventory, merged with verified production items
+ * Fetch products from Supabase with relational inventory and filters
  */
 export async function fetchProducts(filters?: FetchProductsFilter): Promise<{
   products: Product[];
   isFromSupabase: boolean;
 }> {
   if (!isSupabaseConfigured()) {
-    let result = [...VERIFIED_PRODUCTION_PRODUCTS, ...PRODUCTS];
+    let result = [...PRODUCTS];
 
     if (filters) {
       if (filters.category && filters.category !== 'all') {
@@ -227,41 +150,27 @@ export async function fetchProducts(filters?: FetchProductsFilter): Promise<{
 
     const { data, error } = await query;
 
-    let baseProducts: Product[] = [];
-    if (!error && data && data.length > 0) {
-      baseProducts = data.map((item: any) => {
-        const invCount = Array.isArray(item.inventory)
-          ? item.inventory[0]?.stock_count
-          : item.inventory?.stock_count;
-        return mapSupabaseProductToDomain(item, invCount);
-      });
-    } else {
-      baseProducts = PRODUCTS;
+    if (error || !data || data.length === 0) {
+      console.warn('Supabase products fetch failed or empty, using fallback:', error?.message);
+      return { products: PRODUCTS, isFromSupabase: false };
     }
 
-    // Merge in verified production items & local admin created items (newest items first)
-    const extraProducts = [...getLocalCreatedProducts(), ...VERIFIED_PRODUCTION_PRODUCTS];
-    const seenIds = new Set(baseProducts.map((p) => p.id));
-    const merged: Product[] = [...baseProducts];
-
-    for (const extra of extraProducts) {
-      if (!seenIds.has(extra.id)) {
-        seenIds.add(extra.id);
-        merged.unshift(extra);
-      }
-    }
-
-    let filtered = merged;
+    let mapped: Product[] = data.map((item: any) => {
+      const invCount = Array.isArray(item.inventory)
+        ? item.inventory[0]?.stock_count
+        : item.inventory?.stock_count;
+      return mapSupabaseProductToDomain(item, invCount);
+    });
 
     if (filters) {
       if (filters.category && filters.category !== 'all') {
-        filtered = filtered.filter(
+        mapped = mapped.filter(
           (p) => p.category.toLowerCase() === filters.category!.toLowerCase()
         );
       }
       if (filters.searchQuery) {
         const q = filters.searchQuery.toLowerCase();
-        filtered = filtered.filter(
+        mapped = mapped.filter(
           (p) =>
             p.name.toLowerCase().includes(q) ||
             p.brand.toLowerCase().includes(q) ||
@@ -270,38 +179,38 @@ export async function fetchProducts(filters?: FetchProductsFilter): Promise<{
         );
       }
       if (filters.minPrice !== undefined) {
-        filtered = filtered.filter((p) => p.price >= filters.minPrice!);
+        mapped = mapped.filter((p) => p.price >= filters.minPrice!);
       }
       if (filters.maxPrice !== undefined) {
-        filtered = filtered.filter((p) => p.price <= filters.maxPrice!);
+        mapped = mapped.filter((p) => p.price <= filters.maxPrice!);
       }
       if (filters.inStockOnly) {
-        filtered = filtered.filter((p) => p.inStock);
+        mapped = mapped.filter((p) => p.inStock);
       }
       if (filters.sortBy) {
         switch (filters.sortBy) {
           case 'price-low':
-            filtered.sort((a, b) => a.price - b.price);
+            mapped.sort((a, b) => a.price - b.price);
             break;
           case 'price-high':
-            filtered.sort((a, b) => b.price - a.price);
+            mapped.sort((a, b) => b.price - a.price);
             break;
           case 'rating':
-            filtered.sort((a, b) => b.rating - a.rating);
+            mapped.sort((a, b) => b.rating - a.rating);
             break;
           case 'newest':
-            filtered.sort((a, b) => (b.isNewArrival ? 1 : 0) - (a.isNewArrival ? 1 : 0));
+            mapped.sort((a, b) => (b.isNewArrival ? 1 : 0) - (a.isNewArrival ? 1 : 0));
             break;
           default:
-            filtered.sort((a, b) => (b.isNewArrival ? 80 : 0) - (a.isNewArrival ? 80 : 0));
+            mapped.sort((a, b) => (b.isNewArrival ? 80 : 0) - (a.isNewArrival ? 80 : 0));
         }
       }
     }
 
-    return { products: filtered, isFromSupabase: true };
+    return { products: mapped, isFromSupabase: true };
   } catch (err) {
     console.warn('Error fetching products from Supabase:', err);
-    return { products: [...VERIFIED_PRODUCTION_PRODUCTS, ...PRODUCTS], isFromSupabase: false };
+    return { products: PRODUCTS, isFromSupabase: false };
   }
 }
 
@@ -310,7 +219,7 @@ export async function fetchProducts(filters?: FetchProductsFilter): Promise<{
  */
 export async function fetchAdminProducts(): Promise<{ products: Product[]; isFromSupabase: boolean }> {
   if (!isSupabaseConfigured()) {
-    return { products: [...VERIFIED_PRODUCTION_PRODUCTS, ...PRODUCTS], isFromSupabase: false };
+    return { products: [...PRODUCTS], isFromSupabase: false };
   }
 
   try {
@@ -319,34 +228,22 @@ export async function fetchAdminProducts(): Promise<{ products: Product[]; isFro
       .select('*, inventory(stock_count)')
       .order('created_at', { ascending: false });
 
-    let baseProducts: Product[] = [];
-    if (!error && data && data.length > 0) {
-      baseProducts = data.map((item: any) => {
-        const invCount = Array.isArray(item.inventory)
-          ? item.inventory[0]?.stock_count
-          : item.inventory?.stock_count;
-        return mapSupabaseProductToDomain(item, invCount);
-      });
-    } else {
-      baseProducts = PRODUCTS;
+    if (error || !data || data.length === 0) {
+      console.warn('Supabase admin products query empty/failed:', error?.message);
+      return { products: PRODUCTS, isFromSupabase: false };
     }
 
-    // Merge in verified production items & local admin created items (newest items first)
-    const extraProducts = [...getLocalCreatedProducts(), ...VERIFIED_PRODUCTION_PRODUCTS];
-    const seenIds = new Set(baseProducts.map((p) => p.id));
-    const merged: Product[] = [...baseProducts];
+    const mapped = data.map((item: any) => {
+      const invCount = Array.isArray(item.inventory)
+        ? item.inventory[0]?.stock_count
+        : item.inventory?.stock_count;
+      return mapSupabaseProductToDomain(item, invCount);
+    });
 
-    for (const extra of extraProducts) {
-      if (!seenIds.has(extra.id)) {
-        seenIds.add(extra.id);
-        merged.unshift(extra);
-      }
-    }
-
-    return { products: merged, isFromSupabase: true };
+    return { products: mapped, isFromSupabase: true };
   } catch (err) {
     console.warn('Exception in fetchAdminProducts:', err);
-    return { products: [...VERIFIED_PRODUCTION_PRODUCTS, ...PRODUCTS], isFromSupabase: false };
+    return { products: PRODUCTS, isFromSupabase: false };
   }
 }
 
@@ -354,12 +251,6 @@ export async function fetchAdminProducts(): Promise<{ products: Product[]; isFro
  * Fetch a single product by ID from Supabase
  */
 export async function fetchProductById(productId: string): Promise<{ product: Product | null; isFromSupabase: boolean }> {
-  // Check verified production and local admin created items first
-  const extra = [...getLocalCreatedProducts(), ...VERIFIED_PRODUCTION_PRODUCTS].find((p) => p.id === productId);
-  if (extra) {
-    return { product: extra, isFromSupabase: true };
-  }
-
   if (!isSupabaseConfigured()) {
     const found = PRODUCTS.find((p) => p.id === productId) || null;
     return { product: found, isFromSupabase: false };
@@ -487,8 +378,37 @@ export async function createAdminProduct(
     };
   }
 
+  // 1. Enforce authenticated administrator session
   try {
-    // 1. Prepare product row matching Supabase schema exactly
+    const { data: { session }, error: sessionErr } = await supabase.auth.getSession();
+    if (sessionErr || !session?.user) {
+      return {
+        success: false,
+        error: 'Unauthorized: A valid authenticated administrator session is required to create products.',
+      };
+    }
+
+    const { data: profileData } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', session.user.id)
+      .maybeSingle();
+
+    if (!profileData || profileData.role !== 'admin') {
+      return {
+        success: false,
+        error: 'Unauthorized: Account does not have administrator privileges in public.profiles.',
+      };
+    }
+  } catch (authCheckErr: any) {
+    return {
+      success: false,
+      error: authCheckErr.message || 'Failed to verify administrator authentication session.',
+    };
+  }
+
+  try {
+    // 2. Prepare product row matching Supabase schema exactly
     const productRow: any = {
       id: prodId,
       name: productData.name,
@@ -578,7 +498,7 @@ export async function createAdminProduct(
       return { success: false, error: prodErr.message };
     }
 
-    // 2. Insert inventory row with onConflict handling
+    // 3. Insert inventory row with onConflict handling
     const { error: invErr } = await supabase.from('inventory').upsert(
       {
         product_id: prodId,
@@ -594,7 +514,6 @@ export async function createAdminProduct(
     }
 
     const finalProduct = mapSupabaseProductToDomain(insertedRow || productRow, stock);
-    saveLocalCreatedProduct(finalProduct);
     return { success: true, product: finalProduct };
   } catch (err: any) {
     return { success: false, error: err.message };
@@ -756,17 +675,6 @@ export async function deleteAdminProduct(productId: string): Promise<{ success: 
     }
     const { error } = await supabase.from('products').delete().eq('id', productId);
     if (error) {
-      try {
-        const resp = await fetch(`/api/admin/products/${encodeURIComponent(productId)}`, {
-          method: 'DELETE',
-          headers: { 'x-admin-role': 'admin' },
-        });
-        if (resp.ok) {
-          return { success: true };
-        }
-      } catch {
-        // ignore
-      }
       return { success: false, error: error.message };
     }
     return { success: true };

@@ -22,6 +22,9 @@ import { ContactPage } from './pages/ContactPage';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { AccountPage } from './pages/AccountPage';
+import { CategoriesPage } from './pages/CategoriesPage';
+import { PlayPage } from './pages/PlayPage';
+import { MobileBottomNav } from './components/navigation/MobileBottomNav';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { AdminPage, AdminSection } from './pages/AdminPage';
 import { AdminLoginPage } from './pages/AdminLoginPage';
@@ -128,6 +131,8 @@ function parseCurrentRoute(): { page: PageView; productId?: string; adminSection
     [
       'home',
       'shop',
+      'categories',
+      'play',
       'cart',
       'checkout',
       'contact',
@@ -299,12 +304,20 @@ function AppContent() {
       )}
 
       {/* Main Viewport Content */}
-      <main className="flex-1">
+      <main className="flex-1 pb-16 md:pb-0">
         {currentPage === 'home' && (
           <HomePage
             onNavigate={handleNavigate}
             onQuickView={(prod) => setQuickViewProduct(prod)}
           />
+        )}
+
+        {currentPage === 'categories' && (
+          <CategoriesPage onNavigate={handleNavigate} />
+        )}
+
+        {currentPage === 'play' && (
+          <PlayPage onNavigate={handleNavigate} />
         )}
 
         {currentPage === 'shop' && (
@@ -401,6 +414,12 @@ function AppContent() {
 
       {/* Floating Back to Top Button */}
       <BackToTop />
+
+      {/* Mobile Bottom Navigation (5 items, Flipkart-inspired layout, hidden on desktop & admin) */}
+      <MobileBottomNav
+        currentPage={currentPage}
+        onNavigate={handleNavigate}
+      />
     </div>
   );
 }

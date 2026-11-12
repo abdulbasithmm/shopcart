@@ -24,14 +24,32 @@ import {
   Eye,
   Heart,
   Trash2,
+  Plus,
+  Edit2,
+  X,
+  EyeOff,
+  Ban,
+  AlertTriangle,
+  Building,
+  Home,
+  Briefcase,
 } from 'lucide-react';
-import { PageView, Order, OrderItem } from '../types';
+import { PageView, Order, OrderItem, SavedAddress } from '../types';
 import { PRODUCTS } from '../data/mockData';
 import { formatPrice } from '../utils/format';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useCart } from '../context/CartContext';
-import { fetchUserOrders } from '../services/orderService';
+import {
+  fetchUserOrders,
+  requestCustomerCancellation,
+  hideCustomerOrder,
+} from '../services/orderService';
+import {
+  addCustomerSavedAddress,
+  updateCustomerSavedAddress,
+  deleteCustomerSavedAddress,
+} from '../services/profileService';
 import { OrderTrackingModal } from '../components/orders/OrderTrackingModal';
 import { ProductImage } from '../components/common/ProductImage';
 import {
@@ -55,6 +73,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
     updateProfile,
     resendVerificationEmail,
     resetPassword,
+    refreshProfile,
     isSupabaseBackend,
   } = useAuth();
   const { showToast } = useToast();
@@ -92,6 +111,37 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
   const [orderFilterTab, setOrderFilterTab] = useState<'all' | 'in_progress' | 'delivered' | 'cancelled'>('all');
   const [copiedOrderId, setCopiedOrderId] = useState<string | null>(null);
 
+  // Cancellation Modal state
+  const [cancellingOrder, setCancellingOrder] = useState<Order | null>(null);
+  const [cancellationReason, setCancellationReason] = useState<string>('Ordered by mistake');
+  const [cancellationDetails, setCustomCancellationNotes] = useState<string>('');
+  const [isSubmittingCancel, setIsSubmittingCancel] = useState<boolean>(false);
+
+  // Hide Order Modal state
+  const [hidingOrder, setHidingOrder] = useState<Order | null>(null);
+  const [isSubmittingHide, setIsSubmittingHide] = useState<boolean>(false);
+
+  // Saved Addresses state
+  const [addressModalOpen, setAddressModalOpen] = useState<boolean>(false);
+  const [editingAddress, setEditingAddress] = useState<SavedAddress | null>(null);
+  const [addressForm, setAddressForm] = useState<Omit<SavedAddress, 'id'>>({
+    label: 'Home',
+    fullName: '',
+    phone: '',
+    email: '',
+    country: 'India',
+    houseBuilding: '',
+    streetArea: '',
+    landmark: '',
+    city: '',
+    district: '',
+    state: '',
+    pinCode: '',
+    isDefault: false,
+    deliveryInstructions: '',
+  });
+  const [isSavingAddress, setIsSavingAddress] = useState<boolean>(false);
+
   const handleCopyOrderId = (idStr: string) => {
     navigator.clipboard.writeText(idStr);
     setCopiedOrderId(idStr);
@@ -109,6 +159,183 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
     }
   };
 
+  const handleOpenAddAddress = () => {
+    setEditingAddress(null);
+    setAddressForm({
+      label: 'Home',
+      fullName: user?.name || '',
+      phone: user?.phone || '',
+      email: user?.email || '',
+      country: 'India',
+      houseBuilding: '',
+      streetArea: '',
+      landmark: '',
+      city: user?.address?.city || 'Bengaluru',
+      district: '',
+      state: user?.address?.state || 'Karnataka',
+      pinCode: user?.address?.zipCode || '',
+      isDefault: (user?.savedAddresses?.length || 0) === 0,
+      deliveryInstructions: '',
+    });
+    setAddressModalOpen(true);
+  };
+
+  const handleOpenEditAddress = (addr: SavedAddress) => {
+    setEditingAddress(addr);
+    setAddressForm({
+      label: addr.label || 'Home',
+      fullName: addr.fullName || '',
+      phone: addr.phone || '',
+      email: addr.email || user?.email || '',
+      country: addr.country || 'India',
+      houseBuilding: addr.houseBuilding || addr.apartment || '',
+      streetArea: addr.streetArea || addr.street || '',
+      landmark: addr.landmark || '',
+      city: addr.city || '',
+      district: addr.district || '',
+      state: addr.state || '',
+      pinCode: addr.pinCode || addr.postalCode || '',
+      isDefault: !!addr.isDefault,
+      deliveryInstructions: addr.deliveryInstructions || '',
+    });
+    setAddressModalOpen(true);
+  };
+
+  const handleSaveAddressForm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    if (
+      !addressForm.fullName.trim() ||
+      !addressForm.phone.trim() ||
+      !addressForm.houseBuilding.trim() ||
+      !addressForm.streetArea.trim() ||
+      !addressForm.city.trim() ||
+      !addressForm.pinCode.trim()
+    ) {
+      showToast('Please complete all required address fields.', 'error');
+      return;
+    }
+
+    setIsSavingAddress(true);
+    try {
+      if (editingAddress) {
+        const res = await updateCustomerSavedAddress(user.id, {
+          ...addressForm,
+          id: editingAddress.id,
+        });
+        if (res.success) {
+          showToast('Delivery address updated successfully!', 'success');
+          await refreshProfile();
+          setAddressModalOpen(false);
+        } else {
+          showToast(res.error || 'Failed to update address', 'error');
+        }
+      } else {
+        const res = await addCustomerSavedAddress(user.id, addressForm);
+        if (res.success) {
+          showToast('New delivery address added successfully!', 'success');
+          await refreshProfile();
+          setAddressModalOpen(false);
+        } else {
+          showToast(res.error || 'Failed to add address', 'error');
+        }
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error saving address', 'error');
+    } finally {
+      setIsSavingAddress(false);
+    }
+  };
+
+  const handleDeleteAddress = async (addressId: string) => {
+    if (!user) return;
+    if (!confirm('Are you sure you want to delete this saved address?')) return;
+
+    try {
+      const res = await deleteCustomerSavedAddress(user.id, addressId);
+      if (res.success) {
+        showToast('Address deleted successfully', 'info');
+        await refreshProfile();
+      } else {
+        showToast(res.error || 'Failed to delete address', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error deleting address', 'error');
+    }
+  };
+
+  const handleSetDefaultAddress = async (addr: SavedAddress) => {
+    if (!user) return;
+    try {
+      const res = await updateCustomerSavedAddress(user.id, {
+        ...addr,
+        isDefault: true,
+      });
+      if (res.success) {
+        showToast(`"${addr.label || 'Address'}" set as default delivery address`, 'success');
+        await refreshProfile();
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to set default address', 'error');
+    }
+  };
+
+  const handleSubmitCancellation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cancellingOrder) return;
+    const combinedReason = `${cancellationReason}${
+      cancellationDetails.trim() ? `: ${cancellationDetails.trim()}` : ''
+    }`;
+
+    setIsSubmittingCancel(true);
+    try {
+      const res = await requestCustomerCancellation(cancellingOrder.id, combinedReason);
+      if (res.success) {
+        showToast(`Order #${cancellingOrder.order_number} cancelled successfully.`, 'success');
+        setOrders((prev) =>
+          prev.map((o) =>
+            o.id === cancellingOrder.id
+              ? {
+                  ...o,
+                  status: 'cancelled',
+                  cancellation_reason: combinedReason,
+                  cancelled_at: new Date().toISOString(),
+                  cancelled_by: 'customer',
+                }
+              : o
+          )
+        );
+        setCancellingOrder(null);
+        setCustomCancellationNotes('');
+      } else {
+        showToast(res.message || 'Unable to cancel order. Please contact support.', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Cancellation request failed', 'error');
+    } finally {
+      setIsSubmittingCancel(false);
+    }
+  };
+
+  const handleSubmitHideOrder = async () => {
+    if (!hidingOrder) return;
+    setIsSubmittingHide(true);
+    try {
+      const res = await hideCustomerOrder(hidingOrder.id);
+      if (res.success) {
+        showToast(`Order #${hidingOrder.order_number} hidden from your history.`, 'info');
+        setOrders((prev) => prev.filter((o) => o.id !== hidingOrder.id));
+        setHidingOrder(null);
+      } else {
+        showToast(res.message || 'Failed to hide order', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to hide order', 'error');
+    } finally {
+      setIsSubmittingHide(false);
+    }
+  };
+
   // Verification email resend
   const [isResending, setIsResending] = useState(false);
 
@@ -123,6 +350,17 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
       setZipCode(user.address?.zipCode || '');
       setCountry(user.address?.country || 'United States');
     }
+  }, [user]);
+
+  // Realtime orders update listener
+  useEffect(() => {
+    const handleOrdersUpdated = () => {
+      if (user) {
+        fetchUserOrders(user.id).then((data) => setOrders(data || []));
+      }
+    };
+    window.addEventListener('shopcart-orders-updated', handleOrdersUpdated);
+    return () => window.removeEventListener('shopcart-orders-updated', handleOrdersUpdated);
   }, [user]);
 
   // Load orders
@@ -521,6 +759,125 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
               </button>
             </div>
           </form>
+
+          {/* Saved Delivery Addresses Section */}
+          <div className="pt-8 border-t border-slate-200/80 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-[#0b5c37]" />
+                  <span>Saved Delivery Addresses</span>
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Manage multiple shipping destinations for fast checkout on web &amp; mobile.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleOpenAddAddress}
+                className="px-4 py-2 bg-[#0b5c37] hover:bg-[#08482b] text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-emerald-900/10 flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add New Address</span>
+              </button>
+            </div>
+
+            {(!user?.savedAddresses || user.savedAddresses.length === 0) ? (
+              <div className="p-6 bg-slate-50 rounded-2xl border border-dashed border-slate-300 text-center space-y-2">
+                <MapPin className="w-8 h-8 text-slate-400 mx-auto" />
+                <p className="text-xs font-semibold text-slate-700">No saved delivery addresses</p>
+                <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                  Add your home, office, or family delivery addresses so you won't need to re-type them during checkout.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleOpenAddAddress}
+                  className="mt-2 text-xs font-bold text-[#0b5c37] hover:underline cursor-pointer"
+                >
+                  + Add your first address
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {user.savedAddresses.map((addr) => (
+                  <div
+                    key={addr.id}
+                    className={`p-4 rounded-2xl border transition-all flex flex-col justify-between ${
+                      addr.isDefault
+                        ? 'bg-emerald-50/40 border-[#0b5c37]/40 ring-1 ring-[#0b5c37]/20 shadow-xs'
+                        : 'bg-white border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                          {addr.label?.toLowerCase() === 'work' ? (
+                            <Briefcase className="w-3.5 h-3.5 text-slate-600" />
+                          ) : (
+                            <Home className="w-3.5 h-3.5 text-[#0b5c37]" />
+                          )}
+                          <span>{addr.label || 'Home'}</span>
+                          {addr.isDefault && (
+                            <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
+                              Default
+                            </span>
+                          )}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditAddress(addr)}
+                            className="p-1.5 text-slate-400 hover:text-[#0b5c37] transition-colors rounded-lg hover:bg-slate-100 cursor-pointer"
+                            title="Edit Address"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteAddress(addr.id)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 transition-colors rounded-lg hover:bg-slate-100 cursor-pointer"
+                            title="Delete Address"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="text-xs space-y-0.5">
+                        <p className="font-bold text-slate-800">{addr.fullName || user.name}</p>
+                        <p className="text-slate-600">
+                          {addr.houseBuilding ? `${addr.houseBuilding}, ` : ''}
+                          {addr.streetArea || ''}
+                        </p>
+                        {addr.landmark && (
+                          <p className="text-slate-500 text-[11px]">Landmark: {addr.landmark}</p>
+                        )}
+                        <p className="text-slate-600">
+                          {addr.city}, {addr.state} - <span className="font-mono font-semibold">{addr.pinCode}</span>
+                        </p>
+                        <p className="text-slate-500 text-[11px]">{addr.country || 'India'}</p>
+                        <p className="text-slate-700 font-mono text-[11px] pt-1">
+                          Phone: {addr.phone || user.phone}
+                        </p>
+                      </div>
+                    </div>
+
+                    {!addr.isDefault && (
+                      <div className="pt-3 mt-3 border-t border-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => handleSetDefaultAddress(addr)}
+                          className="text-[11px] font-bold text-[#0b5c37] hover:underline cursor-pointer"
+                        >
+                          Set as Default Address
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -715,9 +1072,50 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
                             <p className="text-xs text-slate-500 mt-0.5">
                               {isCancelled || isRefunded ? statusMeta.description : deliveryInfo.subtext}
                             </p>
+
+                            {/* Cancellation Details Banner */}
+                            {isCancelled && (
+                              <div className="bg-rose-50 border border-rose-200/90 rounded-xl p-3 mt-2.5 flex items-start gap-2.5 text-left">
+                                <AlertCircle className="w-4 h-4 text-rose-600 mt-0.5 shrink-0" />
+                                <div className="text-xs space-y-0.5">
+                                  <span className="font-bold text-rose-900 block">Cancellation Reason:</span>
+                                  <p className="text-rose-800">{ord.cancellation_reason || 'Cancelled at customer request'}</p>
+                                  {ord.cancelled_at && (
+                                    <span className="text-[10px] text-rose-500 font-mono block">
+                                      {new Date(ord.cancelled_at).toLocaleString()}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
                           </div>
 
-                          <div className="flex items-center gap-2 shrink-0">
+                          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                            {/* Eligible Customer Cancellation Button */}
+                            {['order_placed', 'pending', 'confirmed', 'processing'].includes(ord.status?.toLowerCase()) && (
+                              <button
+                                type="button"
+                                onClick={() => setCancellingOrder(ord)}
+                                className="px-3.5 py-2 border border-rose-200 hover:bg-rose-50 text-rose-700 font-bold text-xs rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
+                              >
+                                <Ban className="w-3.5 h-3.5" />
+                                <span>Cancel Order</span>
+                              </button>
+                            )}
+
+                            {/* Soft-Hide Cancelled Order from View */}
+                            {(isCancelled || isRefunded) && (
+                              <button
+                                type="button"
+                                onClick={() => setHidingOrder(ord)}
+                                className="px-3 py-2 border border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 font-semibold text-xs rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
+                                title="Hide from your order history"
+                              >
+                                <EyeOff className="w-3.5 h-3.5 text-slate-400" />
+                                <span>Hide Order</span>
+                              </button>
+                            )}
+
                             <button
                               type="button"
                               onClick={() => setTrackingModalOrder(ord)}
@@ -1052,6 +1450,363 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
         onClose={() => setTrackingModalOrder(null)}
         onBuyAgain={handleReorderItem}
       />
+
+      {/* 1. CUSTOMER ORDER CANCELLATION MODAL */}
+      {cancellingOrder && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 flex items-center justify-center">
+                  <Ban className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Cancel Order #{cancellingOrder.order_number}</h3>
+                  <p className="text-[11px] text-slate-500">Total: {formatPrice(Number(cancellingOrder.total_amount || 0))}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCancellingOrder(null)}
+                className="text-slate-400 hover:text-slate-700 text-xs font-bold p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitCancellation} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  Select Reason for Cancellation <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={cancellationReason}
+                  onChange={(e) => setCancellationReason(e.target.value)}
+                  className="w-full py-2.5 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-rose-500 cursor-pointer"
+                >
+                  <option value="Ordered by mistake">Ordered by mistake</option>
+                  <option value="Item delivery time is too long">Item delivery time is too long</option>
+                  <option value="Need to change delivery address or phone">Need to change delivery address or phone</option>
+                  <option value="Found a better price elsewhere">Found a better price elsewhere</option>
+                  <option value="Payment / UPI transaction issue">Payment / UPI transaction issue</option>
+                  <option value="Changed mind / No longer needed">Changed mind / No longer needed</option>
+                  <option value="Other reason">Other reason</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  Additional Notes (Optional)
+                </label>
+                <textarea
+                  rows={2}
+                  value={cancellationDetails}
+                  onChange={(e) => setCustomCancellationNotes(e.target.value)}
+                  placeholder="Provide more context for our operations team..."
+                  className="w-full py-2 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-rose-500"
+                />
+              </div>
+
+              <div className="bg-amber-50 p-3 rounded-xl border border-amber-200/80 text-[11px] text-amber-800 space-y-1">
+                <span className="font-bold flex items-center gap-1 text-amber-900">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <span>Cancellation Policy:</span>
+                </span>
+                <p>
+                  Orders that have not yet been dispatched can be cancelled immediately. If you have already transferred UPI payment, our merchant team will verify and initiate your refund.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setCancellingOrder(null)}
+                  disabled={isSubmittingCancel}
+                  className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-xs rounded-xl transition-colors cursor-pointer"
+                >
+                  Keep Order
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingCancel}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  {isSubmittingCancel ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Cancelling Order...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Ban className="w-3.5 h-3.5" />
+                      <span>Confirm Cancellation</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 2. CUSTOMER HIDE CANCELLED ORDER CONFIRMATION MODAL */}
+      {hidingOrder && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl animate-in zoom-in-95">
+            <div className="w-12 h-12 bg-slate-100 text-slate-600 rounded-2xl flex items-center justify-center mx-auto">
+              <EyeOff className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1">
+              <h3 className="text-base font-bold text-slate-900">Hide Cancelled Order?</h3>
+              <p className="text-xs text-slate-500">
+                Order <span className="font-mono font-bold text-slate-700">#{hidingOrder.order_number}</span> will be removed from your order history list.
+              </p>
+            </div>
+            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-[11px] text-slate-600">
+              <p>
+                Financial, invoice, and warranty audit records remain safely retained in the official database.
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => setHidingOrder(null)}
+                disabled={isSubmittingHide}
+                className="flex-1 py-2.5 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-xs rounded-xl transition-colors cursor-pointer"
+              >
+                Keep in List
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmitHideOrder}
+                disabled={isSubmittingHide}
+                className="flex-1 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                {isSubmittingHide ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <>
+                    <EyeOff className="w-3.5 h-3.5" />
+                    <span>Hide Order</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. ADD / EDIT SAVED DELIVERY ADDRESS MODAL */}
+      {addressModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-200 text-[#0b5c37] flex items-center justify-center">
+                  <MapPin className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    {editingAddress ? 'Edit Delivery Address' : 'Add New Delivery Address'}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">Save complete Indian postal address for 1-click checkout</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAddressModalOpen(false)}
+                className="text-slate-400 hover:text-slate-700 text-xs font-bold p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAddressForm} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Address Label <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={addressForm.label || 'Home'}
+                    onChange={(e) => setAddressForm({ ...addressForm, label: e.target.value as any })}
+                    className="w-full py-2 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
+                  >
+                    <option value="Home">Home</option>
+                    <option value="Work">Work / Office</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Contact Full Name <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={addressForm.fullName}
+                    onChange={(e) => setAddressForm({ ...addressForm, fullName: e.target.value })}
+                    placeholder="Recipient's name"
+                    className="w-full py-2 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    10-Digit Mobile Number <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    value={addressForm.phone}
+                    onChange={(e) => setAddressForm({ ...addressForm, phone: e.target.value })}
+                    placeholder="e.g. 9876543210"
+                    className="w-full py-2 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Email Address (Optional)
+                  </label>
+                  <input
+                    type="email"
+                    value={addressForm.email || ''}
+                    onChange={(e) => setAddressForm({ ...addressForm, email: e.target.value })}
+                    placeholder="For delivery updates"
+                    className="w-full py-2 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Flat / House No. / Building / Apartment <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={addressForm.houseBuilding}
+                    onChange={(e) => setAddressForm({ ...addressForm, houseBuilding: e.target.value })}
+                    placeholder="e.g. Flat 402, Lotus Tower"
+                    className="w-full py-2 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Street / Road / Area / Sector <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={addressForm.streetArea}
+                    onChange={(e) => setAddressForm({ ...addressForm, streetArea: e.target.value })}
+                    placeholder="e.g. 100 Feet Road, Indiranagar"
+                    className="w-full py-2 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Landmark (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={addressForm.landmark || ''}
+                    onChange={(e) => setAddressForm({ ...addressForm, landmark: e.target.value })}
+                    placeholder="e.g. Near Indiranagar Metro"
+                    className="w-full py-2 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Town / City <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={addressForm.city}
+                    onChange={(e) => setAddressForm({ ...addressForm, city: e.target.value })}
+                    placeholder="e.g. Bengaluru"
+                    className="w-full py-2 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    State / Union Territory <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={addressForm.state}
+                    onChange={(e) => setAddressForm({ ...addressForm, state: e.target.value })}
+                    placeholder="e.g. Karnataka"
+                    className="w-full py-2 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    6-Digit Postal PIN Code <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={6}
+                    value={addressForm.pinCode}
+                    onChange={(e) => setAddressForm({ ...addressForm, pinCode: e.target.value.replace(/\D/g, '') })}
+                    placeholder="e.g. 560038"
+                    className="w-full py-2 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37] font-mono"
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-700 pt-1">
+                    <input
+                      type="checkbox"
+                      checked={addressForm.isDefault}
+                      onChange={(e) => setAddressForm({ ...addressForm, isDefault: e.target.checked })}
+                      className="w-4 h-4 rounded text-[#0b5c37] accent-[#0b5c37] cursor-pointer"
+                    />
+                    <span className="font-semibold">Make this my default shipping address</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setAddressModalOpen(false)}
+                  disabled={isSavingAddress}
+                  className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-xs rounded-xl transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingAddress}
+                  className="px-5 py-2 bg-[#0b5c37] hover:bg-[#08482b] text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  {isSavingAddress ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving Address...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Save Address</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

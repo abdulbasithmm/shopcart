@@ -56,6 +56,10 @@ import {
   Printer,
   RotateCcw,
   FileText,
+  Archive,
+  ArchiveRestore,
+  Ban,
+  History,
 } from 'lucide-react';
 import { PageView, Product, Order, OrderStatus, ShipmentUpdate, MerchantPaymentSettings, AIScreenshotAnalysis } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -77,6 +81,8 @@ import {
   updateOrderTracking,
   addShipmentUpdate,
   fetchAllAdminOrders,
+  cancelOrderByAdmin,
+  archiveAdminOrder,
 } from '../services/orderService';
 import {
   getStatusMeta,
@@ -150,6 +156,17 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   // Search & Filters
   const [orderSearchQuery, setOrderSearchQuery] = useState('');
   const [orderStatusFilter, setOrderStatusFilter] = useState('all');
+  const [orderViewMode, setOrderViewMode] = useState<'active' | 'archived'>('active');
+  const [adminCancellingOrder, setAdminCancellingOrder] = useState<any | null>(null);
+  const [adminCancellationReason, setAdminCancellationReason] = useState('Customer requested cancellation');
+  const [adminCancellationNotes, setAdminCancellationNotes] = useState('');
+  const [isSubmittingAdminCancel, setIsSubmittingAdminCancel] = useState(false);
+  const [adminArchivingOrder, setAdminArchivingOrder] = useState<any | null>(null);
+  const [isSubmittingAdminArchive, setIsSubmittingAdminArchive] = useState(false);
+  const [orderNotesDrawerOrder, setOrderNotesDrawerOrder] = useState<any | null>(null);
+  const [orderNotesInput, setOrderNotesInput] = useState('');
+  const [isSavingOrderNotes, setIsSavingOrderNotes] = useState(false);
+
   const [productSearchQuery, setProductSearchQuery] = useState('');
   const [productCategoryFilter, setProductCategoryFilter] = useState('all');
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
@@ -294,8 +311,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     setIsLoading(true);
     try {
       if (isSupabaseConfigured()) {
-        // 1. Fetch Orders with Items and Payments
-        const adminOrders = await fetchAllAdminOrders();
+        // 1. Fetch Orders with Items, Payments, and Archive status
+        const adminOrders = await fetchAllAdminOrders({ includeArchived: true });
         setOrders(adminOrders);
 
         // 2. Fetch Products for Admin (all products including drafts, ordered newest first)
@@ -350,8 +367,41 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     }
   };
 
+  // Realtime order synchronization
   useEffect(() => {
     loadAdminData();
+
+    // 1. Listen for local events across checkout and customer actions
+    const handleLocalOrderUpdate = () => {
+      loadAdminData();
+    };
+    window.addEventListener('shopcart-orders-updated', handleLocalOrderUpdate);
+
+    // 2. Supabase Realtime channel subscription on orders
+    let channel: any = null;
+    if (isSupabaseConfigured()) {
+      try {
+        channel = supabase
+          .channel('admin-orders-realtime')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+            loadAdminData();
+          })
+          .subscribe();
+      } catch (e) {
+        console.warn('Realtime channel error:', e);
+      }
+    }
+
+    return () => {
+      window.removeEventListener('shopcart-orders-updated', handleLocalOrderUpdate);
+      if (channel && isSupabaseConfigured()) {
+        try {
+          supabase.removeChannel(channel);
+        } catch {
+          // ignore
+        }
+      }
+    };
   }, []);
 
   // Ping Supabase to test real-time latency
@@ -413,9 +463,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     });
   }, [orders]);
 
-  // Filtered orders with all 8 statuses & tracking query
+  const activeOrdersCount = useMemo(() => orders.filter((o) => !o.is_archived_by_admin).length, [orders]);
+  const archivedOrdersCount = useMemo(() => orders.filter((o) => !!o.is_archived_by_admin).length, [orders]);
+
+  // Filtered orders with active/archived separation, all 8 statuses & search
   const filteredOrders = useMemo(() => {
     return orders.filter((ord) => {
+      const isArchived = !!ord.is_archived_by_admin;
+      if (orderViewMode === 'active' && isArchived) return false;
+      if (orderViewMode === 'archived' && !isArchived) return false;
+
       const statusMatch =
         orderStatusFilter === 'all' ||
         normalizeOrderStatus(ord.status) === normalizeOrderStatus(orderStatusFilter);
@@ -425,13 +482,17 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         !q ||
         (ord.order_number || '').toLowerCase().includes(q) ||
         (ord.guest_email || '').toLowerCase().includes(q) ||
+        (ord.customer_name || '').toLowerCase().includes(q) ||
+        (ord.customer_phone || '').toLowerCase().includes(q) ||
         (ord.tracking_number || '').toLowerCase().includes(q) ||
         (ord.carrier || '').toLowerCase().includes(q) ||
-        (ord.shipping_address?.fullName || '').toLowerCase().includes(q);
+        (ord.shipping_address?.fullName || '').toLowerCase().includes(q) ||
+        (ord.shipping_address?.phone || '').toLowerCase().includes(q) ||
+        (ord.shipping_address?.city || '').toLowerCase().includes(q);
 
       return statusMatch && searchMatch;
     });
-  }, [orders, orderStatusFilter, orderSearchQuery]);
+  }, [orders, orderStatusFilter, orderSearchQuery, orderViewMode]);
 
   // Filtered products
   const filteredProducts = useMemo(() => {
@@ -660,6 +721,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const handleUpdateOrderStatus = async (orderId: string, newStatus: string) => {
     try {
       const canonicalStatus = normalizeOrderStatus(newStatus);
+      if (canonicalStatus === 'cancelled') {
+        const found = orders.find((o) => o.id === orderId || o.order_number === orderId);
+        if (found) {
+          setAdminCancellingOrder(found);
+          setAdminCancellationReason('Cancelled by store administrator');
+          setAdminCancellationNotes('');
+          return;
+        }
+      }
+
       const res = await updateOrderStatus(orderId, canonicalStatus);
       if (res.success) {
         showToast(res.message, 'success');
@@ -672,6 +743,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
             ...prev,
             status: canonicalStatus,
             shipment_updates: res.updatedOrder?.shipment_updates || prev.shipment_updates,
+            status_history: res.updatedOrder?.status_history || prev.status_history,
           }));
         }
       } else {
@@ -679,6 +751,106 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       }
     } catch (err: any) {
       showToast(err.message || 'Failed to update order status', 'error');
+    }
+  };
+
+  const handleConfirmAdminCancel = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminCancellingOrder) return;
+    const combinedReason = `${adminCancellationReason}${
+      adminCancellationNotes.trim() ? ` · ${adminCancellationNotes.trim()}` : ''
+    }`;
+    setIsSubmittingAdminCancel(true);
+    try {
+      const res = await cancelOrderByAdmin(
+        adminCancellingOrder.id || adminCancellingOrder.order_number,
+        combinedReason
+      );
+      if (res.success) {
+        showToast(`Order #${adminCancellingOrder.order_number} marked as Cancelled.`, 'success');
+        setAdminCancellingOrder(null);
+        loadAdminData();
+        if (
+          selectedOrderDetails &&
+          (selectedOrderDetails.id === adminCancellingOrder.id ||
+            selectedOrderDetails.order_number === adminCancellingOrder.order_number)
+        ) {
+          setSelectedOrderDetails((prev: any) => ({
+            ...prev,
+            status: 'cancelled',
+            cancellation_reason: combinedReason,
+            cancelled_at: new Date().toISOString(),
+            cancelled_by: 'admin',
+          }));
+        }
+      } else {
+        showToast(res.message || 'Failed to cancel order', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error cancelling order', 'error');
+    } finally {
+      setIsSubmittingAdminCancel(false);
+    }
+  };
+
+  const handleConfirmAdminArchive = async () => {
+    if (!adminArchivingOrder) return;
+    setIsSubmittingAdminArchive(true);
+    try {
+      const res = await archiveAdminOrder(
+        adminArchivingOrder.id || adminArchivingOrder.order_number
+      );
+      if (res.success) {
+        showToast(
+          `Order #${adminArchivingOrder.order_number} archived. Financial records preserved.`,
+          'success'
+        );
+        setAdminArchivingOrder(null);
+        loadAdminData();
+        if (
+          selectedOrderDetails &&
+          (selectedOrderDetails.id === adminArchivingOrder.id ||
+            selectedOrderDetails.order_number === adminArchivingOrder.order_number)
+        ) {
+          setSelectedOrderDetails((prev: any) => ({ ...prev, is_archived_by_admin: true }));
+        }
+      } else {
+        showToast(res.message || 'Failed to archive order', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error archiving order', 'error');
+    } finally {
+      setIsSubmittingAdminArchive(false);
+    }
+  };
+
+  const handleSaveAdminNotes = async (orderId: string, notes: string) => {
+    setIsSavingOrderNotes(true);
+    try {
+      const found = orders.find((o) => o.id === orderId || o.order_number === orderId);
+      const curStatus = found ? normalizeOrderStatus(found.status) : 'processing';
+      const res = await updateOrderStatus(orderId, curStatus, { adminNotes: notes });
+      if (res.success) {
+        showToast('Internal admin notes saved!', 'success');
+        loadAdminData();
+        if (
+          selectedOrderDetails &&
+          (selectedOrderDetails.id === orderId || selectedOrderDetails.order_number === orderId)
+        ) {
+          setSelectedOrderDetails((prev: any) => ({
+            ...prev,
+            admin_notes: notes,
+            status_history: res.updatedOrder?.status_history || prev.status_history,
+          }));
+        }
+        setOrderNotesDrawerOrder(null);
+      } else {
+        showToast(res.message || 'Failed to save notes', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error saving notes', 'error');
+    } finally {
+      setIsSavingOrderNotes(false);
     }
   };
 
@@ -1826,6 +1998,53 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         {/* ===================================================================== */}
         {activeSection === 'orders' && (
           <div className="space-y-5">
+            {/* View Mode Toggle: Active Pipeline vs Archived Records */}
+            <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setOrderViewMode('active')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-2 ${
+                    orderViewMode === 'active'
+                      ? 'bg-[#0b5c37] text-white shadow-xs'
+                      : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
+                  }`}
+                >
+                  <Package className="w-4 h-4" />
+                  <span>Active Orders Pipeline</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] ${
+                    orderViewMode === 'active' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    {activeOrdersCount}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOrderViewMode('archived')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-2 ${
+                    orderViewMode === 'archived'
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
+                  }`}
+                >
+                  <Archive className="w-4 h-4" />
+                  <span>Archived Orders</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] ${
+                    orderViewMode === 'archived' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    {archivedOrdersCount}
+                  </span>
+                </button>
+              </div>
+
+              {orderViewMode === 'archived' && (
+                <span className="text-[11px] text-slate-500 inline-flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Archived orders maintain permanent financial &amp; ledger integrity.</span>
+                </span>
+              )}
+            </div>
+
             {/* Filter & Search Bar */}
             <div className="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-xs flex flex-col sm:flex-row gap-3 justify-between items-center">
               <div className="relative w-full sm:w-72">
@@ -2049,6 +2268,30 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                               >
                                 <Eye className="w-3.5 h-3.5 text-[#0b5c37]" />
                                 <span>View Details</span>
+                              </button>
+
+                              {/* Archive / Restore Toggle Button */}
+                              <button
+                                type="button"
+                                onClick={() => setAdminArchivingOrder(ord)}
+                                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg border transition-colors cursor-pointer inline-flex items-center gap-1 ${
+                                  ord.is_archived_by_admin
+                                    ? 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200'
+                                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                                }`}
+                                title={ord.is_archived_by_admin ? 'Restore to active pipeline' : 'Archive order from active view'}
+                              >
+                                {ord.is_archived_by_admin ? (
+                                  <>
+                                    <ArchiveRestore className="w-3.5 h-3.5" />
+                                    <span>Restore</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Archive className="w-3.5 h-3.5" />
+                                    <span>Archive</span>
+                                  </>
+                                )}
                               </button>
                             </td>
                           </tr>
@@ -4185,12 +4428,241 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                     )}
                   </div>
                 </div>
+
+                {/* Cancellation Details Section */}
+                {(selectedOrderDetails.status === 'cancelled' || selectedOrderDetails.cancellation_reason) && (
+                  <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 space-y-2">
+                    <div className="flex items-center gap-2 text-rose-700 font-bold text-xs uppercase tracking-wider">
+                      <Ban className="w-4 h-4" />
+                      <span>Order Cancellation Details</span>
+                    </div>
+                    <p className="text-xs text-rose-950 font-medium">
+                      Reason: <span className="font-semibold">{selectedOrderDetails.cancellation_reason || 'Administrative cancellation'}</span>
+                    </p>
+                    <div className="flex items-center gap-3 text-[11px] text-rose-600 font-mono">
+                      <span>Cancelled By: <strong className="capitalize">{selectedOrderDetails.cancelled_by || 'Admin'}</strong></span>
+                      {selectedOrderDetails.cancelled_at && (
+                        <span>· {new Date(selectedOrderDetails.cancelled_at).toLocaleString()}</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Internal Admin Notes Card */}
+                <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-amber-900 font-bold text-xs">
+                      <FileText className="w-4 h-4 text-amber-700" />
+                      <span>Internal Admin Notes (Private)</span>
+                    </div>
+                    <span className="text-[10px] text-amber-700 font-mono">Staff &amp; Ledger only</span>
+                  </div>
+                  <textarea
+                    defaultValue={selectedOrderDetails.admin_notes || ''}
+                    id={`admin-notes-${selectedOrderDetails.id}`}
+                    rows={2}
+                    placeholder="Add internal notes, bank reconciliation remarks, logistics exceptions..."
+                    className="w-full text-xs p-2.5 rounded-xl border border-amber-300 bg-white text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-amber-600 focus:ring-1 focus:ring-amber-500"
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      disabled={isSavingOrderNotes}
+                      onClick={() => {
+                        const el = document.getElementById(`admin-notes-${selectedOrderDetails.id}`) as HTMLTextAreaElement;
+                        if (el) {
+                          handleSaveAdminNotes(selectedOrderDetails.id || selectedOrderDetails.order_number, el.value);
+                        }
+                      }}
+                      className="px-3 py-1.5 bg-amber-700 hover:bg-amber-800 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer inline-flex items-center gap-1.5 shadow-2xs"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>{isSavingOrderNotes ? 'Saving...' : 'Save Notes'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Status History Audit Trail */}
+                {selectedOrderDetails.status_history && selectedOrderDetails.status_history.length > 0 && (
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2.5">
+                    <div className="flex items-center gap-1.5 text-slate-800 font-bold text-xs">
+                      <History className="w-4 h-4 text-slate-600" />
+                      <span>Status Change Audit History ({selectedOrderDetails.status_history.length})</span>
+                    </div>
+                    <div className="divide-y divide-slate-200 border border-slate-200 rounded-xl bg-white max-h-48 overflow-y-auto">
+                      {selectedOrderDetails.status_history.map((hist: any, hIdx: number) => (
+                        <div key={hIdx} className="p-2.5 text-xs flex items-center justify-between gap-2">
+                          <div>
+                            <span className="font-bold text-slate-800 capitalize">
+                              {hist.status?.replace('_', ' ')}
+                            </span>
+                            {hist.note && (
+                              <p className="text-[11px] text-slate-500 mt-0.5">{hist.note}</p>
+                            )}
+                          </div>
+                          <div className="text-right shrink-0 font-mono text-[10px] text-slate-400">
+                            <div>{hist.changedBy}</div>
+                            <div>{new Date(hist.changedAt).toLocaleString()}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
             </div>
           </div>
         );
       })()}
+
+      {/* --------------------------------------------------------------------- */}
+      {/* MODAL: ADMIN CANCEL ORDER WITH MANDATORY REASON */}
+      {/* --------------------------------------------------------------------- */}
+      {adminCancellingOrder && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-lg w-full border border-slate-200 shadow-2xl p-6 space-y-4 my-8 text-slate-900">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                  <Ban className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900">Cancel Order #{adminCancellingOrder.order_number}</h3>
+                  <p className="text-xs text-slate-500">A mandatory cancellation reason is required for audit logs</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAdminCancellingOrder(null)}
+                className="text-slate-400 hover:text-slate-700 p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmAdminCancel} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Cancellation Reason <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={adminCancellationReason}
+                  onChange={(e) => setAdminCancellationReason(e.target.value)}
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 bg-slate-50 text-slate-800 focus:outline-none focus:border-rose-600 focus:bg-white"
+                >
+                  <option value="Customer requested cancellation">Customer requested cancellation</option>
+                  <option value="Fraudulent transaction / unverified payment">Fraudulent transaction / unverified payment</option>
+                  <option value="Item out of stock / inventory mismatch">Item out of stock / inventory mismatch</option>
+                  <option value="Non-serviceable delivery pin code">Non-serviceable delivery pin code</option>
+                  <option value="Payment verification timeout">Payment verification timeout</option>
+                  <option value="Duplicate order placed by customer">Duplicate order placed by customer</option>
+                  <option value="Administrative cancellation">Administrative cancellation</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Additional Internal Notes (Optional)
+                </label>
+                <textarea
+                  value={adminCancellationNotes}
+                  onChange={(e) => setAdminCancellationNotes(e.target.value)}
+                  placeholder="Internal remarks for ledger reconciliation..."
+                  rows={2}
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 bg-slate-50 text-slate-800 focus:outline-none focus:border-rose-600 focus:bg-white"
+                />
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
+                Cancelling this order will update its status, notify customer history, and keep financial records intact.
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setAdminCancellingOrder(null)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                >
+                  Back
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingAdminCancel}
+                  className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-sm transition-colors cursor-pointer"
+                >
+                  {isSubmittingAdminCancel ? 'Cancelling...' : 'Confirm Order Cancellation'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --------------------------------------------------------------------- */}
+      {/* MODAL: ADMIN ARCHIVE ORDER */}
+      {/* --------------------------------------------------------------------- */}
+      {adminArchivingOrder && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-md w-full border border-slate-200 shadow-2xl p-6 space-y-4 my-8 text-slate-900">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+                  <Archive className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900">
+                    {adminArchivingOrder.is_archived_by_admin ? 'Restore Order' : 'Archive Order'} #{adminArchivingOrder.order_number}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {adminArchivingOrder.is_archived_by_admin
+                      ? 'Move back into the active orders pipeline'
+                      : 'Remove from active view while retaining all financial ledger records'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAdminArchivingOrder(null)}
+                className="text-slate-400 hover:text-slate-700 p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs text-slate-600 space-y-1">
+              <p className="font-bold text-slate-800">
+                Financial Record Preservation Guarantee:
+              </p>
+              <p>
+                Archiving never deletes database records, revenue reports, or customer histories. You can switch between &quot;Active Orders Pipeline&quot; and &quot;Archived Orders&quot; at any time.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setAdminArchivingOrder(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSubmittingAdminArchive}
+                onClick={handleConfirmAdminArchive}
+                className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-sm transition-colors cursor-pointer"
+              >
+                {isSubmittingAdminArchive
+                  ? 'Processing...'
+                  : adminArchivingOrder.is_archived_by_admin
+                  ? 'Confirm Restore to Active'
+                  : 'Confirm Archive'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* --------------------------------------------------------------------- */}
       {/* MODAL 2A: VIEW PAYMENT DETAILS MODAL */}

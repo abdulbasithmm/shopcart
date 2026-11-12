@@ -26,14 +26,18 @@ import {
   Eye,
   Trash2,
   CheckCircle,
+  MapPin,
+  Plus,
+  Bookmark,
 } from 'lucide-react';
-import { PageView, CartItem, AIScreenshotAnalysis, MerchantPaymentSettings } from '../types';
+import { PageView, CartItem, AIScreenshotAnalysis, MerchantPaymentSettings, SavedAddress } from '../types';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { ProductImage } from '../components/common/ProductImage';
 import { formatPrice } from '../utils/format';
 import { createOrder, OrderResult } from '../services/orderService';
+import { addCustomerSavedAddress } from '../services/profileService';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 
 interface CheckoutPageProps {
@@ -171,22 +175,24 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
   const [aiAnalysisError, setAiAnalysisError] = useState<string | null>(null);
 
   // Form Fields State
+  const [selectedAddressId, setSelectedAddressId] = useState<string>('default');
+  const [saveAddressToProfile, setSaveAddressToProfile] = useState<boolean>(true);
   const [formData, setFormData] = useState<CheckoutFormState>({
-    fullName: user ? user.name : 'Rahul Sharma',
-    phone: user?.phone || '9876543210',
-    email: user ? user.email : 'rahul.sharma@example.in',
-    houseBuilding: 'Flat 402, Lotus Tower',
-    streetArea: 'MG Road, Indiranagar',
-    city: user?.address ? user.address.city : 'Bengaluru',
-    state: user?.address ? user.address.state : 'Karnataka',
-    pinCode: user?.address ? user.address.zipCode : '560038',
-    landmark: 'Near Indiranagar Metro Station',
-    deliveryInstructions: 'Please call on arrival.',
-    country: 'India',
-    address: 'Flat 402, Lotus Tower, MG Road, Indiranagar',
-    apartment: 'Flat 402, Lotus Tower',
-    postalCode: '560038',
-    deliveryNotes: 'Please call on arrival.',
+    fullName: user?.name || '',
+    phone: user?.phone || '',
+    email: user?.email || '',
+    houseBuilding: user?.shippingAddress?.houseBuilding || '',
+    streetArea: user?.shippingAddress?.streetArea || '',
+    city: user?.shippingAddress?.city || user?.address?.city || 'Bengaluru',
+    state: user?.shippingAddress?.state || user?.address?.state || 'Karnataka',
+    pinCode: user?.shippingAddress?.pinCode || user?.address?.zipCode || '560038',
+    landmark: user?.shippingAddress?.landmark || '',
+    deliveryInstructions: user?.shippingAddress?.deliveryInstructions || '',
+    country: user?.shippingAddress?.country || 'India',
+    address: user?.address?.street || '',
+    apartment: '',
+    postalCode: user?.address?.zipCode || '560038',
+    deliveryNotes: '',
     billingSameAsDelivery: true,
     paymentMethod: 'all_upi',
     upiTransactionRef: '',
@@ -307,22 +313,79 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     setAiAnalysisError(null);
   };
 
-  // Synchronize user profile if signed in
+  // Synchronize user profile & saved addresses if signed in
   React.useEffect(() => {
     if (user) {
-      setFormData((prev) => ({
-        ...prev,
-        fullName: prev.fullName || user.name,
-        email: prev.email || user.email,
-        phone: prev.phone || user.phone || '',
-        address: prev.address || user.address?.street || '',
-        city: prev.city || user.address?.city || 'Bengaluru',
-        state: prev.state || user.address?.state || 'Karnataka',
-        pinCode: prev.pinCode || user.address?.zipCode || '560038',
-        country: 'India',
-      }));
+      const defaultSaved =
+        user.savedAddresses?.find((a) => a.isDefault) ||
+        user.savedAddresses?.[0] ||
+        user.shippingAddress;
+
+      if (defaultSaved) {
+        setSelectedAddressId(defaultSaved.id || 'default');
+        setFormData((prev) => ({
+          ...prev,
+          fullName: prev.fullName || defaultSaved.fullName || user.name || '',
+          email: prev.email || user.email || '',
+          phone: prev.phone || defaultSaved.phone || user.phone || '',
+          houseBuilding: prev.houseBuilding || defaultSaved.houseBuilding || defaultSaved.apartment || '',
+          streetArea: prev.streetArea || defaultSaved.streetArea || defaultSaved.street || '',
+          landmark: prev.landmark || defaultSaved.landmark || '',
+          city: prev.city || defaultSaved.city || user.address?.city || 'Bengaluru',
+          state: prev.state || defaultSaved.state || user.address?.state || 'Karnataka',
+          pinCode: prev.pinCode || defaultSaved.pinCode || defaultSaved.postalCode || user.address?.zipCode || '560038',
+          deliveryInstructions: prev.deliveryInstructions || defaultSaved.deliveryInstructions || '',
+          country: defaultSaved.country || 'India',
+          address: `${defaultSaved.houseBuilding || ''}, ${defaultSaved.streetArea || ''}`.trim() || prev.address || '',
+        }));
+      } else {
+        setFormData((prev) => ({
+          ...prev,
+          fullName: prev.fullName || user.name || '',
+          email: prev.email || user.email || '',
+          phone: prev.phone || user.phone || '',
+          address: prev.address || user.address?.street || '',
+          city: prev.city || user.address?.city || 'Bengaluru',
+          state: prev.state || user.address?.state || 'Karnataka',
+          pinCode: prev.pinCode || user.address?.zipCode || '560038',
+          country: 'India',
+        }));
+      }
     }
   }, [user]);
+
+  const handleSelectSavedAddress = (addr: SavedAddress) => {
+    setSelectedAddressId(addr.id);
+    setFormData((prev) => ({
+      ...prev,
+      fullName: addr.fullName || prev.fullName,
+      phone: addr.phone || prev.phone,
+      houseBuilding: addr.houseBuilding || addr.apartment || '',
+      streetArea: addr.streetArea || addr.street || '',
+      city: addr.city || prev.city,
+      state: addr.state || prev.state,
+      pinCode: addr.pinCode || addr.postalCode || prev.pinCode,
+      landmark: addr.landmark || '',
+      deliveryInstructions: addr.deliveryInstructions || prev.deliveryInstructions,
+      country: addr.country || 'India',
+      address: `${addr.houseBuilding || ''}, ${addr.streetArea || ''}`.trim(),
+    }));
+    setErrors({});
+  };
+
+  const handleSelectNewAddress = () => {
+    setSelectedAddressId('new');
+    setFormData((prev) => ({
+      ...prev,
+      houseBuilding: '',
+      streetArea: '',
+      landmark: '',
+      pinCode: '',
+      city: '',
+      state: '',
+      address: '',
+    }));
+  };
 
   // Validation function for delivery details and 12-digit UPI UTR
   const validateForm = (data: CheckoutFormState): CheckoutFormErrors => {
@@ -499,6 +562,26 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         screenshotUrl: screenshotPreview || null,
         aiAnalysis: aiAnalysis || null,
       });
+
+      // Save address to customer profile if requested
+      if (user && saveAddressToProfile && !user.id.startsWith('usr-demo')) {
+        addCustomerSavedAddress(user.id, {
+          isDefault: selectedAddressId === 'default' || (user.savedAddresses?.length || 0) === 0,
+          label: 'Home',
+          fullName: formData.fullName.trim(),
+          phone: cleanPhone,
+          email: formData.email.trim(),
+          houseBuilding: formData.houseBuilding.trim(),
+          streetArea: formData.streetArea.trim(),
+          landmark: (formData.landmark || '').trim(),
+          city: formData.city.trim(),
+          district: '',
+          state: formData.state.trim(),
+          pinCode: formData.pinCode.trim(),
+          country: formData.country || 'India',
+          deliveryInstructions: (formData.deliveryInstructions || '').trim(),
+        }).catch((e) => console.warn('Non-blocking address save to profile error:', e));
+      }
 
       // Clear cart only after confirmed order creation
       clearCart();
@@ -721,59 +804,165 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
             </section>
 
             {/* SECTION 2: Delivery Address */}
-            <section className="bg-white rounded-2xl border border-slate-200/90 p-6 sm:p-7 shadow-xs space-y-4">
-              <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
-                <div className="w-7 h-7 rounded-lg bg-[#0b5c37] text-white font-black text-xs flex items-center justify-center">
-                  2
+            <section className="bg-white rounded-2xl border border-slate-200/90 p-6 sm:p-7 shadow-xs space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-2">
+                <div className="flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-lg bg-[#0b5c37] text-white font-black text-xs flex items-center justify-center">
+                    2
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-slate-900">Delivery Address</h2>
+                    <p className="text-xs text-slate-500">Destination address for package shipping and dispatch</p>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="text-base font-bold text-slate-900">Delivery Address</h2>
-                  <p className="text-xs text-slate-500">Physical destination for shipping and parcel tracking</p>
-                </div>
+
+                {user && (
+                  <span className="text-[11px] font-medium text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 flex items-center gap-1 self-start sm:self-auto">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Auto-Saved Profile Sync Active</span>
+                  </span>
+                )}
               </div>
 
+              {/* Saved Addresses Selector (When logged-in user has saved addresses) */}
+              {user?.savedAddresses && user.savedAddresses.length > 0 && (
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Deliver to a Saved Address:
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {user.savedAddresses.map((addr) => {
+                      const isSelected = selectedAddressId === addr.id;
+                      return (
+                        <div
+                          key={addr.id}
+                          onClick={() => handleSelectSavedAddress(addr)}
+                          className={`p-3 rounded-xl border text-xs cursor-pointer transition-all flex flex-col justify-between ${
+                            isSelected
+                              ? 'border-[#0b5c37] bg-emerald-50/60 ring-2 ring-[#0b5c37]/20 shadow-xs'
+                              : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                              <MapPin className="w-3.5 h-3.5 text-[#0b5c37]" />
+                              <span>{addr.label || 'Home'}</span>
+                              {addr.isDefault && (
+                                <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.2 rounded">
+                                  Default
+                                </span>
+                              )}
+                            </span>
+                            <input
+                              type="radio"
+                              name="savedAddressSelect"
+                              checked={isSelected}
+                              onChange={() => handleSelectSavedAddress(addr)}
+                              className="accent-[#0b5c37] cursor-pointer"
+                            />
+                          </div>
+                          <p className="text-slate-700 font-medium truncate">
+                            {addr.fullName || user.name} · {addr.phone || user.phone}
+                          </p>
+                          <p className="text-[11px] text-slate-500 line-clamp-2 mt-0.5">
+                            {addr.houseBuilding ? `${addr.houseBuilding}, ` : ''}
+                            {addr.streetArea ? `${addr.streetArea}, ` : ''}
+                            {addr.city}, {addr.state} - {addr.pinCode}
+                          </p>
+                        </div>
+                      );
+                    })}
+
+                    {/* New Address Card */}
+                    <div
+                      onClick={handleSelectNewAddress}
+                      className={`p-3 rounded-xl border-2 border-dashed text-xs cursor-pointer transition-all flex flex-col items-center justify-center min-h-[90px] text-center ${
+                        selectedAddressId === 'new'
+                          ? 'border-[#0b5c37] bg-emerald-50/40 text-[#0b5c37]'
+                          : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-600'
+                      }`}
+                    >
+                      <Plus className="w-4 h-4 mb-1" />
+                      <span className="font-bold">Deliver to a Different Address</span>
+                      <span className="text-[10px] text-slate-400">Enter new location details</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Delivery Address Input Fields */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
                 <div className="sm:col-span-2">
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Street Address <span className="text-rose-500">*</span>
+                    Flat / House No. / Building / Apartment <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="text"
-                    name="address"
-                    value={formData.address}
-                    onChange={(e) => handleFieldChange('address', e.target.value)}
-                    onBlur={() => handleBlur('address')}
-                    placeholder="e.g. 742 Evergreen Terrace"
+                    name="houseBuilding"
+                    value={formData.houseBuilding}
+                    onChange={(e) => {
+                      handleFieldChange('houseBuilding', e.target.value);
+                      handleFieldChange('address', `${e.target.value}, ${formData.streetArea}`.trim());
+                    }}
+                    onBlur={() => handleBlur('houseBuilding')}
+                    placeholder="e.g. Flat 402, Lotus Tower, 4th Floor"
                     className={`w-full px-3.5 py-2.5 text-xs bg-slate-50 border rounded-lg transition-colors focus:outline-none focus:bg-white focus:ring-2 ${
-                      errors.address && touched.address
+                      errors.houseBuilding && touched.houseBuilding
                         ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/30'
                         : 'border-slate-200 focus:ring-emerald-200 focus:border-[#0b5c37]'
                     }`}
                   />
-                  {errors.address && touched.address && (
+                  {errors.houseBuilding && touched.houseBuilding && (
                     <p className="mt-1 text-[11px] text-rose-600 font-medium flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" /> {errors.address}
+                      <AlertCircle className="w-3 h-3" /> {errors.houseBuilding}
+                    </p>
+                  )}
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Street / Road / Area / Locality <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="streetArea"
+                    value={formData.streetArea}
+                    onChange={(e) => {
+                      handleFieldChange('streetArea', e.target.value);
+                      handleFieldChange('address', `${formData.houseBuilding}, ${e.target.value}`.trim());
+                    }}
+                    onBlur={() => handleBlur('streetArea')}
+                    placeholder="e.g. 100 Feet Road, Indiranagar, Stage 2"
+                    className={`w-full px-3.5 py-2.5 text-xs bg-slate-50 border rounded-lg transition-colors focus:outline-none focus:bg-white focus:ring-2 ${
+                      errors.streetArea && touched.streetArea
+                        ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/30'
+                        : 'border-slate-200 focus:ring-emerald-200 focus:border-[#0b5c37]'
+                    }`}
+                  />
+                  {errors.streetArea && touched.streetArea && (
+                    <p className="mt-1 text-[11px] text-rose-600 font-medium flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" /> {errors.streetArea}
                     </p>
                   )}
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Apartment / Suite (Optional)
+                    Landmark (Optional)
                   </label>
                   <input
                     type="text"
-                    name="apartment"
-                    value={formData.apartment}
-                    onChange={(e) => handleFieldChange('apartment', e.target.value)}
-                    placeholder="Apt 4B, Floor 2"
+                    name="landmark"
+                    value={formData.landmark || ''}
+                    onChange={(e) => handleFieldChange('landmark', e.target.value)}
+                    placeholder="e.g. Near Metro Station / Behind Mall"
                     className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white focus:ring-2 focus:ring-emerald-200 focus:border-[#0b5c37]"
                   />
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    City <span className="text-rose-500">*</span>
+                    Town / City <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="text"
@@ -781,18 +970,23 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                     value={formData.city}
                     onChange={(e) => handleFieldChange('city', e.target.value)}
                     onBlur={() => handleBlur('city')}
-                    placeholder="Seattle"
+                    placeholder="e.g. Bengaluru"
                     className={`w-full px-3.5 py-2.5 text-xs bg-slate-50 border rounded-lg transition-colors focus:outline-none focus:bg-white focus:ring-2 ${
                       errors.city && touched.city
                         ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/30'
                         : 'border-slate-200 focus:ring-emerald-200 focus:border-[#0b5c37]'
                     }`}
                   />
+                  {errors.city && touched.city && (
+                    <p className="mt-1 text-[11px] text-rose-600 font-medium flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" /> {errors.city}
+                    </p>
+                  )}
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    State / Province <span className="text-rose-500">*</span>
+                    State / Union Territory <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="text"
@@ -800,43 +994,57 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                     value={formData.state}
                     onChange={(e) => handleFieldChange('state', e.target.value)}
                     onBlur={() => handleBlur('state')}
-                    placeholder="WA"
+                    placeholder="e.g. Karnataka"
                     className={`w-full px-3.5 py-2.5 text-xs bg-slate-50 border rounded-lg transition-colors focus:outline-none focus:bg-white focus:ring-2 ${
                       errors.state && touched.state
                         ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/30'
                         : 'border-slate-200 focus:ring-emerald-200 focus:border-[#0b5c37]'
                     }`}
                   />
+                  {errors.state && touched.state && (
+                    <p className="mt-1 text-[11px] text-rose-600 font-medium flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" /> {errors.state}
+                    </p>
+                  )}
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Postal / ZIP Code <span className="text-rose-500">*</span>
+                    6-Digit Postal PIN Code <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="text"
-                    name="postalCode"
-                    value={formData.postalCode}
-                    onChange={(e) => handleFieldChange('postalCode', e.target.value)}
-                    onBlur={() => handleBlur('postalCode')}
-                    placeholder="98101"
-                    className={`w-full px-3.5 py-2.5 text-xs bg-slate-50 border rounded-lg transition-colors focus:outline-none focus:bg-white focus:ring-2 ${
-                      errors.postalCode && touched.postalCode
+                    maxLength={6}
+                    name="pinCode"
+                    value={formData.pinCode}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, '');
+                      handleFieldChange('pinCode', val);
+                      handleFieldChange('postalCode', val);
+                    }}
+                    onBlur={() => handleBlur('pinCode')}
+                    placeholder="e.g. 560038"
+                    className={`w-full px-3.5 py-2.5 text-xs bg-slate-50 border rounded-lg font-mono transition-colors focus:outline-none focus:bg-white focus:ring-2 ${
+                      errors.pinCode && touched.pinCode
                         ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/30'
                         : 'border-slate-200 focus:ring-emerald-200 focus:border-[#0b5c37]'
                     }`}
                   />
+                  {errors.pinCode && touched.pinCode && (
+                    <p className="mt-1 text-[11px] text-rose-600 font-medium flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" /> {errors.pinCode}
+                    </p>
+                  )}
                 </div>
 
-                <div>
+                <div className="sm:col-span-2">
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Country <span className="text-rose-500">*</span>
+                    Country
                   </label>
                   <select
                     name="country"
                     value={formData.country}
                     onChange={(e) => handleFieldChange('country', e.target.value)}
-                    onBlur={() => handleBlur('country')}
                     className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white focus:ring-2 focus:ring-emerald-200"
                   >
                     {COUNTRIES.map((c) => (
@@ -846,6 +1054,38 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                     ))}
                   </select>
                 </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Delivery Instructions / Notes (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    name="deliveryInstructions"
+                    value={formData.deliveryInstructions || ''}
+                    onChange={(e) => handleFieldChange('deliveryInstructions', e.target.value)}
+                    placeholder="e.g. Please ring doorbell twice; leave with security if unavailable"
+                    className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white focus:ring-2 focus:ring-emerald-200"
+                  />
+                </div>
+
+                {/* Save to Profile Checkbox */}
+                {user && (
+                  <div className="sm:col-span-2 pt-2">
+                    <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-700 select-none">
+                      <input
+                        type="checkbox"
+                        checked={saveAddressToProfile}
+                        onChange={(e) => setSaveAddressToProfile(e.target.checked)}
+                        className="w-4 h-4 rounded text-[#0b5c37] accent-[#0b5c37] cursor-pointer"
+                      />
+                      <span className="font-medium flex items-center gap-1.5">
+                        <Bookmark className="w-3.5 h-3.5 text-[#0b5c37]" />
+                        <span>Save or update this delivery address to my account profile for faster checkout</span>
+                      </span>
+                    </label>
+                  </div>
+                )}
               </div>
             </section>
 

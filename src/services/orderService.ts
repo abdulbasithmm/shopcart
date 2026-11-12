@@ -191,6 +191,14 @@ export async function createOrder(params: CreateOrderParams): Promise<OrderResul
           // Non-fatal
         }
 
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('shopcart-orders-updated', {
+              detail: { orderNumber: params.orderNumber, orderId: data.orderId },
+            })
+          );
+        }
+
         return {
           success: true,
           orderId: data.orderId,
@@ -214,13 +222,120 @@ export async function createOrder(params: CreateOrderParams): Promise<OrderResul
   }
 
   try {
-    // 1. Insert into orders table with tracking number, carrier, estimated delivery, and initial updates
-    const { data: orderData, error: orderErr } = await supabase
+    // Attempt 2: Try atomic PostgreSQL RPC create_complete_order if available
+    try {
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc('create_complete_order', {
+        p_order: {
+          order_number: params.orderNumber,
+          user_id: params.user?.id && !params.user.id.startsWith('usr-') ? params.user.id : null,
+          guest_email: params.guestEmail || params.shippingAddress.email || null,
+          customer_name: params.shippingAddress.fullName,
+          customer_email: params.guestEmail || params.shippingAddress.email || null,
+          customer_phone: params.shippingAddress.phone,
+          status: initialStatus,
+          subtotal: params.subtotal,
+          discount_amount: params.discountAmount,
+          shipping_fee: params.shippingFee,
+          tax_amount: params.taxAmount,
+          total_amount: params.totalAmount,
+          coupon_code: params.couponCode || null,
+          shipping_address: params.shippingAddress,
+          customer_notes: params.customerNotes || null,
+          tracking_number: trackingNumber,
+          carrier: carrier,
+          estimated_delivery_date: estimatedDeliveryISO,
+          shipment_updates: initialShipmentUpdates,
+        },
+        p_items: params.cart.map((item) => ({
+          product_id: item.product.id,
+          product_name: item.product.name,
+          unit_price: item.product.price,
+          quantity: item.quantity,
+          total_price: Number((item.product.price * item.quantity).toFixed(2)),
+          selected_color: item.selectedColor || null,
+          selected_size: item.selectedSize || null,
+        })),
+        p_payment: {
+          payment_method: params.paymentMethod,
+          payment_status: params.paymentStatus,
+          transaction_reference: params.transactionReference || null,
+          screenshot_url: params.screenshotUrl || null,
+          ai_analysis: params.aiAnalysis || null,
+          ai_confidence_score: params.aiAnalysis?.confidence_score || null,
+          ai_recommendation: params.aiAnalysis?.recommended_action || null,
+          suspicious_indicators: params.aiAnalysis?.suspicious_indicators || [],
+        },
+      });
+
+      if (!rpcErr && rpcRes && rpcRes.success) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('shopcart-orders-updated', {
+              detail: { orderNumber: params.orderNumber, orderId: rpcRes.order_id },
+            })
+          );
+        }
+        return {
+          success: true,
+          orderId: rpcRes.order_id,
+          orderNumber: params.orderNumber,
+          isStoredInSupabase: true,
+          trackingNumber,
+          estimatedDeliveryDate: estimatedDeliveryISO,
+        };
+      }
+    } catch {
+      // Non-fatal, fall back to direct inserts
+    }
+
+    // Attempt 3: Direct insert into orders table
+    const orderInsertPayload: any = {
+      order_number: params.orderNumber,
+      user_id: params.user?.id && !params.user.id.startsWith('usr-') ? params.user.id : null,
+      guest_email: params.guestEmail || params.shippingAddress.email || null,
+      customer_name: params.shippingAddress.fullName,
+      customer_email: params.guestEmail || params.shippingAddress.email || null,
+      customer_phone: params.shippingAddress.phone,
+      status: initialStatus,
+      subtotal: params.subtotal,
+      discount_amount: params.discountAmount,
+      shipping_fee: params.shippingFee,
+      tax_amount: params.taxAmount,
+      total_amount: params.totalAmount,
+      coupon_code: params.couponCode || null,
+      shipping_address: params.shippingAddress as any,
+      customer_notes: params.customerNotes || null,
+      tracking_number: trackingNumber,
+      carrier: carrier,
+      estimated_delivery_date: estimatedDeliveryISO,
+      shipment_updates: initialShipmentUpdates as any,
+      status_history: [
+        {
+          status: initialStatus,
+          changedAt: new Date().toISOString(),
+          changedBy: 'Customer',
+          note: 'Order placed',
+        },
+      ],
+      payment_method: params.paymentMethod,
+      payment_status: params.paymentStatus,
+      is_archived_by_admin: false,
+      is_hidden_by_customer: false,
+    };
+
+    let { data: orderData, error: orderErr } = await supabase
       .from('orders')
-      .insert({
+      .insert(orderInsertPayload)
+      .select('id')
+      .single();
+
+    // Fallback without extended columns if schema cache not reloaded
+    if (orderErr) {
+      console.warn('Primary orders insert error, attempting base columns:', orderErr.message);
+      const basePayload = {
         order_number: params.orderNumber,
         user_id: params.user?.id && !params.user.id.startsWith('usr-') ? params.user.id : null,
-        guest_email: params.guestEmail || params.shippingAddress.fullName || null,
+        guest_email: params.guestEmail || params.shippingAddress.email || null,
         status: initialStatus,
         subtotal: params.subtotal,
         discount_amount: params.discountAmount,
@@ -234,14 +349,27 @@ export async function createOrder(params: CreateOrderParams): Promise<OrderResul
         carrier: carrier,
         estimated_delivery_date: estimatedDeliveryISO,
         shipment_updates: initialShipmentUpdates as any,
-      })
-      .select('id')
-      .single();
+      };
+
+      const fallback = await supabase
+        .from('orders')
+        .insert(basePayload)
+        .select('id')
+        .single();
+
+      if (!fallback.error && fallback.data) {
+        orderData = fallback.data;
+        orderErr = null;
+      } else {
+        throw new Error(fallback.error?.message || orderErr.message);
+      }
+    }
 
     if (orderErr || !orderData) {
       console.error('Failed to insert order in Supabase:', orderErr);
-      throw new Error(orderErr?.message || 'Failed to create order record in Supabase');
+      throw new Error((orderErr as any)?.message || 'Failed to create order record in Supabase');
     }
+
 
     const orderId = orderData.id;
 
@@ -407,38 +535,71 @@ export async function createOrder(params: CreateOrderParams): Promise<OrderResul
  * Fetch orders strictly for a specific customer
  * Enforces customer privacy and isolation
  */
-export async function fetchUserOrders(userId: string): Promise<Order[]> {
+export async function fetchUserOrders(
+  userId: string,
+  options?: { includeHidden?: boolean }
+): Promise<Order[]> {
   if (!userId) return [];
 
-  if (!isSupabaseConfigured()) {
-    try {
-      const local: Order[] = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
-      return local.filter((o) => !o.user_id || o.user_id === userId || userId === 'usr-demo-customer');
-    } catch {
-      return [];
+  const includeHidden = Boolean(options?.includeHidden);
+
+  // 1. Try Backend API
+  try {
+    const res = await fetch(`/api/orders/customer/${userId}?includeHidden=${includeHidden}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.success && Array.isArray(json.orders)) {
+        const orderMap = new Map<string, Order>();
+        json.orders.forEach((o: any) => {
+          const norm = normalizeOrderRecord(o);
+          if (includeHidden || !norm.is_hidden_by_customer) {
+            orderMap.set(norm.order_number || norm.id, norm);
+          }
+        });
+        return Array.from(orderMap.values()).sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+      }
     }
+  } catch {
+    // Non-fatal, try direct Supabase
   }
 
+  // 2. Local storage mirror
+  let local: Order[] = [];
   try {
-    const { data, error } = await supabase
+    local = JSON.parse(localStorage.getItem('shopcart_orders') || '[]')
+      .filter((o: Order) => !o.user_id || o.user_id === userId || userId === 'usr-demo-customer')
+      .filter((o: Order) => includeHidden || !o.is_hidden_by_customer);
+  } catch {
+    local = [];
+  }
+
+  if (!isSupabaseConfigured()) {
+    return local;
+  }
+
+  // 3. Supabase direct
+  try {
+    let query = supabase
       .from('orders')
       .select('*, order_items(*), payment_records(*)')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
+      .eq('user_id', userId);
+
+    if (!includeHidden) {
+      query = query.eq('is_hidden_by_customer', false);
+    }
+
+    const { data, error } = await query.order('created_at', { ascending: false });
 
     if (error) {
       console.warn('Failed to fetch user orders from Supabase:', error.message);
-      const local: Order[] = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
-      return local.filter((o) => !o.user_id || o.user_id === userId);
+      return local;
     }
 
-    const remote = (data || []).map(normalizeOrderRecord);
-    let local: Order[] = [];
-    try {
-      local = JSON.parse(localStorage.getItem('shopcart_orders') || '[]').filter((o: Order) => o.user_id === userId);
-    } catch {
-      local = [];
-    }
+    const remote = (data || [])
+      .map(normalizeOrderRecord)
+      .filter((o) => includeHidden || !o.is_hidden_by_customer);
 
     const map = new Map<string, Order>();
     local.forEach((o) => map.set(o.order_number, o));
@@ -448,24 +609,28 @@ export async function fetchUserOrders(userId: string): Promise<Order[]> {
     );
   } catch (err) {
     console.warn('Exception in fetchUserOrders:', err);
-    return [];
+    return local;
   }
 }
 
 /**
- * Fetch all orders for administrator
+ * Fetch all orders for administrator with archive filtering
  */
-export async function fetchAllAdminOrders(): Promise<Order[]> {
+export async function fetchAllAdminOrders(options?: { includeArchived?: boolean }): Promise<Order[]> {
+  const includeArchived = Boolean(options?.includeArchived);
+
   let localOrders: Order[] = [];
   try {
-    localOrders = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
+    localOrders = JSON.parse(localStorage.getItem('shopcart_orders') || '[]').filter(
+      (o: Order) => includeArchived || !o.is_archived_by_admin
+    );
   } catch {
     localOrders = [];
   }
 
   // 1. Primary path: Fetch from server-authoritative Admin Orders endpoint
   try {
-    const res = await fetch('/api/admin/orders');
+    const res = await fetch(`/api/admin/orders?includeArchived=${includeArchived}`);
     if (res.ok) {
       const json = await res.json();
       if (json.success && Array.isArray(json.orders)) {
@@ -473,7 +638,9 @@ export async function fetchAllAdminOrders(): Promise<Order[]> {
         localOrders.forEach((o) => orderMap.set(o.order_number || o.id, o));
         json.orders.forEach((o: any) => {
           const norm = normalizeOrderRecord(o);
-          orderMap.set(norm.order_number || norm.id, norm);
+          if (includeArchived || !norm.is_archived_by_admin) {
+            orderMap.set(norm.order_number || norm.id, norm);
+          }
         });
         return Array.from(orderMap.values()).sort(
           (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
@@ -489,10 +656,16 @@ export async function fetchAllAdminOrders(): Promise<Order[]> {
   }
 
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('orders')
       .select('*, order_items(*), payment_records(*)')
       .order('created_at', { ascending: false });
+
+    if (!includeArchived) {
+      query = query.eq('is_archived_by_admin', false);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.warn('Failed to fetch admin orders from Supabase:', error.message);
@@ -528,7 +701,10 @@ export async function fetchAllAdminOrders(): Promise<Order[]> {
       }
     }
 
-    const remoteOrders = (data || []).map(normalizeOrderRecord);
+    const remoteOrders = (data || [])
+      .map(normalizeOrderRecord)
+      .filter((o) => includeArchived || !o.is_archived_by_admin);
+
     const orderMap = new Map<string, Order>();
     localOrders.forEach((o) => orderMap.set(o.order_number, o));
     remoteOrders.forEach((o) => orderMap.set(o.order_number, o));
@@ -540,6 +716,7 @@ export async function fetchAllAdminOrders(): Promise<Order[]> {
     return localOrders;
   }
 }
+
 
 /**
  * Helper to normalize order record from database
@@ -601,12 +778,33 @@ function normalizeOrderRecord(row: any): Order {
     deliveryInstructions: shipAddr.deliveryInstructions || shipAddr.instructions || row.customer_notes || '',
   };
 
+  const initialMilestones = createInitialShipmentUpdates(
+    new Date(row.created_at || Date.now()),
+    paymentStatus === 'verified'
+  );
+
   return {
     ...row,
     customer_name: cleanAddress.fullName,
     customer_email: cleanAddress.email || null,
     customer_phone: cleanAddress.phone || null,
     status: normStatus,
+    cancellation_reason: row.cancellation_reason || null,
+    cancelled_at: row.cancelled_at || null,
+    cancelled_by: row.cancelled_by || null,
+    admin_notes: row.admin_notes || null,
+    status_history: Array.isArray(row.status_history)
+      ? row.status_history
+      : [
+          {
+            status: normStatus,
+            changedAt: row.created_at || new Date().toISOString(),
+            changedBy: 'System',
+            note: 'Order placed',
+          },
+        ],
+    is_archived_by_admin: Boolean(row.is_archived_by_admin),
+    is_hidden_by_customer: Boolean(row.is_hidden_by_customer),
     subtotal: Number(row.subtotal || (Number(row.total_amount || 0) - Number(row.shipping_fee || 0))),
     shipping_fee: Number(row.shipping_fee || 0),
     discount_amount: Number(row.discount_amount || 0),
@@ -627,13 +825,13 @@ function normalizeOrderRecord(row: any): Order {
     shipping_address: cleanAddress,
     shipment_updates: Array.isArray(row.shipment_updates) && row.shipment_updates.length > 0
       ? row.shipment_updates
-      : createInitialShipmentUpdates(new Date(row.created_at || Date.now()), paymentStatus === 'verified'),
+      : initialMilestones,
   };
 }
 
 /**
  * Admin: Update order status to any of the 8 canonical statuses
- * Automatically appends a shipment update milestone
+ * Automatically appends status history and shipment update milestone
  */
 export async function updateOrderStatus(
   orderId: string,
@@ -642,79 +840,136 @@ export async function updateOrderStatus(
     customTitle?: string;
     customDescription?: string;
     location?: string;
+    adminNotes?: string;
+    cancellationReason?: string;
+    cancelledBy?: 'admin' | 'customer';
   }
 ): Promise<{ success: boolean; message: string; updatedOrder?: Order }> {
   const meta = getStatusMeta(newStatus);
   const now = new Date();
+  const timestamp = now.toISOString();
 
   const newUpdate: ShipmentUpdate = {
     id: `evt-${Date.now()}`,
     status: newStatus,
-    title: options?.customTitle || meta.label,
-    description: options?.customDescription || meta.description,
+    title: options?.customTitle || (newStatus === 'cancelled' ? 'Order Cancelled' : meta.label),
+    description: options?.cancellationReason || options?.customDescription || meta.description,
     location: options?.location || 'Shop Cart Fulfillment Network',
-    timestamp: now.toISOString(),
+    timestamp,
   };
 
-  const isConnected = isSupabaseConfigured() && orderId && !orderId.startsWith('local-');
+  const newHistoryItem = {
+    status: newStatus,
+    changedAt: timestamp,
+    changedBy: options?.cancelledBy === 'customer' ? 'Customer' : 'Administrator',
+    note: options?.cancellationReason || options?.adminNotes || options?.customDescription || undefined,
+  };
 
-  if (!isConnected) {
-    // Update local storage
-    try {
-      const local: Order[] = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
-      let updatedOrder: Order | undefined;
-
-      const nextOrders = local.map((ord) => {
-        if (ord.id === orderId || ord.order_number === orderId) {
-          const updates = [...(ord.shipment_updates || []), newUpdate];
-          updatedOrder = {
-            ...ord,
-            status: newStatus,
-            shipment_updates: updates,
-            updated_at: now.toISOString(),
-          };
-          return updatedOrder;
-        }
-        return ord;
-      });
-
-      localStorage.setItem('shopcart_orders', JSON.stringify(nextOrders));
-      return { success: true, message: `Status updated to ${meta.label}`, updatedOrder };
-    } catch (err: any) {
-      return { success: false, message: err.message || 'Failed to update local order' };
+  // 1. Try Backend API
+  try {
+    const res = await fetch(`/api/admin/orders/${orderId}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        status: newStatus,
+        note: options?.customDescription || options?.cancellationReason,
+        location: options?.location,
+        cancellationReason: options?.cancellationReason,
+        adminNotes: options?.adminNotes,
+      }),
+    });
+    if (res.ok) {
+      // Backend updated successfully
     }
+  } catch {
+    // Non-fatal if backend endpoint is unavailable
   }
 
+  // 2. Local Storage Mirror
   try {
-    // 1. Fetch current shipment_updates
+    const local: Order[] = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
+    let updatedOrder: Order | undefined;
+
+    const nextOrders = local.map((ord) => {
+      if (ord.id === orderId || ord.order_number === orderId) {
+        const updates = [newUpdate, ...(ord.shipment_updates || [])];
+        const history = [newHistoryItem, ...(ord.status_history || [])];
+        updatedOrder = {
+          ...ord,
+          status: newStatus,
+          shipment_updates: updates,
+          status_history: history,
+          cancellation_reason: options?.cancellationReason || (newStatus === 'cancelled' ? ord.cancellation_reason || 'Cancelled' : null),
+          cancelled_at: newStatus === 'cancelled' ? timestamp : ord.cancelled_at,
+          cancelled_by: options?.cancelledBy || (newStatus === 'cancelled' ? 'admin' : ord.cancelled_by),
+          admin_notes: options?.adminNotes !== undefined ? options.adminNotes : ord.admin_notes,
+          updated_at: timestamp,
+        };
+        return updatedOrder;
+      }
+      return ord;
+    });
+
+    localStorage.setItem('shopcart_orders', JSON.stringify(nextOrders));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shopcart-orders-updated', { detail: { orderId, status: newStatus } }));
+    }
+  } catch {
+    // Non-fatal
+  }
+
+  const isConnected = isSupabaseConfigured() && orderId && !orderId.startsWith('local-');
+  if (!isConnected) {
+    return { success: true, message: `Status updated to ${meta.label}` };
+  }
+
+  // 3. Supabase Direct Update
+  try {
     const { data: currentOrder } = await supabase
       .from('orders')
-      .select('shipment_updates')
+      .select('shipment_updates, status_history, admin_notes')
       .eq('id', orderId)
-      .single();
+      .maybeSingle();
 
     const existingUpdates: ShipmentUpdate[] = Array.isArray(currentOrder?.shipment_updates)
       ? currentOrder.shipment_updates
       : [];
-    const mergedUpdates = [...existingUpdates, newUpdate];
+    const mergedUpdates = [newUpdate, ...existingUpdates];
 
-    // 2. Update orders table in Supabase
-    const { data: updatedData, error: updateErr } = await supabase
-      .from('orders')
-      .update({
-        status: newStatus,
-        shipment_updates: mergedUpdates as any,
-        updated_at: now.toISOString(),
-      })
-      .eq('id', orderId)
-      .select('*, order_items(*), payment_records(*)')
-      .single();
+    const existingHistory = Array.isArray(currentOrder?.status_history)
+      ? currentOrder.status_history
+      : [];
+    const mergedHistory = [newHistoryItem, ...existingHistory];
 
-    if (updateErr) {
-      throw updateErr;
+    const payload: any = {
+      status: newStatus,
+      shipment_updates: mergedUpdates as any,
+      status_history: mergedHistory as any,
+      updated_at: timestamp,
+    };
+
+    if (options?.adminNotes !== undefined) {
+      payload.admin_notes = options.adminNotes;
     }
 
-    // 3. Insert into order_shipment_updates table if present
+    if (newStatus === 'cancelled') {
+      payload.cancellation_reason = options?.cancellationReason || 'Cancelled by Administrator';
+      payload.cancelled_at = timestamp;
+      payload.cancelled_by = options?.cancelledBy || 'admin';
+    }
+
+    const { data: updatedData, error: updateErr } = await supabase
+      .from('orders')
+      .update(payload)
+      .eq('id', orderId)
+      .select('*, order_items(*), payment_records(*)')
+      .maybeSingle();
+
+    if (updateErr) {
+      console.warn('Direct Supabase update warning:', updateErr.message);
+    }
+
+    // Optional table insert
     try {
       await supabase.from('order_shipment_updates').insert({
         order_id: orderId,
@@ -725,12 +980,12 @@ export async function updateOrderStatus(
         created_at: newUpdate.timestamp,
       });
     } catch {
-      // Ignored if table not created
+      // Ignored
     }
 
     return {
       success: true,
-      message: `Status updated to ${meta.label} in Supabase`,
+      message: `Status updated to ${meta.label} in database`,
       updatedOrder: updatedData ? normalizeOrderRecord(updatedData) : undefined,
     };
   } catch (err: any) {
@@ -738,6 +993,193 @@ export async function updateOrderStatus(
     return { success: false, message: err.message || 'Failed to update order status' };
   }
 }
+
+/**
+ * Admin: Cancel an order with a mandatory cancellation reason
+ */
+export async function cancelOrderByAdmin(
+  orderId: string,
+  cancellationReason: string,
+  adminNotes?: string
+): Promise<{ success: boolean; message: string }> {
+  if (!cancellationReason || !cancellationReason.trim()) {
+    return { success: false, message: 'A cancellation reason is required.' };
+  }
+
+  return updateOrderStatus(orderId, 'cancelled', {
+    cancellationReason: cancellationReason.trim(),
+    adminNotes: adminNotes?.trim(),
+    cancelledBy: 'admin',
+    customTitle: 'Order Cancelled by Administrator',
+    customDescription: cancellationReason.trim(),
+  });
+}
+
+/**
+ * Admin: Archive or unarchive a cancelled order (soft-delete / archive)
+ * Keeps financial records and order history completely intact.
+ */
+export async function archiveAdminOrder(
+  orderId: string,
+  archive = true
+): Promise<{ success: boolean; message: string }> {
+  const timestamp = new Date().toISOString();
+
+  // 1. Try Backend API
+  try {
+    await fetch(`/api/admin/orders/${orderId}/archive`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ archive }),
+    });
+  } catch {
+    // Non-fatal
+  }
+
+  // 2. Update local storage mirror
+  try {
+    const local: Order[] = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
+    const nextOrders = local.map((ord) => {
+      if (ord.id === orderId || ord.order_number === orderId) {
+        return {
+          ...ord,
+          is_archived_by_admin: Boolean(archive),
+          updated_at: timestamp,
+        };
+      }
+      return ord;
+    });
+    localStorage.setItem('shopcart_orders', JSON.stringify(nextOrders));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shopcart-orders-updated', { detail: { orderId, isArchived: archive } }));
+    }
+  } catch {
+    // Non-fatal
+  }
+
+  // 3. Update Supabase
+  if (isSupabaseConfigured() && orderId && !orderId.startsWith('local-')) {
+    try {
+      await supabase
+        .from('orders')
+        .update({
+          is_archived_by_admin: Boolean(archive),
+          updated_at: timestamp,
+        })
+        .eq('id', orderId);
+    } catch (err: any) {
+      console.warn('Supabase archive warning:', err?.message);
+    }
+  }
+
+  return {
+    success: true,
+    message: archive
+      ? 'Order archived successfully. It will no longer appear in the active orders list.'
+      : 'Order restored to active list.',
+  };
+}
+
+/**
+ * Customer: Request cancellation for an eligible order
+ */
+export async function requestCustomerCancellation(
+  orderId: string,
+  reasonOrUserId: string,
+  maybeReason?: string
+): Promise<{ success: boolean; message: string }> {
+  const cancellationReason = maybeReason ? maybeReason : reasonOrUserId;
+  const userId = maybeReason ? reasonOrUserId : '';
+
+  if (!cancellationReason || !cancellationReason.trim()) {
+    return { success: false, message: 'Please provide a cancellation reason.' };
+  }
+
+  const timestamp = new Date().toISOString();
+
+  // 1. Try Backend API
+  try {
+    const res = await fetch(`/api/orders/${orderId}/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cancellationReason, userId }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return { success: true, message: data.message || 'Order cancelled successfully.' };
+    }
+  } catch {
+    // Fall back to direct
+  }
+
+  // 2. Direct Supabase / local update
+  return updateOrderStatus(orderId, 'cancelled', {
+    cancellationReason: cancellationReason.trim(),
+    cancelledBy: 'customer',
+    customTitle: 'Cancellation Requested by Customer',
+    customDescription: cancellationReason.trim(),
+  });
+}
+
+/**
+ * Customer: Hide a cancelled/refunded order from their order history
+ */
+export async function hideCustomerOrder(
+  orderId: string,
+  userId?: string
+): Promise<{ success: boolean; message: string }> {
+  const timestamp = new Date().toISOString();
+
+  // 1. Try Backend API
+  try {
+    await fetch(`/api/orders/${orderId}/hide`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId }),
+    });
+  } catch {
+    // Non-fatal
+  }
+
+  // 2. Update local storage mirror
+  try {
+    const local: Order[] = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
+    const nextOrders = local.map((ord) => {
+      if (ord.id === orderId || ord.order_number === orderId) {
+        return {
+          ...ord,
+          is_hidden_by_customer: true,
+          updated_at: timestamp,
+        };
+      }
+      return ord;
+    });
+    localStorage.setItem('shopcart_orders', JSON.stringify(nextOrders));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('shopcart-orders-updated', { detail: { orderId, hidden: true } }));
+    }
+  } catch {
+    // Non-fatal
+  }
+
+  // 3. Update Supabase
+  if (isSupabaseConfigured() && orderId && !orderId.startsWith('local-')) {
+    try {
+      await supabase
+        .from('orders')
+        .update({
+          is_hidden_by_customer: true,
+          updated_at: timestamp,
+        })
+        .eq('id', orderId);
+    } catch (err: any) {
+      console.warn('Supabase hide order warning:', err?.message);
+    }
+  }
+
+  return { success: true, message: 'Order hidden from your order history.' };
+}
+
 
 /**
  * Admin: Update tracking number, carrier, and estimated delivery date

@@ -59,6 +59,27 @@ export interface CartItem {
   selectedSize?: string;
 }
 
+export interface SavedAddress {
+  id: string;
+  isDefault?: boolean;
+  label?: string; // 'Home' | 'Work' | 'Other'
+  fullName: string;
+  phone: string;
+  email?: string;
+  country: string;
+  houseBuilding: string;
+  streetArea: string;
+  landmark?: string;
+  city: string;
+  district?: string;
+  state: string;
+  pinCode: string;
+  deliveryInstructions?: string;
+  apartment?: string;
+  street?: string;
+  postalCode?: string;
+}
+
 export interface User {
   id: string;
   name: string;
@@ -74,6 +95,8 @@ export interface User {
     zipCode: string;
     country: string;
   };
+  shippingAddress?: SavedAddress;
+  savedAddresses?: SavedAddress[];
 }
 
 export interface Review {
@@ -208,6 +231,13 @@ export interface OrderShippingAddress {
   deliveryInstructions?: string;
 }
 
+export interface StatusHistoryItem {
+  status: OrderStatus;
+  changedAt: string;
+  changedBy: string;
+  note?: string;
+}
+
 export interface Order {
   id: string;
   order_number: string;
@@ -217,6 +247,13 @@ export interface Order {
   customer_email?: string | null;
   customer_phone?: string | null;
   status: OrderStatus;
+  cancellation_reason?: string | null;
+  cancelled_at?: string | null;
+  cancelled_by?: 'admin' | 'customer' | null;
+  admin_notes?: string | null;
+  status_history?: StatusHistoryItem[];
+  is_archived_by_admin?: boolean;
+  is_hidden_by_customer?: boolean;
   subtotal: number;
   discount_amount: number;
   shipping_fee: number;
@@ -251,6 +288,8 @@ export interface Order {
 export type PageView =
   | 'home'
   | 'shop'
+  | 'categories'
+  | 'play'
   | 'product'
   | 'cart'
   | 'checkout'

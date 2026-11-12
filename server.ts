@@ -129,8 +129,36 @@ app.use('/api/admin', async (req: Request, res: Response, next) => {
   next();
 });
 
-// In-memory orders store cache to guarantee instant data availability and sync
+// Persistent orders store cache to guarantee instant data availability and sync across restarts
+const ORDERS_DISK_FILE = path.join(process.cwd(), 'data/orders.json');
 const serverOrdersStore = new Map<string, any>();
+
+function loadOrdersFromDisk() {
+  try {
+    if (fs.existsSync(ORDERS_DISK_FILE)) {
+      const raw = fs.readFileSync(ORDERS_DISK_FILE, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((ord: any) => {
+          if (ord.order_number) serverOrdersStore.set(ord.order_number, ord);
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('Could not read orders from disk:', err);
+  }
+}
+
+function saveOrdersToDisk() {
+  try {
+    const list = Array.from(serverOrdersStore.values());
+    fs.writeFileSync(ORDERS_DISK_FILE, JSON.stringify(list, null, 2), 'utf-8');
+  } catch (err) {
+    console.warn('Could not write orders to disk:', err);
+  }
+}
+
+loadOrdersFromDisk();
 
 // Helper to generate standard shipment milestones
 function createInitialShipmentMilestones(orderDate: Date = new Date(), isVerified: boolean = false) {
@@ -670,7 +698,7 @@ app.delete('/api/admin/products/:id', async (req: Request, res: Response) => {
 // ADMIN ORDERS MANAGEMENT APIS
 // Admin Dashboard -> /api/admin/orders -> Supabase PostgreSQL
 // -----------------------------------------------------------------------------
-app.get('/api/admin/orders', async (_req: Request, res: Response) => {
+app.get('/api/admin/orders', async (req: Request, res: Response) => {
   try {
     const ordersMap = new Map<string, any>();
 
@@ -805,9 +833,11 @@ app.get('/api/admin/orders', async (_req: Request, res: Response) => {
       }
     }
 
-    const allOrders = Array.from(ordersMap.values()).sort(
-      (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
-    );
+    const includeArchived = req.query.includeArchived === 'true';
+
+    const allOrders = Array.from(ordersMap.values())
+      .filter((o) => (includeArchived ? true : !o.is_archived_by_admin))
+      .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 
     return res.json({
       success: true,
@@ -819,11 +849,17 @@ app.get('/api/admin/orders', async (_req: Request, res: Response) => {
   }
 });
 
-// Update Order Status (Confirmed, Shipped, Delivered, etc.)
+// Update Order Status (Confirmed, Processing, Shipped, Delivered, Cancelled, etc.)
 app.patch('/api/admin/orders/:orderId/status', async (req: Request, res: Response) => {
   try {
     const { orderId } = req.params;
-    const { status, note, location = 'Shopcart Fulfillment Center' } = req.body;
+    const {
+      status,
+      note,
+      location = 'Shopcart Fulfillment Center',
+      cancellationReason,
+      adminNotes,
+    } = req.body;
 
     const validStatuses = [
       'order_placed',
@@ -842,14 +878,25 @@ app.patch('/api/admin/orders/:orderId/status', async (req: Request, res: Respons
       return res.status(400).json({ error: `Invalid order status: ${status}` });
     }
 
+    if (status === 'cancelled' && !cancellationReason && !note) {
+      return res.status(400).json({ error: 'A cancellation reason is required when cancelling an order.' });
+    }
+
     const timestamp = new Date().toISOString();
     const milestone = {
       id: `milestone-${Date.now()}`,
       status,
       title: `Status: ${status.replace(/_/g, ' ').toUpperCase()}`,
-      description: note || `Order updated to ${status.replace(/_/g, ' ')}`,
+      description: note || cancellationReason || `Order status updated to ${status.replace(/_/g, ' ')}`,
       location,
       timestamp,
+    };
+
+    const historyItem = {
+      status,
+      changedAt: timestamp,
+      changedBy: (req as any).adminUser?.email || 'Administrator',
+      note: note || cancellationReason || adminNotes || undefined,
     };
 
     // Update in memory cache
@@ -857,26 +904,41 @@ app.patch('/api/admin/orders/:orderId/status', async (req: Request, res: Respons
       if (ord.id === orderId || ord.order_number === orderId) {
         ord.status = status;
         ord.updated_at = timestamp;
+        if (adminNotes !== undefined) ord.admin_notes = adminNotes;
+        if (status === 'cancelled') {
+          ord.cancellation_reason = cancellationReason || note || 'Cancelled by Administrator';
+          ord.cancelled_at = timestamp;
+          ord.cancelled_by = 'admin';
+        }
         if (!Array.isArray(ord.shipment_updates)) ord.shipment_updates = [];
         ord.shipment_updates.unshift(milestone);
+        if (!Array.isArray(ord.status_history)) ord.status_history = [];
+        ord.status_history.unshift(historyItem);
       }
     });
+    saveOrdersToDisk();
 
     // Update in Supabase
     if (supabase) {
       try {
         const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
-        let query = supabase.from('orders').update({
+        const updatePayload: any = {
           status,
           updated_at: timestamp,
-        });
+        };
+        if (adminNotes !== undefined) updatePayload.admin_notes = adminNotes;
+        if (status === 'cancelled') {
+          updatePayload.cancellation_reason = cancellationReason || note || 'Cancelled by Administrator';
+          updatePayload.cancelled_at = timestamp;
+          updatePayload.cancelled_by = 'admin';
+        }
 
+        let query = supabase.from('orders').update(updatePayload);
         if (isUuid) {
           query = query.eq('id', orderId);
         } else {
           query = query.eq('order_number', orderId);
         }
-
         await query;
       } catch (dbErr) {
         console.warn('DB update order status error:', dbErr);
@@ -893,6 +955,237 @@ app.patch('/api/admin/orders/:orderId/status', async (req: Request, res: Respons
     return res.status(500).json({ error: err.message || 'Failed to update order status' });
   }
 });
+
+// Admin: Archive or Unarchive a Cancelled Order
+app.patch('/api/admin/orders/:orderId/archive', async (req: Request, res: Response) => {
+  try {
+    const { orderId } = req.params;
+    const { archive = true } = req.body;
+    const timestamp = new Date().toISOString();
+
+    let targetOrder: any = null;
+    serverOrdersStore.forEach((ord) => {
+      if (ord.id === orderId || ord.order_number === orderId) {
+        ord.is_archived_by_admin = Boolean(archive);
+        ord.updated_at = timestamp;
+        targetOrder = ord;
+      }
+    });
+    saveOrdersToDisk();
+
+    if (supabase) {
+      try {
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
+        let query = supabase.from('orders').update({
+          is_archived_by_admin: Boolean(archive),
+          updated_at: timestamp,
+        });
+        if (isUuid) {
+          query = query.eq('id', orderId);
+        } else {
+          query = query.eq('order_number', orderId);
+        }
+        await query;
+      } catch (dbErr) {
+        console.warn('DB archive order error:', dbErr);
+      }
+    }
+
+    return res.json({
+      success: true,
+      isArchived: Boolean(archive),
+      message: archive ? 'Order archived successfully.' : 'Order restored to active view.',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to archive order' });
+  }
+});
+
+// Customer: Request Cancellation for Eligible Order
+app.post('/api/orders/:orderId/cancel', async (req: Request, res: Response) => {
+  try {
+    const { orderId } = req.params;
+    const { cancellationReason, userId } = req.body;
+
+    if (!cancellationReason || !cancellationReason.trim()) {
+      return res.status(400).json({ error: 'Please provide a reason for cancelling your order.' });
+    }
+
+    const timestamp = new Date().toISOString();
+    let orderFound = false;
+
+    serverOrdersStore.forEach((ord) => {
+      if (ord.id === orderId || ord.order_number === orderId) {
+        orderFound = true;
+        // Verify user ownership if userId provided
+        if (userId && ord.user_id && ord.user_id !== userId) {
+          throw new Error('Access denied: You can only cancel your own orders.');
+        }
+
+        const eligibleStatuses = ['order_placed', 'confirmed', 'processing'];
+        if (!eligibleStatuses.includes(ord.status)) {
+          throw new Error(`Order cannot be cancelled in status "${ord.status}". Contact support if shipped.`);
+        }
+
+        ord.status = 'cancelled';
+        ord.cancellation_reason = cancellationReason.trim();
+        ord.cancelled_at = timestamp;
+        ord.cancelled_by = 'customer';
+        ord.updated_at = timestamp;
+
+        const milestone = {
+          id: `milestone-${Date.now()}`,
+          status: 'cancelled',
+          title: 'Order Cancelled by Customer',
+          description: `Cancellation requested: "${cancellationReason.trim()}"`,
+          location: 'Shopcart Customer Care',
+          timestamp,
+        };
+        if (!Array.isArray(ord.shipment_updates)) ord.shipment_updates = [];
+        ord.shipment_updates.unshift(milestone);
+
+        const historyItem = {
+          status: 'cancelled',
+          changedAt: timestamp,
+          changedBy: 'Customer',
+          note: cancellationReason.trim(),
+        };
+        if (!Array.isArray(ord.status_history)) ord.status_history = [];
+        ord.status_history.unshift(historyItem);
+      }
+    });
+    saveOrdersToDisk();
+
+    if (supabase) {
+      try {
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
+        const updatePayload: any = {
+          status: 'cancelled',
+          cancellation_reason: cancellationReason.trim(),
+          cancelled_at: timestamp,
+          cancelled_by: 'customer',
+          updated_at: timestamp,
+        };
+        let query = supabase.from('orders').update(updatePayload);
+        if (isUuid) {
+          query = query.eq('id', orderId);
+        } else {
+          query = query.eq('order_number', orderId);
+        }
+        if (userId) query = query.eq('user_id', userId);
+        await query;
+      } catch (dbErr) {
+        console.warn('DB customer cancel order error:', dbErr);
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: 'Your order has been cancelled successfully.',
+      status: 'cancelled',
+      cancellationReason: cancellationReason.trim(),
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Failed to cancel order' });
+  }
+});
+
+// Customer: Hide / Archive Cancelled Order from Order History
+app.post('/api/orders/:orderId/hide', async (req: Request, res: Response) => {
+  try {
+    const { orderId } = req.params;
+    const { userId } = req.body;
+    const timestamp = new Date().toISOString();
+
+    serverOrdersStore.forEach((ord) => {
+      if (ord.id === orderId || ord.order_number === orderId) {
+        if (userId && ord.user_id && ord.user_id !== userId) {
+          throw new Error('Access denied: You can only hide your own orders.');
+        }
+        ord.is_hidden_by_customer = true;
+        ord.updated_at = timestamp;
+      }
+    });
+    saveOrdersToDisk();
+
+    if (supabase) {
+      try {
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
+        let query = supabase.from('orders').update({
+          is_hidden_by_customer: true,
+          updated_at: timestamp,
+        });
+        if (isUuid) {
+          query = query.eq('id', orderId);
+        } else {
+          query = query.eq('order_number', orderId);
+        }
+        if (userId) query = query.eq('user_id', userId);
+        await query;
+      } catch (dbErr) {
+        console.warn('DB hide order error:', dbErr);
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: 'Order hidden from your order history.',
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Failed to hide order' });
+  }
+});
+
+// Customer: Get Orders for Specific Customer
+app.get('/api/orders/customer/:userId', async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const includeHidden = req.query.includeHidden === 'true';
+
+    const customerOrders: any[] = [];
+    serverOrdersStore.forEach((ord) => {
+      if (ord.user_id === userId || (userId.startsWith('usr-demo') && !ord.user_id)) {
+        if (includeHidden || !ord.is_hidden_by_customer) {
+          customerOrders.push(ord);
+        }
+      }
+    });
+
+    if (supabase && userId && !userId.startsWith('usr-demo')) {
+      try {
+        let query = supabase
+          .from('orders')
+          .select('*, order_items(*), payment_records(*)')
+          .eq('user_id', userId);
+
+        if (!includeHidden) {
+          query = query.eq('is_hidden_by_customer', false);
+        }
+
+        const { data, error } = await query.order('created_at', { ascending: false });
+        if (!error && data) {
+          const map = new Map<string, any>();
+          customerOrders.forEach((o) => map.set(o.order_number, o));
+          data.forEach((o) => map.set(o.order_number, o));
+          const merged = Array.from(map.values()).sort(
+            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          );
+          return res.json({ success: true, count: merged.length, orders: merged });
+        }
+      } catch (dbErr) {
+        console.warn('DB customer orders error:', dbErr);
+      }
+    }
+
+    customerOrders.sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+    return res.json({ success: true, count: customerOrders.length, orders: customerOrders });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to fetch customer orders' });
+  }
+});
+
 
 // Update Order Shipment & Tracking
 app.patch('/api/admin/orders/:orderId/shipping', async (req: Request, res: Response) => {
