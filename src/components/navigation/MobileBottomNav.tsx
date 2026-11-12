@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { PageView } from '../../types';
 import { useCart } from '../../context/CartContext';
+import { useAuth } from '../../context/AuthContext';
 
 interface MobileBottomNavProps {
   currentPage: PageView;
@@ -19,14 +20,15 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   onNavigate,
 }) => {
   const { cartCount } = useCart();
+  const { isAuthenticated } = useAuth();
 
-  // Hidden on admin pages, login/register or desktop (md:hidden)
-  const isAdminOrAuth =
+  // Hidden on admin portal pages or desktop (md:hidden)
+  const isAdminRoute =
     currentPage === 'admin' ||
     currentPage === 'admin-login' ||
     currentPage === 'access-denied';
 
-  if (isAdminOrAuth) {
+  if (isAdminRoute) {
     return null;
   }
 
@@ -69,6 +71,20 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
     },
   ];
 
+  const handleItemClick = (id: PageView) => {
+    if (id === 'account') {
+      // If customer is logged in, navigate to Account/Profile
+      // If customer is not logged in, navigate to Sign In
+      if (isAuthenticated) {
+        onNavigate('account');
+      } else {
+        onNavigate('login');
+      }
+      return;
+    }
+    onNavigate(id);
+  };
+
   return (
     <nav
       aria-label="Mobile Bottom Navigation"
@@ -76,14 +92,23 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
     >
       <div className="grid grid-cols-5 h-14 items-center px-1 max-w-lg mx-auto">
         {navItems.map((item) => {
-          const isActive = currentPage === item.id;
+          // Compute active state
+          const isAccountActive =
+            currentPage === 'account' ||
+            (!isAuthenticated &&
+              (currentPage === 'login' ||
+                currentPage === 'register' ||
+                currentPage === 'forgot-password' ||
+                currentPage === 'reset-password'));
+
+          const isActive = item.id === 'account' ? isAccountActive : currentPage === item.id;
           const IconComponent = item.icon;
 
           if (item.isCenter) {
             return (
               <button
                 key={item.id}
-                onClick={() => onNavigate(item.id)}
+                onClick={() => handleItemClick(item.id)}
                 className="relative flex flex-col items-center justify-center -mt-4 group cursor-pointer focus:outline-none"
                 aria-label={item.label}
               >
@@ -111,8 +136,8 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           return (
             <button
               key={item.id}
-              onClick={() => onNavigate(item.id)}
-              className="relative flex flex-col items-center justify-center py-1 transition-colors duration-150 cursor-pointer focus:outline-none"
+              onClick={() => handleItemClick(item.id)}
+              className="relative flex flex-col items-center justify-center py-1 transition-colors duration-150 cursor-pointer focus:outline-none min-h-[48px]"
               aria-label={item.label}
             >
               <div className="relative">

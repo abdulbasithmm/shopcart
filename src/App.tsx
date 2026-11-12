@@ -293,7 +293,7 @@ function AppContent() {
   const isAdminRoute = currentPage === 'admin' || currentPage === 'admin-login' || currentPage === 'access-denied';
 
   return (
-    <div className="min-h-screen flex flex-col bg-white text-slate-900 selection:bg-[#0b5c37] selection:text-white">
+    <div className="min-h-screen flex flex-col bg-white text-slate-900 selection:bg-[#0b5c37] selection:text-white overflow-x-hidden w-full">
       {/* Top Header - Hidden on dedicated Admin portal views for clean separation */}
       {!isAdminRoute && (
         <Header

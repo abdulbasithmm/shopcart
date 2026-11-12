@@ -57,8 +57,16 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!name.trim() || !email.trim() || !password.trim()) {
+    const cleanName = name.trim();
+    const cleanEmail = email.trim();
+
+    if (!cleanName || !cleanEmail || !password.trim()) {
       showToast('Please fill out all registration fields', 'error');
+      return;
+    }
+
+    if (password.length < 6) {
+      showToast('Password must be at least 6 characters long', 'error');
       return;
     }
 
@@ -67,26 +75,21 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
       return;
     }
 
-    if (password.length < 6) {
-      showToast('Password must be at least 6 characters', 'error');
-      return;
-    }
-
     if (!agreeTerms) {
-      showToast('Please agree to terms and conditions', 'error');
+      showToast('Please accept the Terms of Service to continue', 'error');
       return;
     }
 
     setIsLoading(true);
     try {
-      const res = await register(name.trim(), email.trim(), password);
+      const res = await register(cleanName, cleanEmail, password);
       if (res.success) {
         if (res.needsConfirmation) {
-          setRegisteredEmail(email.trim());
+          setRegisteredEmail(cleanEmail);
           setAwaitingVerification(true);
           showToast('Account created! Please verify your email.', 'info');
         } else {
-          showToast(`Welcome to Shop Cart, ${name.split(' ')[0]}!`, 'success');
+          showToast(`Welcome to Shop Cart, ${cleanName.split(' ')[0]}!`, 'success');
           onNavigate('account');
         }
       } else {
@@ -116,8 +119,8 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
   };
 
   return (
-    <div className="min-h-[75vh] flex items-center justify-center px-4 py-12">
-      <div className="w-full max-w-md bg-white rounded-3xl p-8 sm:p-10 border border-slate-200/90 shadow-xl space-y-6">
+    <div className="min-h-[75vh] flex items-center justify-center px-3 sm:px-4 py-8 sm:py-12">
+      <div className="w-full max-w-md bg-white rounded-3xl p-5 sm:p-8 md:p-10 border border-slate-200/90 shadow-xl space-y-5 sm:space-y-6">
         {/* Brand header */}
         <div className="text-center space-y-2">
           <div
@@ -132,33 +135,33 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
             </span>
           </div>
 
-          <h1 className="text-xl font-bold text-slate-900">
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900">
             {awaitingVerification ? 'Verify Your Email' : 'Create an Account'}
           </h1>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-500 leading-relaxed px-1">
             {awaitingVerification
               ? 'One last step to activate your full Shop Cart shopping experience.'
-              : 'Join the Shop Cart VIP membership for instant rewards and express delivery.'}
+              : 'Join the Shop Cart membership for express delivery, order tracking, and rewards.'}
           </p>
         </div>
 
         {/* Awaiting Email Verification Screen */}
         {awaitingVerification ? (
-          <div className="space-y-5 text-center">
+          <div className="space-y-4 text-center">
             <div className="w-16 h-16 bg-emerald-50 border-2 border-emerald-200 rounded-2xl flex items-center justify-center text-[#0b5c37] mx-auto shadow-xs">
               <Inbox className="w-8 h-8" />
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <h2 className="text-base font-bold text-slate-900">Confirmation Link Sent!</h2>
               <p className="text-xs text-slate-600 leading-relaxed">
                 We sent a verification link to{' '}
-                <strong className="text-slate-900 bg-slate-100 px-1.5 py-0.5 rounded">{registeredEmail}</strong>.
+                <strong className="text-slate-900 bg-slate-100 px-1.5 py-0.5 rounded break-all">{registeredEmail}</strong>.
                 Please click the link inside to verify your email address.
               </p>
             </div>
 
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/70 text-left text-xs text-slate-600 space-y-2">
+            <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/70 text-left text-xs text-slate-600 space-y-1.5">
               <div className="flex items-center gap-2 font-semibold text-slate-800">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                 <span>Next steps:</span>
@@ -179,7 +182,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
                 type="button"
                 onClick={handleResend}
                 disabled={isResending}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full min-h-[42px] py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer"
               >
                 {isResending ? (
                   <>
@@ -195,7 +198,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
             <button
               type="button"
               onClick={() => onNavigate('login')}
-              className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+              className="w-full min-h-[46px] py-3 bg-[#0b5c37] hover:bg-[#08482b] text-white font-bold text-xs rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98]"
             >
               <span>Proceed to Sign In</span>
               <ArrowRight className="w-4 h-4" />
@@ -215,9 +218,9 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
                   placeholder="e.g. Jordan Hayes"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full py-2.5 pl-9 pr-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
+                  className="w-full min-h-[44px] py-2.5 pl-10 pr-3 text-sm bg-slate-50 border border-slate-300 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-[#0b5c37] focus:ring-1 focus:ring-[#0b5c37]"
                 />
-                <UserIcon className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <UserIcon className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
             </div>
 
@@ -229,12 +232,15 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
                 <input
                   type="email"
                   required
+                  inputMode="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
                   placeholder="jordan@example.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full py-2.5 pl-9 pr-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
+                  className="w-full min-h-[44px] py-2.5 pl-10 pr-3 text-sm bg-slate-50 border border-slate-300 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-[#0b5c37] focus:ring-1 focus:ring-[#0b5c37]"
                 />
-                <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
             </div>
 
@@ -249,13 +255,14 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
                   placeholder="At least 6 characters"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full py-2.5 pl-9 pr-10 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37] font-mono"
+                  className="w-full min-h-[44px] py-2.5 pl-10 pr-11 text-sm bg-slate-50 border border-slate-300 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-[#0b5c37] focus:ring-1 focus:ring-[#0b5c37] font-mono"
                 />
-                <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center text-slate-400 hover:text-slate-700 cursor-pointer"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -285,21 +292,21 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
                   placeholder="Repeat password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="w-full py-2.5 pl-9 pr-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37] font-mono"
+                  className="w-full min-h-[44px] py-2.5 pl-10 pr-3 text-sm bg-slate-50 border border-slate-300 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-[#0b5c37] focus:ring-1 focus:ring-[#0b5c37] font-mono"
                 />
-                <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
             </div>
 
-            <div className="flex items-start gap-2 pt-1">
+            <div className="flex items-start gap-2.5 pt-1">
               <input
                 type="checkbox"
                 id="terms"
                 checked={agreeTerms}
                 onChange={(e) => setAgreeTerms(e.target.checked)}
-                className="mt-0.5 rounded border-slate-300 text-[#0b5c37] focus:ring-[#0b5c37] accent-[#0b5c37] cursor-pointer"
+                className="w-4 h-4 mt-0.5 rounded border-slate-300 text-[#0b5c37] focus:ring-[#0b5c37] accent-[#0b5c37] cursor-pointer"
               />
-              <label htmlFor="terms" className="text-[11px] text-slate-600 leading-tight cursor-pointer">
+              <label htmlFor="terms" className="text-xs text-slate-600 leading-tight cursor-pointer py-0.5">
                 I agree to the <span className="text-slate-900 font-semibold underline">Terms of Service</span> and <span className="text-slate-900 font-semibold underline">Privacy Policy</span>.
               </label>
             </div>
@@ -307,10 +314,10 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-3 bg-[#0b5c37] hover:bg-[#08482b] text-white font-bold text-xs rounded-xl transition-all shadow-md shadow-emerald-900/10 flex items-center justify-center gap-2 cursor-pointer"
+              className="w-full min-h-[46px] py-3 bg-[#0b5c37] hover:bg-[#08482b] text-white font-bold text-sm rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98]"
             >
               {isLoading ? (
-                <span>Creating Supabase Account...</span>
+                <span>Creating Account...</span>
               ) : (
                 <>
                   <span>Complete Registration</span>
@@ -327,15 +334,15 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
             Already registered with Shop Cart?{' '}
             <button
               onClick={() => onNavigate('login')}
-              className="text-[#0b5c37] font-bold hover:underline ml-1 cursor-pointer"
+              className="text-[#0b5c37] font-bold hover:underline ml-1 cursor-pointer py-1 inline-block"
             >
               Sign In Here
             </button>
           </div>
         )}
 
-        <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
-          <ShieldCheck className="w-3.5 h-3.5 text-[#0b5c37]" />
+        <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-400 text-center">
+          <ShieldCheck className="w-3.5 h-3.5 text-[#0b5c37] shrink-0" />
           <span>
             {isSupabaseBackend ? 'Synced with Supabase Auth & PostgreSQL Profiles' : 'Supabase Auth Ready'}
           </span>

@@ -6,7 +6,6 @@ import {
   EyeOff,
   ArrowRight,
   ShoppingBag,
-  Zap,
   ShieldCheck,
   AlertCircle,
   CheckCircle2,
@@ -21,7 +20,7 @@ interface LoginPageProps {
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
-  const { login, quickDemoLogin, forgotPassword, resendVerificationEmail, isSupabaseBackend } = useAuth();
+  const { login, forgotPassword, resendVerificationEmail, isSupabaseBackend } = useAuth();
   const { showToast } = useToast();
 
   const [email, setEmail] = useState('');
@@ -45,19 +44,20 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
     e.preventDefault();
     setUnconfirmedEmail(null);
 
-    if (!email.trim() || !password.trim()) {
+    const cleanEmail = email.trim();
+    if (!cleanEmail || !password.trim()) {
       showToast('Please enter your email and password', 'error');
       return;
     }
 
     setIsLoading(true);
     try {
-      const res = await login(email.trim(), password);
+      const res = await login(cleanEmail, password);
       if (res.success) {
-        showToast(`Welcome back to Shop Cart!`, 'success');
+        showToast('Welcome back to Shop Cart!', 'success');
         onNavigate('account');
       } else if (res.needsEmailVerification) {
-        setUnconfirmedEmail(email.trim());
+        setUnconfirmedEmail(cleanEmail);
         showToast('Your email is not confirmed yet. Please check your inbox.', 'warning');
       } else {
         showToast(res.message || 'Login failed. Please check your credentials.', 'error');
@@ -87,14 +87,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
 
   const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!resetEmail.trim()) {
+    const cleanResetEmail = resetEmail.trim();
+    if (!cleanResetEmail) {
       showToast('Please enter your registered email address', 'error');
       return;
     }
 
     setIsSendingReset(true);
     try {
-      const res = await forgotPassword(resetEmail.trim());
+      const res = await forgotPassword(cleanResetEmail);
       if (res.success) {
         setResetEmailSent(true);
         showToast('Password recovery instructions sent!', 'success');
@@ -107,8 +108,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
   };
 
   return (
-    <div className="min-h-[75vh] flex items-center justify-center px-4 py-12">
-      <div className="w-full max-w-md bg-white rounded-3xl p-8 sm:p-10 border border-slate-200/90 shadow-xl space-y-6">
+    <div className="min-h-[75vh] flex items-center justify-center px-3 sm:px-4 py-8 sm:py-12">
+      <div className="w-full max-w-md bg-white rounded-3xl p-5 sm:p-8 md:p-10 border border-slate-200/90 shadow-xl space-y-5 sm:space-y-6">
         {/* Brand header */}
         <div className="text-center space-y-2">
           <div
@@ -123,13 +124,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
             </span>
           </div>
 
-          <h1 className="text-xl font-bold text-slate-900">
-            {isForgotPasswordMode ? 'Reset Your Password' : 'Welcome Back'}
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900">
+            {isForgotPasswordMode ? 'Reset Your Password' : 'Sign in to Shop Cart'}
           </h1>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-500 leading-relaxed px-1">
             {isForgotPasswordMode
-              ? 'Enter your registered email and we will send you a password recovery link.'
-              : 'Sign in to track orders, save wishlists, and manage account preferences.'}
+              ? 'Enter your registered email address and we will dispatch a password recovery link.'
+              : 'Access your saved addresses, track ongoing orders, and view member rewards.'}
           </p>
         </div>
 
@@ -140,8 +141,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
               <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
               <div>
                 <p className="font-bold">Email Verification Required</p>
-                <p className="text-[11px] text-amber-800 mt-0.5">
-                  We sent a confirmation link to <span className="font-semibold">{unconfirmedEmail}</span>. Please verify your address before signing in.
+                <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+                  We sent a confirmation link to <span className="font-semibold break-all">{unconfirmedEmail}</span>. Please verify your address before signing in.
                 </p>
               </div>
             </div>
@@ -155,11 +156,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
                 type="button"
                 onClick={handleResendVerification}
                 disabled={isResending}
-                className="w-full py-1.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5 text-[11px] cursor-pointer"
+                className="w-full min-h-[40px] py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-1.5 text-xs cursor-pointer active:scale-[0.98]"
               >
                 {isResending ? (
                   <>
-                    <RefreshCw className="w-3 h-3 animate-spin" />
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                     <span>Resending Link...</span>
                   </>
                 ) : (
@@ -180,8 +181,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-emerald-950">Recovery Link Sent</h3>
-                  <p className="text-xs text-emerald-800 mt-1">
-                    Check your email inbox at <strong>{resetEmail}</strong> for a link to securely reset your password.
+                  <p className="text-xs text-emerald-800 mt-1 leading-relaxed">
+                    Check your email inbox at <strong className="break-all">{resetEmail}</strong> for a link to securely reset your password.
                   </p>
                 </div>
                 <button
@@ -190,7 +191,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
                     setIsForgotPasswordMode(false);
                     setResetEmailSent(false);
                   }}
-                  className="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer"
+                  className="w-full min-h-[44px] px-4 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer"
                 >
                   Back to Sign In
                 </button>
@@ -205,27 +206,30 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
                     <input
                       type="email"
                       required
+                      inputMode="email"
+                      autoCapitalize="none"
+                      autoCorrect="off"
                       placeholder="you@example.com"
                       value={resetEmail}
                       onChange={(e) => setResetEmail(e.target.value)}
-                      className="w-full py-2.5 pl-9 pr-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
+                      className="w-full min-h-[44px] py-2.5 pl-10 pr-3 text-sm bg-slate-50 border border-slate-300 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-[#0b5c37] focus:ring-1 focus:ring-[#0b5c37]"
                     />
-                    <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   </div>
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex gap-2.5 pt-1">
                   <button
                     type="button"
                     onClick={() => setIsForgotPasswordMode(false)}
-                    className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                    className="flex-1 min-h-[44px] py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={isSendingReset}
-                    className="flex-1 py-2.5 bg-[#0b5c37] hover:bg-[#08482b] text-white font-bold text-xs rounded-xl transition-all shadow-md shadow-emerald-900/10 flex items-center justify-center gap-1.5 cursor-pointer"
+                    className="flex-1 min-h-[44px] py-2.5 bg-[#0b5c37] hover:bg-[#08482b] text-white font-bold text-xs rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.98]"
                   >
                     {isSendingReset ? (
                       <span>Sending Link...</span>
@@ -241,124 +245,105 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
             )}
           </div>
         ) : (
-          <>
-            {/* Customer Quick Sign-in Option */}
-            <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-200/80 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-xs text-emerald-950">
-                <Zap className="w-4 h-4 text-[#0b5c37] shrink-0" />
-                <span className="leading-tight text-emerald-900 font-medium">
-                  Testing storefront? Try customer demo:
-                </span>
+          /* Main Sign In Form */
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                Email Address
+              </label>
+              <div className="relative">
+                <input
+                  type="email"
+                  required
+                  inputMode="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full min-h-[44px] py-2.5 pl-10 pr-3 text-sm bg-slate-50 border border-slate-300 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-[#0b5c37] focus:ring-1 focus:ring-[#0b5c37]"
+                />
+                <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  quickDemoLogin(false);
-                  showToast('Logged in as Customer (Alex Morgan)', 'success');
-                  onNavigate('account');
-                }}
-                className="px-3 py-1.5 bg-[#0b5c37] hover:bg-[#08482b] text-white text-[11px] font-bold rounded-lg shadow-2xs transition-colors cursor-pointer text-center shrink-0"
-              >
-                Customer Demo
-              </button>
             </div>
 
-            {/* Main Sign In Form */}
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Email Address
-                </label>
-                <div className="relative">
-                  <input
-                    type="email"
-                    required
-                    placeholder="you@example.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full py-2.5 pl-9 pr-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
-                  />
-                  <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                </div>
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-bold text-slate-700">Password</label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setResetEmail(email);
+                    setIsForgotPasswordMode(true);
+                  }}
+                  className="text-xs text-[#0b5c37] hover:underline font-semibold cursor-pointer py-0.5"
+                >
+                  Forgot password?
+                </button>
               </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-bold text-slate-700">Password</label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setResetEmail(email);
-                      setIsForgotPasswordMode(true);
-                    }}
-                    className="text-[11px] text-[#0b5c37] hover:underline font-semibold cursor-pointer"
-                  >
-                    Forgot password?
-                  </button>
-                </div>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full py-2.5 pl-9 pr-10 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37] font-mono"
-                  />
-                  <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full min-h-[44px] py-2.5 pl-10 pr-11 text-sm bg-slate-50 border border-slate-300 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-[#0b5c37] focus:ring-1 focus:ring-[#0b5c37] font-mono"
+                />
+                <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center text-slate-400 hover:text-slate-700 cursor-pointer"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
+            </div>
 
-              <div className="flex items-center">
-                <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={rememberMe}
-                    onChange={(e) => setRememberMe(e.target.checked)}
-                    className="rounded border-slate-300 text-[#0b5c37] focus:ring-[#0b5c37] accent-[#0b5c37]"
-                  />
-                  <span>Remember this session for 30 days</span>
-                </label>
-              </div>
+            <div className="flex items-center pt-0.5">
+              <label className="flex items-center gap-2.5 text-xs text-slate-600 cursor-pointer py-1">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-300 text-[#0b5c37] focus:ring-[#0b5c37] accent-[#0b5c37] cursor-pointer"
+                />
+                <span>Remember this session</span>
+              </label>
+            </div>
 
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
-              >
-                {isLoading ? (
-                  <span>Authenticating with Supabase...</span>
-                ) : (
-                  <>
-                    <span>Sign In to Shop Cart</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </>
-                )}
-              </button>
-            </form>
-          </>
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full min-h-[46px] py-3 bg-[#0b5c37] hover:bg-[#08482b] text-white font-bold text-sm rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98]"
+            >
+              {isLoading ? (
+                <span>Signing In...</span>
+              ) : (
+                <>
+                  <span>Sign In</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+          </form>
         )}
 
         {/* Register footer link */}
         <div className="pt-4 border-t border-slate-100 text-center text-xs text-slate-500">
-          Don&apos;t have an Shop Cart account yet?{' '}
+          Don&apos;t have a Shop Cart account?{' '}
           <button
             onClick={() => onNavigate('register')}
-            className="text-[#0b5c37] font-bold hover:underline ml-1 cursor-pointer"
+            className="text-[#0b5c37] font-bold hover:underline ml-1 cursor-pointer py-1 inline-block"
           >
             Create an Account
           </button>
         </div>
 
-        <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
-          <ShieldCheck className="w-3.5 h-3.5 text-[#0b5c37]" />
+        <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-400 text-center">
+          <ShieldCheck className="w-3.5 h-3.5 text-[#0b5c37] shrink-0" />
           <span>
             {isSupabaseBackend ? 'Protected by Supabase Auth & PostgreSQL RLS' : 'Supabase Auth Ready'}
           </span>

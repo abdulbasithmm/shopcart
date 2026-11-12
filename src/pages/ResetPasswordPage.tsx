@@ -73,8 +73,8 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onNavigate
   };
 
   return (
-    <div className="min-h-[75vh] flex items-center justify-center px-4 py-12">
-      <div className="w-full max-w-md bg-white rounded-3xl p-8 sm:p-10 border border-slate-200/90 shadow-xl space-y-6">
+    <div className="min-h-[75vh] flex items-center justify-center px-3 sm:px-4 py-8 sm:py-12">
+      <div className="w-full max-w-md bg-white rounded-3xl p-5 sm:p-8 md:p-10 border border-slate-200/90 shadow-xl space-y-5 sm:space-y-6">
         {/* Brand header */}
         <div className="text-center space-y-2">
           <div

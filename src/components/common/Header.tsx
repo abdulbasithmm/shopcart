@@ -123,30 +123,23 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             </div>
 
-            {/* Mobile Actions: Account + Cart (visible on mobile, hidden on md+) */}
-            <div className="flex items-center gap-1 sm:gap-2 md:hidden text-slate-800">
+            {/* Mobile Action: Direct Account / Sign-In button (Cart is in Mobile Bottom Navigation) */}
+            <div className="flex items-center gap-1.5 md:hidden text-slate-800">
               <button
-                onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-                className="px-2 py-1.5 hover:bg-slate-100 rounded-lg text-xs font-bold text-slate-900 flex items-center gap-1 min-h-[40px] cursor-pointer"
-                aria-label="Account menu"
+                onClick={() => {
+                  if (isAuthenticated) {
+                    onNavigate('account');
+                  } else {
+                    onNavigate('login');
+                  }
+                }}
+                className="px-2.5 py-1.5 hover:bg-slate-100 rounded-lg text-xs font-bold text-slate-900 flex items-center gap-1.5 min-h-[40px] cursor-pointer border border-slate-200/80 active:scale-95 transition-all"
+                aria-label={isAuthenticated ? 'Your Account' : 'Sign In to Shop Cart'}
               >
-                <span className="text-[11px] font-semibold text-slate-700 max-w-[80px] truncate">
-                  {isAuthenticated && user ? user.name.split(' ')[0] : 'Sign in'}
+                <UserIcon className="w-4 h-4 text-[#0b5c37] shrink-0" />
+                <span className="text-[11px] font-semibold text-slate-800 max-w-[85px] truncate">
+                  {isAuthenticated && user ? user.name.split(' ')[0] : 'Sign In'}
                 </span>
-                <ChevronDown className="w-3 h-3 text-slate-500" />
-              </button>
-
-              <button
-                onClick={() => setIsCartDrawerOpen(true)}
-                className="p-2 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer relative min-h-[40px] min-w-[40px] flex items-center justify-center"
-                aria-label="Shopping Cart"
-              >
-                <div className="relative">
-                  <ShoppingCart className="w-6 h-6 stroke-[2] text-slate-900" />
-                  <span className="absolute -top-1.5 -right-2 bg-[#0b5c37] text-white text-[10px] font-black w-4 h-4 rounded-full flex items-center justify-center">
-                    {cartCount}
-                  </span>
-                </div>
               </button>
             </div>
           </div>
@@ -456,22 +449,81 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
 
             <div className="pt-4 border-t border-slate-200 space-y-2">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Help &amp; Settings</h4>
-              <button
-                onClick={() => {
-                  onNavigate('account');
-                  setIsMobileMenuOpen(false);
-                }}
-                className="w-full text-left py-2 text-sm text-slate-700"
-              >
-                Your Account
-              </button>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Account &amp; Settings</h4>
+              {isAuthenticated ? (
+                <>
+                  <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200/80 mb-2">
+                    <p className="text-xs font-bold text-slate-900">{user?.name}</p>
+                    <p className="text-[11px] text-slate-500 truncate">{user?.email}</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      onNavigate('account');
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className="w-full text-left py-2 px-2 hover:bg-slate-50 rounded-md text-sm font-medium text-slate-800"
+                  >
+                    Your Profile &amp; Addresses
+                  </button>
+                  <button
+                    onClick={() => {
+                      onNavigate('account', { tab: 'orders' });
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className="w-full text-left py-2 px-2 hover:bg-slate-50 rounded-md text-sm font-medium text-slate-800"
+                  >
+                    Your Orders &amp; Tracking
+                  </button>
+                  <button
+                    onClick={() => {
+                      onNavigate('account', { tab: 'wishlist' });
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className="w-full text-left py-2 px-2 hover:bg-slate-50 rounded-md text-sm font-medium text-slate-800"
+                  >
+                    Your Wishlist
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setIsMobileMenuOpen(false);
+                      await logout();
+                      onNavigate('home');
+                    }}
+                    className="w-full text-left py-2 px-2 text-sm text-rose-600 hover:bg-rose-50 rounded-md font-semibold flex items-center gap-1.5"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span>Sign Out</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => {
+                      onNavigate('login');
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className="w-full py-2.5 px-3 bg-[#0b5c37] hover:bg-[#08482b] text-white text-xs font-bold rounded-xl shadow-xs text-center transition-colors"
+                  >
+                    Sign In to Shop Cart
+                  </button>
+                  <button
+                    onClick={() => {
+                      onNavigate('register');
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className="w-full py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl text-center transition-colors"
+                  >
+                    Create Free Account
+                  </button>
+                </>
+              )}
+
               <button
                 onClick={() => {
                   onNavigate('contact');
                   setIsMobileMenuOpen(false);
                 }}
-                className="w-full text-left py-2 text-sm text-slate-700"
+                className="w-full text-left py-2 px-2 text-sm text-slate-600 hover:text-slate-900 border-t border-slate-100 pt-3"
               >
                 Customer Service
               </button>
