@@ -237,6 +237,13 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                     Help &amp; Customer Service
                   </button>
                 </li>
+                <li className="pt-2 border-t border-[#3a4553]/60 text-[11px] space-y-1 text-[#bbb]">
+                  <p className="text-white font-semibold">Support Desk:</p>
+                  <p><a href="tel:+919496660968" className="hover:text-emerald-400 text-white font-mono">+91 9496660968</a></p>
+                  <p className="text-[10px] text-slate-400">Hours: 9:00 AM – 10:00 PM</p>
+                  <p><a href="mailto:basithmm08@gmail.com" className="hover:text-emerald-400 text-[#ccc]">basithmm08@gmail.com</a></p>
+                  <p className="text-[10px] text-slate-400">Kondotty, Malappuram, Kerala</p>
+                </li>
               </ul>
             </div>
           </div>

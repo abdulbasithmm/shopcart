@@ -5,6 +5,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
+import nodemailer from 'nodemailer';
 
 dotenv.config();
 
@@ -691,6 +692,180 @@ app.delete('/api/admin/products/:id', async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// CUSTOMER SUPPORT & CONTACT INQUIRIES API
+// Dispatches direct customer messages to basithmm08@gmail.com
+// -----------------------------------------------------------------------------
+const CONTACT_FILE = path.join(__dirname, 'data', 'contact_messages.json');
+const SUPPORT_EMAIL = 'basithmm08@gmail.com';
+const SUPPORT_PHONE = '+91 9496660968';
+
+function loadContactMessages(): any[] {
+  try {
+    if (!fs.existsSync(path.dirname(CONTACT_FILE))) {
+      fs.mkdirSync(path.dirname(CONTACT_FILE), { recursive: true });
+    }
+    if (fs.existsSync(CONTACT_FILE)) {
+      const raw = fs.readFileSync(CONTACT_FILE, 'utf-8');
+      return JSON.parse(raw);
+    }
+  } catch (err) {
+    console.warn('Error reading contact messages file:', err);
+  }
+  return [];
+}
+
+function saveContactMessage(msg: any) {
+  try {
+    const list = loadContactMessages();
+    list.unshift(msg);
+    if (!fs.existsSync(path.dirname(CONTACT_FILE))) {
+      fs.mkdirSync(path.dirname(CONTACT_FILE), { recursive: true });
+    }
+    fs.writeFileSync(CONTACT_FILE, JSON.stringify(list, null, 2), 'utf-8');
+  } catch (err) {
+    console.warn('Error saving contact message:', err);
+  }
+}
+
+app.post('/api/contact', async (req: Request, res: Response) => {
+  try {
+    const { fullName, email, phone, subject, message, hp_field } = req.body;
+
+    // 1. Anti-spam honeypot
+    if (hp_field) {
+      return res.status(200).json({ success: true, message: 'Message received.' });
+    }
+
+    // 2. Validate input fields
+    if (!fullName || typeof fullName !== 'string' || fullName.trim().length < 2) {
+      return res.status(400).json({ error: 'Please enter your full name (at least 2 characters).' });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!email || typeof email !== 'string' || !emailRegex.test(email.trim())) {
+      return res.status(400).json({ error: 'Please provide a valid email address.' });
+    }
+
+    if (!phone || typeof phone !== 'string' || phone.trim().length < 7) {
+      return res.status(400).json({ error: 'Please provide a valid contact phone number.' });
+    }
+
+    if (!subject || typeof subject !== 'string' || subject.trim().length < 2) {
+      return res.status(400).json({ error: 'Please specify an inquiry subject.' });
+    }
+
+    if (!message || typeof message !== 'string' || message.trim().length < 5) {
+      return res.status(400).json({ error: 'Please enter a message of at least 5 characters.' });
+    }
+
+    const ticketId = `TKT-${Date.now().toString().slice(-6)}`;
+    const timestamp = new Date().toISOString();
+
+    const contactRecord = {
+      ticketId,
+      fullName: fullName.trim(),
+      email: email.trim(),
+      phone: phone.trim(),
+      subject: subject.trim(),
+      message: message.trim(),
+      targetRecipient: SUPPORT_EMAIL,
+      createdAt: timestamp,
+      status: 'received',
+      ip: req.ip || req.headers['x-forwarded-for'] || 'unknown',
+    };
+
+    // Save record to persistent store
+    saveContactMessage(contactRecord);
+
+    // If Supabase has contact_messages table, mirror there non-fatally
+    if (supabase) {
+      try {
+        await supabase.from('contact_messages').insert({
+          ticket_id: ticketId,
+          full_name: contactRecord.fullName,
+          email: contactRecord.email,
+          phone: contactRecord.phone,
+          subject: contactRecord.subject,
+          message: contactRecord.message,
+          created_at: timestamp,
+        });
+      } catch {
+        // Table might not exist yet, non-fatal
+      }
+    }
+
+    // Attempt email delivery via Nodemailer if SMTP credentials are provided
+    let emailDelivered = false;
+    let emailNotice = '';
+
+    const smtpHost = process.env.SMTP_HOST;
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS;
+    const smtpPort = Number(process.env.SMTP_PORT) || 587;
+
+    if (smtpHost && smtpUser && smtpPass) {
+      try {
+        const transporter = nodemailer.createTransport({
+          host: smtpHost,
+          port: smtpPort,
+          secure: smtpPort === 465,
+          auth: {
+            user: smtpUser,
+            pass: smtpPass,
+          },
+        });
+
+        await transporter.sendMail({
+          from: `"Shopcart Customer Support" <${smtpUser}>`,
+          to: SUPPORT_EMAIL,
+          replyTo: contactRecord.email,
+          subject: `[${ticketId}] ${contactRecord.subject} - from ${contactRecord.fullName}`,
+          text: `New Shopcart Customer Inquiry\n\nTicket: ${ticketId}\nDate: ${timestamp}\nFrom: ${contactRecord.fullName}\nEmail: ${contactRecord.email}\nPhone: ${contactRecord.phone}\nSubject: ${contactRecord.subject}\n\nMessage:\n${contactRecord.message}\n`,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px;">
+              <h2 style="color: #0b5c37; margin-bottom: 4px;">Shopcart Support Notification</h2>
+              <p style="color: #64748b; font-size: 13px; margin-top: 0;">Ticket <strong>#${ticketId}</strong> &bull; Received ${new Date(timestamp).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}</p>
+              <div style="background-color: #f8fafc; padding: 14px; border-radius: 8px; margin: 16px 0; font-size: 14px;">
+                <p style="margin: 4px 0;"><strong>Customer Name:</strong> ${contactRecord.fullName}</p>
+                <p style="margin: 4px 0;"><strong>Email:</strong> <a href="mailto:${contactRecord.email}">${contactRecord.email}</a></p>
+                <p style="margin: 4px 0;"><strong>Phone:</strong> <a href="tel:${contactRecord.phone}">${contactRecord.phone}</a></p>
+                <p style="margin: 4px 0;"><strong>Subject:</strong> ${contactRecord.subject}</p>
+              </div>
+              <div style="padding: 14px; border-left: 4px solid #0b5c37; background-color: #f0fdf4; margin: 16px 0;">
+                <h4 style="margin: 0 0 8px 0; color: #166534;">Message:</h4>
+                <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #1e293b; white-space: pre-wrap;">${contactRecord.message}</p>
+              </div>
+              <p style="font-size: 12px; color: #94a3b8; margin-top: 24px;">Shopcart Distribution Centre: Kondotty, Malappuram, Kerala, India &bull; Support: ${SUPPORT_PHONE}</p>
+            </div>
+          `,
+        });
+        emailDelivered = true;
+        emailNotice = `Direct email successfully delivered to ${SUPPORT_EMAIL}.`;
+      } catch (smtpErr: any) {
+        console.warn('Nodemailer SMTP dispatch warning:', smtpErr?.message);
+        emailNotice = `Ticket logged. Target recipient: ${SUPPORT_EMAIL}`;
+      }
+    } else {
+      emailNotice = `Ticket recorded and routed to ${SUPPORT_EMAIL}.`;
+    }
+
+    return res.json({
+      success: true,
+      ticketId,
+      timestamp,
+      recipient: SUPPORT_EMAIL,
+      phone: SUPPORT_PHONE,
+      emailDelivered,
+      message: `Your message has been received! Ticket #${ticketId} dispatched to ${SUPPORT_EMAIL}. Our support concierge will respond promptly.`,
+      emailNotice,
+    });
+  } catch (err: any) {
+    console.error('Error handling contact message:', err);
+    return res.status(500).json({ error: err.message || 'Failed to submit contact message' });
   }
 });
 

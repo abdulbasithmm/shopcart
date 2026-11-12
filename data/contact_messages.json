@@ -1,0 +1,26 @@
+[
+  {
+    "ticketId": "TKT-951870",
+    "fullName": "Arjun Sharma",
+    "email": "arjun.sharma@example.com",
+    "phone": "+91 9876543210",
+    "subject": "Product availability query",
+    "message": "Hello Shopcart, I would like to inquire about bulk ordering for our department.",
+    "targetRecipient": "basithmm08@gmail.com",
+    "createdAt": "2026-11-12T16:45:51.870Z",
+    "status": "received",
+    "ip": "127.0.0.1"
+  },
+  {
+    "ticketId": "TKT-607602",
+    "fullName": "Naveen Kumar",
+    "email": "naveen.kumar@example.com",
+    "phone": "+91 9876543210",
+    "subject": "Order Delivery Timeline",
+    "message": "Hi support team, I would like to check when boAt earbuds will be delivered to Kochi.",
+    "targetRecipient": "basithmm08@gmail.com",
+    "createdAt": "2026-11-12T16:40:07.602Z",
+    "status": "received",
+    "ip": "127.0.0.1"
+  }
+]
