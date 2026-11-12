@@ -116,15 +116,15 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
                 <div
                   className={`w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200 shadow-md ${
                     isActive
-                      ? 'bg-[#2874f0] text-white shadow-[#2874f0]/30 scale-105'
-                      : 'bg-white text-slate-700 border-2 border-[#2874f0] hover:bg-blue-50'
+                      ? 'bg-[#0B5C37] text-white shadow-[#0B5C37]/30 scale-105'
+                      : 'bg-white text-slate-700 border-2 border-[#0B5C37] hover:bg-emerald-50'
                   }`}
                 >
                   <IconComponent className={`w-5 h-5 stroke-[2.2] transition-transform ${isActive ? 'scale-110' : ''}`} />
                 </div>
                 <span
                   className={`text-[10px] font-bold mt-0.5 tracking-tight transition-colors ${
-                    isActive ? 'text-[#2874f0]' : 'text-slate-600'
+                    isActive ? 'text-[#0B5C37]' : 'text-slate-600'
                   }`}
                 >
                   {item.label}
@@ -144,7 +144,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
                 <IconComponent
                   className={`w-5 h-5 stroke-[1.8] transition-all duration-200 ${
                     isActive
-                      ? 'text-[#2874f0] stroke-[2.4] scale-110'
+                      ? 'text-[#0B5C37] stroke-[2.4] scale-110'
                       : 'text-slate-500 hover:text-slate-800'
                   }`}
                 />
@@ -157,13 +157,13 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
               </div>
               <span
                 className={`text-[10px] font-semibold tracking-tight transition-colors mt-0.5 ${
-                  isActive ? 'text-[#2874f0] font-bold' : 'text-slate-500'
+                  isActive ? 'text-[#0B5C37] font-bold' : 'text-slate-500'
                 }`}
               >
                 {item.label}
               </span>
               {isActive && (
-                <span className="absolute bottom-0 w-6 h-0.5 bg-[#2874f0] rounded-full" />
+                <span className="absolute bottom-0 w-6 h-0.5 bg-[#0B5C37] rounded-full" />
               )}
             </button>
           );
