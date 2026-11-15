@@ -40,11 +40,11 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
   };
 
   return (
-    <footer className="mt-16 text-white font-sans">
+    <footer className="mt-4 sm:mt-8 lg:mt-12 text-white font-sans w-full">
       {/* Back to top button */}
       <button
         onClick={scrollToTop}
-        className="w-full py-3.5 bg-[#37475a] hover:bg-[#485769] text-center text-xs text-white font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+        className="w-full py-3 bg-[#37475a] hover:bg-[#485769] text-center text-xs text-white font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
         aria-label={t.common.backToTop}
       >
         <ChevronUp className="w-4 h-4 text-slate-300" />
@@ -53,8 +53,8 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
 
       {/* Main Multi-Column Links Section */}
       <div className="bg-[#232f3e] border-b border-[#3a4553] text-[#ddd]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-xs leading-relaxed">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-8 sm:py-12">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-5 sm:gap-8 text-xs leading-relaxed">
             {/* Column 1 */}
             <div>
               <h4 className="font-bold text-white text-sm mb-3">{t.footer.getToKnowUs}</h4>
@@ -273,9 +273,9 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
       </div>
 
       {/* Sub-footer Directory (Deep Charcoal #131a22) */}
-      <div className="bg-[#131a22] text-[#999] py-8 text-[11px]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 mb-8 text-[#aaa]">
+      <div className="bg-[#131a22] text-[#999] pt-6 pb-20 md:py-8 text-[11px]">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6 mb-6 sm:mb-8 text-[#aaa]">
             <div onClick={() => onNavigate('shop', { category: 'Books' })} className="cursor-pointer hover:text-white">
               <p className="font-bold text-white hover:underline">AbeBooks</p>
               <p className="text-[#888]">Books, art &amp; collectibles</p>

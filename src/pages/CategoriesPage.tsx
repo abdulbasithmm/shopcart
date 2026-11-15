@@ -72,13 +72,13 @@ export const CategoriesPage: React.FC<CategoriesPageProps> = ({ onNavigate }) =>
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-20 md:pb-12">
+    <div className="bg-slate-50 pb-4 sm:pb-8 w-full">
       {/* Top Header Banner */}
-      <div className="bg-white border-b border-slate-200 px-4 py-4 sticky top-16 z-10 shadow-2xs">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
+      <div className="bg-white border-b border-slate-200 px-2.5 sm:px-6 lg:px-8 py-3 sm:py-4 md:sticky md:top-16 z-10 shadow-2xs">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-2">
           <div>
-            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
-              <LayoutGrid className="w-6 h-6 text-[#0b5c37]" />
+            <h1 className="text-lg sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+              <LayoutGrid className="w-5 h-5 sm:w-6 sm:h-6 text-[#0b5c37]" />
               <span>{t.nav.shopByCategory}</span>
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
@@ -87,7 +87,7 @@ export const CategoriesPage: React.FC<CategoriesPageProps> = ({ onNavigate }) =>
           </div>
           <button
             onClick={() => onNavigate('shop', { category: 'all' })}
-            className="text-xs font-bold text-[#0b5c37] hover:text-[#08482b] flex items-center gap-1 cursor-pointer bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200"
+            className="text-xs font-bold text-[#0b5c37] hover:text-[#08482b] flex items-center gap-1 cursor-pointer bg-emerald-50 px-2.5 sm:px-3 py-1.5 rounded-lg border border-emerald-200 shrink-0"
           >
             <span>{t.common.exploreCatalog}</span>
             <ChevronRight className="w-4 h-4" />
@@ -95,9 +95,9 @@ export const CategoriesPage: React.FC<CategoriesPageProps> = ({ onNavigate }) =>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 py-6">
+      <div className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8 py-4 sm:py-6">
         {/* Categories Grid - Mobile Quick Selector */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3 mb-8">
+        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2 sm:gap-3 mb-5 sm:mb-8">
           {filteredCategories.map((cat) => {
             const isSelected = selectedCategory.toLowerCase() === cat.id.toLowerCase();
             const liveCount = products.filter(
@@ -135,7 +135,7 @@ export const CategoriesPage: React.FC<CategoriesPageProps> = ({ onNavigate }) =>
         </div>
 
         {/* Selected Category Header & Deep Link */}
-        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="bg-white rounded-2xl p-3.5 sm:p-5 border border-slate-200 shadow-xs mb-4 sm:mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
           <div>
             <div className="flex items-center gap-2">
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-[#0b5c37]">
@@ -159,14 +159,14 @@ export const CategoriesPage: React.FC<CategoriesPageProps> = ({ onNavigate }) =>
         </div>
 
         {/* Products in Category */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
           {activeCategoryProducts.map((prod) => (
             <div
               key={prod.id}
               onClick={() => onNavigate('product', { productId: prod.id })}
-              className="bg-white rounded-2xl border border-slate-200 shadow-2xs hover:shadow-md transition-all overflow-hidden flex flex-col cursor-pointer group"
+              className="bg-white rounded-xl sm:rounded-2xl border border-slate-200 shadow-2xs hover:shadow-md transition-all overflow-hidden flex flex-col cursor-pointer group"
             >
-              <div className="relative aspect-4/3 bg-slate-50 p-4 flex items-center justify-center overflow-hidden">
+              <div className="relative aspect-4/3 bg-slate-50 p-2 sm:p-4 flex items-center justify-center overflow-hidden">
                 <ProductImage
                   product={prod}
                   size="md"
@@ -174,18 +174,18 @@ export const CategoriesPage: React.FC<CategoriesPageProps> = ({ onNavigate }) =>
                   className="max-h-full max-w-full group-hover:scale-105 transition-transform duration-300"
                 />
                 {prod.discountPercentage && (
-                  <span className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider shadow-2xs">
+                  <span className="absolute top-2 left-2 px-1.5 sm:px-2 py-0.5 rounded-md bg-rose-600 text-white text-[9px] sm:text-[10px] font-black uppercase tracking-wider shadow-2xs">
                     {prod.discountPercentage}% OFF
                   </span>
                 )}
                 {prod.isFeatured && (
-                  <span className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-amber-500 text-white text-[10px] font-bold shadow-2xs flex items-center gap-0.5">
+                  <span className="absolute top-2 right-2 px-1.5 sm:px-2 py-0.5 rounded-md bg-amber-500 text-white text-[9px] sm:text-[10px] font-bold shadow-2xs flex items-center gap-0.5">
                     <Sparkle className="w-3 h-3 fill-current" />
-                    <span>Featured</span>
+                    <span className="hidden sm:inline">Featured</span>
                   </span>
                 )}
               </div>
-              <div className="p-4 flex-1 flex flex-col justify-between">
+              <div className="p-2.5 sm:p-4 flex-1 flex flex-col justify-between">
                 <div>
                   <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">
                     {prod.brand}

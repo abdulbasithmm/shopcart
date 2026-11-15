@@ -221,7 +221,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
     allProducts[0];
 
   return (
-    <div className="bg-[#f8f9fa] text-slate-900 min-h-screen space-y-8 pb-16 selection:bg-[#0b5c37] selection:text-white">
+    <div className="bg-[#f8f9fa] text-slate-900 space-y-5 sm:space-y-8 pb-2 sm:pb-6 selection:bg-[#0b5c37] selection:text-white w-full">
       {/* --------------------------------------------------------------------- */}
       {/* 1. HERO BANNER: COMPACT TOP UTILITY BAR + 3S HORIZONTAL CAROUSEL */}
       {/* --------------------------------------------------------------------- */}
@@ -234,11 +234,11 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
         onBlurCapture={() => setIsHeroPaused(false)}
         onTouchStart={() => setIsHeroPaused(true)}
         onTouchEnd={() => setIsHeroPaused(false)}
-        className="relative overflow-hidden bg-gradient-to-b from-[#f3f6f4] via-[#f7f9f8] to-[#f8f9fa] border-b border-slate-200"
+        className="relative overflow-hidden bg-gradient-to-b from-[#f3f6f4] via-[#f7f9f8] to-[#f8f9fa] border-b border-slate-200 w-full"
       >
         {/* Minimal top bar visible when main header is hidden at page top (gives instant Language Switcher, Account & Cart access) */}
         <div
-          className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-1 flex items-center justify-between gap-3 relative z-30 transition-opacity duration-200 ${
+          className={`max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8 pt-2.5 sm:pt-4 pb-1 flex items-center justify-between gap-2 relative z-30 transition-opacity duration-200 ${
             isAtPageTop ? 'opacity-100' : 'opacity-0 pointer-events-none'
           }`}
         >
@@ -275,7 +275,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
           </div>
         </div>
 
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-12 relative min-h-[430px] sm:min-h-[470px] flex items-center">
+        <div className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8 pt-2 pb-12 sm:py-6 md:py-12 relative sm:min-h-[470px] flex items-center">
           {/* Subtle leaf accent graphic in top right */}
           <div className="absolute top-0 right-0 w-80 h-80 opacity-20 pointer-events-none overflow-hidden">
             <svg viewBox="0 0 200 200" fill="#0b5c37" className="w-full h-full transform translate-x-16 -translate-y-16 scale-125">
@@ -284,24 +284,24 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
             </svg>
           </div>
 
-          {/* Left Arrow */}
+          {/* Left Arrow (Tablet & Desktop) */}
           <button
             type="button"
             onClick={handlePrevSlide}
-            className="absolute left-1 sm:left-4 z-20 w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-white/95 hover:bg-white shadow-md border border-slate-200/90 flex items-center justify-center text-slate-700 hover:text-slate-950 cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95"
+            className="hidden sm:flex absolute left-4 z-20 w-11 h-11 rounded-full bg-white/95 hover:bg-white shadow-md border border-slate-200/90 items-center justify-center text-slate-700 hover:text-slate-950 cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95"
             aria-label="Previous slide"
           >
-            <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
+            <ChevronLeft className="w-5 h-5" />
           </button>
 
-          {/* Right Arrow */}
+          {/* Right Arrow (Tablet & Desktop) */}
           <button
             type="button"
             onClick={handleNextSlide}
-            className="absolute right-1 sm:right-4 z-20 w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-white/95 hover:bg-white shadow-md border border-slate-200/90 flex items-center justify-center text-slate-700 hover:text-slate-950 cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95"
+            className="hidden sm:flex absolute right-4 z-20 w-11 h-11 rounded-full bg-white/95 hover:bg-white shadow-md border border-slate-200/90 items-center justify-center text-slate-700 hover:text-slate-950 cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95"
             aria-label="Next slide"
           >
-            <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
+            <ChevronRight className="w-5 h-5" />
           </button>
 
           {/* Horizontal Smooth Slide Track */}
@@ -311,7 +311,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
               style={{ transform: `translateX(-${heroSlide * 100}%)` }}
             >
               {/* SLIDE 0 */}
-              <div className="w-full shrink-0 px-8 sm:px-12 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+              <div className="w-full shrink-0 px-0 sm:px-12 grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-8 items-center">
                 <div className="lg:col-span-5 space-y-4 sm:space-y-5 z-10">
                   <div className="space-y-1">
                     <h1 className="text-2xl sm:text-4xl lg:text-5xl font-extrabold text-[#111827] tracking-tight leading-tight">
@@ -428,7 +428,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
               </div>
 
               {/* SLIDE 1 */}
-              <div className="w-full shrink-0 px-8 sm:px-12 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+              <div className="w-full shrink-0 px-0 sm:px-12 grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-8 items-center">
                 <div className="lg:col-span-5 space-y-5 z-10">
                   <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-100/80 text-[#0b5c37] rounded-lg text-xs font-bold uppercase tracking-wider">
                     <Zap className="w-3.5 h-3.5 fill-current" />
@@ -481,13 +481,13 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
                 </div>
 
                 <div className="lg:col-span-7 relative flex items-center justify-center">
-                  <div className="grid grid-cols-2 gap-4 w-full max-w-md">
+                  <div className="grid grid-cols-2 gap-2.5 sm:gap-4 w-full sm:max-w-md">
                     {slide1Left && (
                       <div
                         onClick={() => onNavigate('product', { productId: slide1Left.id })}
-                        className="p-5 bg-white rounded-2xl border border-slate-200 shadow-md hover:shadow-lg transition-all cursor-pointer group flex flex-col items-center text-center space-y-2"
+                        className="p-3 sm:p-5 bg-white rounded-2xl border border-slate-200 shadow-md hover:shadow-lg transition-all cursor-pointer group flex flex-col items-center text-center space-y-2"
                       >
-                        <div className="w-28 h-28 flex items-center justify-center group-hover:scale-105 transition-transform">
+                        <div className="w-20 h-20 sm:w-28 sm:h-28 flex items-center justify-center group-hover:scale-105 transition-transform">
                           <ProductImage product={slide1Left} size="sm" showBadge={false} />
                         </div>
                         <span className="text-xs font-bold text-slate-900 group-hover:text-[#0b5c37] line-clamp-1">
@@ -502,9 +502,9 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
                     {slide1Right && (
                       <div
                         onClick={() => onNavigate('product', { productId: slide1Right.id })}
-                        className="p-5 bg-white rounded-2xl border border-slate-200 shadow-md hover:shadow-lg transition-all cursor-pointer group flex flex-col items-center text-center space-y-2"
+                        className="p-3 sm:p-5 bg-white rounded-2xl border border-slate-200 shadow-md hover:shadow-lg transition-all cursor-pointer group flex flex-col items-center text-center space-y-2"
                       >
-                        <div className="w-28 h-28 flex items-center justify-center group-hover:scale-105 transition-transform">
+                        <div className="w-20 h-20 sm:w-28 sm:h-28 flex items-center justify-center group-hover:scale-105 transition-transform">
                           <ProductImage product={slide1Right} size="sm" showBadge={false} />
                         </div>
                         <span className="text-xs font-bold text-slate-900 group-hover:text-[#0b5c37] line-clamp-1">
@@ -520,7 +520,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
               </div>
 
               {/* SLIDE 2 */}
-              <div className="w-full shrink-0 px-8 sm:px-12 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+              <div className="w-full shrink-0 px-0 sm:px-12 grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-8 items-center">
                 <div className="lg:col-span-5 space-y-5 z-10">
                   <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-100 text-amber-900 rounded-lg text-xs font-bold uppercase tracking-wider">
                     <Sparkles className="w-3.5 h-3.5" />
@@ -573,13 +573,13 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
                 </div>
 
                 <div className="lg:col-span-7 relative flex items-center justify-center">
-                  <div className="grid grid-cols-2 gap-4 w-full max-w-md">
+                  <div className="grid grid-cols-2 gap-2.5 sm:gap-4 w-full sm:max-w-md">
                     {slide2Left && (
                       <div
                         onClick={() => onNavigate('product', { productId: slide2Left.id })}
-                        className="p-5 bg-white rounded-2xl border border-slate-200 shadow-md hover:shadow-lg transition-all cursor-pointer group flex flex-col items-center text-center space-y-2"
+                        className="p-3 sm:p-5 bg-white rounded-2xl border border-slate-200 shadow-md hover:shadow-lg transition-all cursor-pointer group flex flex-col items-center text-center space-y-2"
                       >
-                        <div className="w-28 h-28 flex items-center justify-center group-hover:scale-105 transition-transform">
+                        <div className="w-20 h-20 sm:w-28 sm:h-28 flex items-center justify-center group-hover:scale-105 transition-transform">
                           <ProductImage product={slide2Left} size="sm" showBadge={false} />
                         </div>
                         <span className="text-xs font-bold text-slate-900 group-hover:text-[#0b5c37] line-clamp-1">
@@ -594,9 +594,9 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
                     {slide2Right && (
                       <div
                         onClick={() => onNavigate('product', { productId: slide2Right.id })}
-                        className="p-5 bg-white rounded-2xl border border-slate-200 shadow-md hover:shadow-lg transition-all cursor-pointer group flex flex-col items-center text-center space-y-2"
+                        className="p-3 sm:p-5 bg-white rounded-2xl border border-slate-200 shadow-md hover:shadow-lg transition-all cursor-pointer group flex flex-col items-center text-center space-y-2"
                       >
-                        <div className="w-28 h-28 flex items-center justify-center group-hover:scale-105 transition-transform">
+                        <div className="w-20 h-20 sm:w-28 sm:h-28 flex items-center justify-center group-hover:scale-105 transition-transform">
                           <ProductImage product={slide2Right} size="sm" showBadge={false} />
                         </div>
                         <span className="text-xs font-bold text-slate-900 group-hover:text-[#0b5c37] line-clamp-1">
@@ -613,21 +613,39 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
             </div>
           </div>
 
-          {/* Dots navigation */}
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2 z-20">
-            {[0, 1, 2].map((idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => setHeroSlide(idx)}
-                className={`transition-all duration-300 rounded-full cursor-pointer ${
-                  heroSlide === idx
-                    ? 'w-7 h-2.5 bg-[#0b5c37]'
-                    : 'w-2.5 h-2.5 bg-slate-300 hover:bg-slate-400'
-                }`}
-                aria-label={`Go to slide ${idx + 1}`}
-              />
-            ))}
+          {/* Dots & mobile prev/next navigation */}
+          <div className="absolute bottom-2.5 left-1/2 -translate-x-1/2 flex items-center gap-2.5 z-20">
+            <button
+              type="button"
+              onClick={handlePrevSlide}
+              className="sm:hidden w-7 h-7 rounded-full bg-white/90 border border-slate-200 flex items-center justify-center text-slate-700 shadow-xs cursor-pointer"
+              aria-label="Previous slide"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+            <div className="flex items-center gap-2">
+              {[0, 1, 2].map((idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => setHeroSlide(idx)}
+                  className={`transition-all duration-300 rounded-full cursor-pointer ${
+                    heroSlide === idx
+                      ? 'w-7 h-2.5 bg-[#0b5c37]'
+                      : 'w-2.5 h-2.5 bg-slate-300 hover:bg-slate-400'
+                  }`}
+                  aria-label={`Go to slide ${idx + 1}`}
+                />
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={handleNextSlide}
+              className="sm:hidden w-7 h-7 rounded-full bg-white/90 border border-slate-200 flex items-center justify-center text-slate-700 shadow-xs cursor-pointer"
+              aria-label="Next slide"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       </section>
@@ -635,8 +653,8 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
       {/* --------------------------------------------------------------------- */}
       {/* 2. VALUE PROPOSITION STRIP */}
       {/* --------------------------------------------------------------------- */}
-      <ScrollReveal animation="fade-up" delay={50} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="bg-white rounded-lg border border-slate-200 shadow-xs p-4 sm:p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
+      <ScrollReveal animation="fade-up" delay={50} className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8">
+        <div className="bg-white rounded-lg border border-slate-200 shadow-xs p-3 sm:p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
           <div className="flex items-center gap-3.5 pt-2 sm:pt-0">
             <div className="text-[#0b5c37] shrink-0">
               <Truck className="w-7 h-7 stroke-[1.8]" />
@@ -682,7 +700,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
       {/* --------------------------------------------------------------------- */}
       {/* 3. SHOP BY CATEGORY */}
       {/* --------------------------------------------------------------------- */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-4">
+      <section className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8 space-y-3 sm:space-y-4">
         <ScrollReveal animation="fade-in" className="flex items-center justify-between">
           <h2 className="text-lg sm:text-xl font-bold text-slate-900">{t.home.shopByCategory}</h2>
           <button
@@ -746,7 +764,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
       {/* --------------------------------------------------------------------- */}
       {/* 4. TODAY'S DEALS CAROUSEL */}
       {/* --------------------------------------------------------------------- */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-4">
+      <section className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8 space-y-3 sm:space-y-4">
         <ScrollReveal animation="fade-in" className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <h2 className="text-lg sm:text-xl font-bold text-slate-900">{t.home.todaysDeals}</h2>
@@ -783,13 +801,13 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
           </div>
         </ScrollReveal>
 
-        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-4">
           {currentDeals.map((deal, idx) => (
             <ScrollReveal
               key={deal.id}
               animation="fade-up"
               delay={idx * 70}
-              className="bg-white rounded-lg border border-slate-200 p-2.5 sm:p-3.5 flex flex-col justify-between hover:shadow-md transition-all duration-200 cursor-pointer group"
+              className="bg-white rounded-lg border border-slate-200 p-2 sm:p-3.5 flex flex-col justify-between hover:shadow-md transition-all duration-200 cursor-pointer group"
             >
               <div onClick={() => onNavigate('product', { productId: deal.id })}>
                 <div className="relative aspect-square flex items-center justify-center p-2 bg-white">
@@ -855,7 +873,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
       {/* --------------------------------------------------------------------- */}
       {/* 5. REAL SUPABASE DEMO VIDEOS & LIKES SECTION */}
       {/* --------------------------------------------------------------------- */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-4">
+      <section className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8 space-y-3 sm:space-y-4">
         <ScrollReveal animation="fade-in" className="flex items-center justify-between gap-4">
           <div>
             <h2 className="text-lg sm:text-xl font-bold text-slate-900 flex items-center gap-2">
@@ -993,10 +1011,10 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
       {/* --------------------------------------------------------------------- */}
       {/* 6. SHOP CART MEMBERSHIP BANNER */}
       {/* --------------------------------------------------------------------- */}
-      <ScrollReveal animation="fade-up" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <ScrollReveal animation="fade-up" className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8">
         <div className="rounded-2xl overflow-hidden bg-[#a3c3a4] border border-slate-200/80 shadow-sm relative">
           <div className="grid grid-cols-1 lg:grid-cols-12 items-center">
-            <div className="lg:col-span-6 bg-white p-6 sm:p-10 lg:rounded-r-[100px] space-y-4 z-10">
+            <div className="lg:col-span-6 bg-white p-4 sm:p-10 lg:rounded-r-[100px] space-y-3 sm:space-y-4 z-10">
               <div className="flex items-center gap-1.5">
                 <span className="text-xl sm:text-2xl font-black text-[#0b5c37] tracking-tight">
                   shop cart
@@ -1026,7 +1044,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
             </div>
 
             {/* Authentic Delivery Boxes & ShopCart Demo Video Hub Card */}
-            <div className="lg:col-span-6 p-6 sm:p-8 flex items-center justify-center relative min-h-[220px]">
+            <div className="lg:col-span-6 p-4 sm:p-8 flex items-center justify-center relative sm:min-h-[220px]">
               <div className="flex items-center justify-center gap-5 sm:gap-7 flex-wrap">
                 <div className="flex flex-col items-center">
                   <div className="w-20 h-16 sm:w-28 sm:h-20 bg-[#d4a373] rounded-sm border border-[#bc8a5f] shadow-md p-2 flex flex-col justify-between">
@@ -1069,7 +1087,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
             </div>
           </div>
 
-          <div className="bg-white border-t border-slate-200/90 py-3 px-6 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs font-semibold text-slate-800">
+          <div className="bg-white border-t border-slate-200/90 py-3 px-3 sm:px-6 grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-4 text-xs font-semibold text-slate-800">
             <div className="flex items-center justify-center gap-2">
               <Truck className="w-4 h-4 text-[#0b5c37]" />
               <span>{t.home.membershipBenefitDelivery}</span>
@@ -1093,7 +1111,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
       {/* --------------------------------------------------------------------- */}
       {/* 7. BEST SELLERS / POPULAR PRODUCTS GRID */}
       {/* --------------------------------------------------------------------- */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-4">
+      <section className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8 space-y-3 sm:space-y-4">
         <ScrollReveal animation="fade-in" className="flex items-center justify-between">
           <h2 className="text-lg sm:text-xl font-bold text-slate-900">{t.home.featuredBestSellers}</h2>
           <button
@@ -1105,29 +1123,29 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
           </button>
         </ScrollReveal>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
+        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-5">
           {allProducts.slice(0, 12).map((prod, idx) => (
             <ScrollReveal
               key={prod.id}
               animation="fade-up"
               delay={idx * 50}
-              className="bg-white rounded-lg border border-slate-200 p-4 flex flex-col justify-between hover:shadow-md transition-all cursor-pointer group"
+              className="bg-white rounded-lg border border-slate-200 p-2 sm:p-4 flex flex-col justify-between hover:shadow-md transition-all cursor-pointer group"
             >
               <div onClick={() => onNavigate('product', { productId: prod.id })}>
-                <div className="relative aspect-square flex items-center justify-center bg-white p-2">
+                <div className="relative aspect-square flex items-center justify-center bg-white p-1.5 sm:p-2">
                   <ProductImage product={prod} size="md" showBadge={false} />
                   {prod.badge && (
-                    <span className="absolute top-2 left-2 bg-slate-900 text-white text-[10px] font-bold px-2 py-0.5 rounded-sm uppercase tracking-wider">
+                    <span className="absolute top-1.5 left-1.5 sm:top-2 sm:left-2 bg-slate-900 text-white text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-sm uppercase tracking-wider">
                       {prod.badge}
                     </span>
                   )}
                 </div>
 
-                <div className="pt-3 space-y-1">
-                  <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider">
+                <div className="pt-2.5 sm:pt-3 space-y-1">
+                  <span className="text-[10px] sm:text-[11px] font-medium text-slate-400 uppercase tracking-wider">
                     {prod.brand}
                   </span>
-                  <h3 className="text-sm font-semibold text-slate-900 line-clamp-2 group-hover:text-[#0b5c37] transition-colors leading-snug">
+                  <h3 className="text-xs sm:text-sm font-semibold text-slate-900 line-clamp-2 group-hover:text-[#0b5c37] transition-colors leading-snug">
                     {prod.name}
                   </h3>
 
@@ -1144,17 +1162,17 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
                         />
                       ))}
                     </div>
-                    <span className="text-[11px] font-mono text-slate-400">
+                    <span className="text-[10px] sm:text-[11px] font-mono text-slate-400">
                       ({prod.reviewsCount})
                     </span>
                   </div>
 
-                  <div className="flex items-baseline gap-2 pt-1.5">
-                    <span className="text-lg font-bold text-slate-900 tabular-nums">
+                  <div className="flex items-baseline gap-1.5 sm:gap-2 pt-1">
+                    <span className="text-sm sm:text-lg font-bold text-slate-900 tabular-nums">
                       {formatPrice(prod.price)}
                     </span>
                     {prod.originalPrice > prod.price && (
-                      <span className="text-xs text-slate-400 line-through tabular-nums">
+                      <span className="text-[11px] sm:text-xs text-slate-400 line-through tabular-nums">
                         {formatPrice(prod.originalPrice)}
                       </span>
                     )}
@@ -1162,10 +1180,10 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
                 </div>
               </div>
 
-              <div className="pt-3">
+              <div className="pt-2.5 sm:pt-3">
                 <button
                   onClick={(e) => handleAddToCart(e, prod)}
-                  className="w-full py-2 bg-[#f3f4f6] hover:bg-[#0b5c37] text-slate-800 hover:text-white text-xs font-bold rounded-md transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                  className="w-full py-2 bg-[#f3f4f6] hover:bg-[#0b5c37] text-slate-800 hover:text-white text-[11px] sm:text-xs font-bold rounded-md transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <ShoppingBag className="w-3.5 h-3.5" />
                   <span>{t.common.addToCart}</span>
@@ -1177,7 +1195,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
       </section>
 
       {/* PWA Mobile App Download / Install Banner */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-12">
+      <section className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8 pb-2">
         <PWAInstallButton variant="banner" />
       </section>
 

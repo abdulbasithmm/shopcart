@@ -106,10 +106,10 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
   });
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 overflow-y-auto animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl max-w-3xl w-full border border-slate-200 shadow-2xl my-6 overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-5 overflow-y-auto animate-in fade-in duration-200">
+      <div className="bg-white rounded-2xl sm:rounded-3xl max-w-3xl w-full border border-slate-200 shadow-2xl my-3 sm:my-6 overflow-hidden flex flex-col max-h-[94vh] animate-in zoom-in-95 duration-200">
         {/* 1. Modal Top Bar */}
-        <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
+        <div className="px-4 sm:px-6 py-3.5 sm:py-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-[#0b5c37] flex items-center justify-center text-white shadow-md shadow-emerald-900/10">
               <Truck className="w-5 h-5" />
@@ -145,9 +145,9 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
         </div>
 
         {/* 2. Scrollable Body Content */}
-        <div className="p-6 overflow-y-auto space-y-6 text-slate-800 flex-1">
+        <div className="p-3.5 sm:p-6 overflow-y-auto space-y-4 sm:space-y-6 text-slate-800 flex-1">
           {/* A. Estimated Delivery Banner (Amazon-Style) */}
-          <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white p-5 rounded-2xl shadow-sm border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3.5 sm:gap-4">
             <div>
               <div className="flex items-center gap-2">
                 <span
@@ -195,7 +195,7 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
 
           {/* B. Amazon 5-Stage Tracking Progress Timeline */}
           {!isCancelled && !isRefunded ? (
-            <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-6 space-y-4">
+            <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-3.5 sm:p-6 space-y-3 sm:space-y-4">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-900 uppercase font-mono tracking-wider">
                   Package Progress
@@ -208,11 +208,11 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
               {/* Progress Bar with Steps */}
               <div className="relative pt-2 pb-1">
                 {/* Background Line */}
-                <div className="absolute top-5 left-4 right-4 h-1 bg-slate-200 -translate-y-1/2 z-0" />
+                <div className="absolute top-5 left-3 sm:left-4 right-3 sm:right-4 h-1 bg-slate-200 -translate-y-1/2 z-0" />
 
                 {/* Active Colored Fill Line */}
                 <div
-                  className="absolute top-5 left-4 h-1 bg-gradient-to-r from-emerald-500 to-emerald-500 -translate-y-1/2 z-0 transition-all duration-500"
+                  className="absolute top-5 left-3 sm:left-4 h-1 bg-gradient-to-r from-emerald-500 to-emerald-500 -translate-y-1/2 z-0 transition-all duration-500"
                   style={{
                     width: `${Math.min(100, Math.max(0, (currentStep / (AMAZON_TRACKING_MILESTONES.length - 1)) * 92))}%`,
                   }}
@@ -226,9 +226,9 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
                     const isPending = currentStep < idx;
 
                     return (
-                      <div key={step.key} className="flex flex-col items-center text-center max-w-[80px]">
+                      <div key={step.key} className="flex flex-col items-center text-center max-w-[64px] sm:max-w-[80px]">
                         <div
-                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all shadow-xs ${
+                          className={`w-7 h-7 sm:w-9 sm:h-9 rounded-full flex items-center justify-center transition-all shadow-xs ${
                             isCompleted
                               ? 'bg-emerald-600 text-white font-bold'
                               : isActive

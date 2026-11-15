@@ -110,8 +110,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
   };
 
   return (
-    <div className="min-h-[75vh] flex items-center justify-center px-3 sm:px-4 py-8 sm:py-12">
-      <div className="w-full max-w-md bg-white rounded-3xl p-5 sm:p-8 md:p-10 border border-slate-200/90 shadow-xl space-y-5 sm:space-y-6">
+    <div className="sm:min-h-[70vh] flex items-center justify-center px-2.5 sm:px-4 py-5 sm:py-12 w-full">
+      <div className="w-full sm:max-w-md bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-8 md:p-10 border border-slate-200/90 shadow-xl space-y-5 sm:space-y-6">
         {/* Brand header */}
         <div className="text-center space-y-2">
           <div

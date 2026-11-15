@@ -92,7 +92,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
       aria-label="Mobile Bottom Navigation"
       className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-200/90 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] pb-[env(safe-area-inset-bottom,0px)]"
     >
-      <div className="grid grid-cols-5 h-14 items-center px-1 max-w-lg mx-auto">
+      <div className="grid grid-cols-5 h-14 items-center px-1 w-full md:max-w-lg md:mx-auto">
         {navItems.map((item) => {
           // Compute active state
           const isAccountActive =

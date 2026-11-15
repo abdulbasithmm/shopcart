@@ -709,7 +709,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
   // Empty cart fallback
   if (cart.length === 0 && !completedOrder) {
     return (
-      <div className="max-w-2xl mx-auto px-4 py-20 text-center space-y-6">
+      <div className="w-full sm:max-w-2xl sm:mx-auto px-2.5 sm:px-4 py-8 sm:py-16 text-center space-y-5">
         <div className="w-20 h-20 bg-emerald-50 border border-emerald-200/60 rounded-2xl flex items-center justify-center mx-auto text-[#0b5c37]">
           <ShoppingBag className="w-10 h-10" />
         </div>
@@ -738,8 +738,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
   }
 
   return (
-    <div className="bg-slate-50/60 min-h-screen py-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
+    <div className="bg-slate-50/60 py-3 sm:py-8 w-full">
+      <div className="max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 space-y-4 sm:space-y-8">
         {/* Navigation Breadcrumb */}
         <nav className="flex items-center gap-2 text-xs text-slate-500">
           <button
@@ -760,7 +760,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         </nav>
 
         {/* Page Header */}
-        <div className="bg-white border border-slate-200/90 rounded-2xl p-6 sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="bg-white border border-slate-200/90 rounded-2xl p-4 sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2.5 mb-1.5">
               <span className="text-xs font-mono font-bold uppercase tracking-wider text-[#0b5c37] bg-emerald-50 border border-emerald-200/70 px-2 py-0.5 rounded">
@@ -800,11 +800,11 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         </div>
 
         {/* Two-Column Checkout Layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-8 items-start">
           {/* Left Column: Sections 1, 2, 8 (Customer, Shipping & Payment) */}
-          <div className="lg:col-span-7 space-y-6">
+          <div className="lg:col-span-7 space-y-4 sm:space-y-6">
             {/* SECTION 1: Customer Information */}
-            <section className="bg-white rounded-2xl border border-slate-200/90 p-6 sm:p-7 shadow-xs space-y-4">
+            <section className="bg-white rounded-2xl border border-slate-200/90 p-3.5 sm:p-7 shadow-xs space-y-4">
               <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
                 <div className="w-7 h-7 rounded-lg bg-[#0b5c37] text-white font-black text-xs flex items-center justify-center">
                   1
@@ -898,7 +898,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
             </section>
 
             {/* SECTION 2: Delivery Address */}
-            <section className="bg-white rounded-2xl border border-slate-200/90 p-6 sm:p-7 shadow-xs space-y-5">
+            <section className="bg-white rounded-2xl border border-slate-200/90 p-3.5 sm:p-7 shadow-xs space-y-4 sm:space-y-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-2">
                 <div className="flex items-center gap-3">
                   <div className="w-7 h-7 rounded-lg bg-[#0b5c37] text-white font-black text-xs flex items-center justify-center">
@@ -1211,7 +1211,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
             </section>
 
             {/* SECTION 3 / PAYMENT: SINGLE SHOPCART UPI PAYMENT FLOW */}
-            <section className="bg-white rounded-2xl border border-slate-200/90 p-6 sm:p-7 shadow-xs space-y-6">
+            <section className="bg-white rounded-2xl border border-slate-200/90 p-3.5 sm:p-7 shadow-xs space-y-4 sm:space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 gap-2">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-lg bg-[#0b5c37] text-white font-black text-xs flex items-center justify-center">
@@ -1612,7 +1612,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
           {/* Right Column: Order Summary, Items & Summary Cards */}
           <div className="lg:col-span-5 space-y-6">
             {/* SECTION 3: Ordered Products */}
-            <section className="bg-white rounded-2xl border border-slate-200/90 p-6 shadow-xs space-y-4">
+            <section className="bg-white rounded-2xl border border-slate-200/90 p-3.5 sm:p-6 shadow-xs space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <div className="flex items-center gap-3">
                   <div className="w-7 h-7 rounded-lg bg-[#0b5c37] text-white font-black text-xs flex items-center justify-center">
@@ -1698,7 +1698,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
             </section>
 
             {/* SECTION 4 & 5 & 7: Summary & Grand Total */}
-            <section className="bg-white rounded-2xl border border-slate-200/90 p-6 shadow-xs space-y-4">
+            <section className="bg-white rounded-2xl border border-slate-200/90 p-3.5 sm:p-6 shadow-xs space-y-4">
               <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
                 <div className="w-7 h-7 rounded-lg bg-[#0b5c37] text-white font-black text-xs flex items-center justify-center">
                   4 &amp; 7

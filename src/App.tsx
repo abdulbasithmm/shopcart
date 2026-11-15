@@ -305,7 +305,7 @@ function AppContent() {
   const isAdminRoute = currentPage === 'admin' || currentPage === 'admin-login' || currentPage === 'access-denied';
 
   return (
-    <div className="min-h-screen flex flex-col bg-white text-slate-900 selection:bg-[#0b5c37] selection:text-white overflow-x-hidden w-full">
+    <div className="min-h-screen flex flex-col bg-white text-slate-900 selection:bg-[#0b5c37] selection:text-white overflow-x-clip w-full max-w-full">
       {/* Top Header - Hidden on dedicated Admin portal views for clean separation */}
       {!isAdminRoute && (
         <Header
@@ -316,7 +316,7 @@ function AppContent() {
       )}
 
       {/* Main Viewport Content */}
-      <main className="flex-1 pb-16 md:pb-0">
+      <main className={`flex-1 w-full max-w-full ${isAdminRoute ? 'pb-16 md:pb-0' : 'pb-0'}`}>
         {currentPage === 'home' && (
           <HomePage
             onNavigate={handleNavigate}

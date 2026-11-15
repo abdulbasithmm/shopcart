@@ -100,7 +100,7 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
   }, []);
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 bg-white min-h-[calc(100vh-280px)]">
+    <div className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-5 sm:space-y-8 bg-white w-full">
       {/* Breadcrumb Navigation */}
       <nav className="flex items-center gap-2 text-xs text-slate-500">
         <button
@@ -165,9 +165,9 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
 
       {/* Cart Content: Empty State vs Populated Cart */}
       {cart.length === 0 ? (
-        <div className="space-y-12">
+        <div className="space-y-6 sm:space-y-12">
           {/* Empty Cart Banner */}
-          <div className="bg-gradient-to-b from-emerald-50/40 via-white to-white rounded-3xl p-10 sm:p-16 text-center border border-slate-200 shadow-sm max-w-2xl mx-auto">
+          <div className="bg-gradient-to-b from-emerald-50/40 via-white to-white rounded-2xl sm:rounded-3xl p-5 sm:p-16 text-center border border-slate-200 shadow-sm w-full sm:max-w-2xl sm:mx-auto">
             <div className="w-24 h-24 rounded-3xl bg-emerald-100/70 border border-emerald-200 flex items-center justify-center mx-auto mb-6 text-[#0b5c37] shadow-inner">
               <ShoppingBag className="w-12 h-12 stroke-[1.75]" />
             </div>
@@ -292,7 +292,7 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-5">
               {recommendedProducts.map((prod) => (
                 <div
                   key={prod.id}
@@ -380,7 +380,7 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
                 return (
                   <div
                     key={`${item.product.id}-${item.selectedColor || ''}-${item.selectedSize || ''}`}
-                    className="p-5 sm:p-6 flex flex-col sm:flex-row gap-5 items-start sm:items-center justify-between hover:bg-slate-50/40 transition-colors"
+                    className="p-3.5 sm:p-6 flex flex-col sm:flex-row gap-3.5 sm:gap-5 items-start sm:items-center justify-between hover:bg-slate-50/40 transition-colors"
                   >
                     {/* Product Visual & Info */}
                     <div className="flex items-start sm:items-center gap-4 w-full sm:w-auto flex-1">

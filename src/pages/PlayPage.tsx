@@ -206,8 +206,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ onNavigate }) => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white pb-20 md:pb-10">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
+    <div className="bg-slate-950 text-white pb-6 sm:pb-10 w-full">
+      <div className="max-w-6xl mx-auto px-2.5 sm:px-6 pt-3 sm:pt-6 space-y-4 sm:space-y-6">
         {/* Page Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
           <div>
@@ -229,12 +229,12 @@ export const PlayPage: React.FC<PlayPageProps> = ({ onNavigate }) => {
         </div>
 
         {isLoading ? (
-          <div className="min-h-[420px] flex flex-col items-center justify-center gap-3 bg-slate-900/70 rounded-3xl border border-slate-800">
+          <div className="min-h-[260px] sm:min-h-[380px] flex flex-col items-center justify-center gap-3 bg-slate-900/70 rounded-2xl sm:rounded-3xl border border-slate-800">
             <Loader2 className="w-7 h-7 animate-spin text-emerald-400" />
             <span className="text-xs text-slate-400">{t.common.loading}</span>
           </div>
         ) : !currentVideo ? (
-          <div className="min-h-[420px] flex flex-col items-center justify-center text-center p-8 bg-slate-900/80 rounded-3xl border border-slate-800 space-y-4">
+          <div className="min-h-[260px] sm:min-h-[380px] flex flex-col items-center justify-center text-center p-5 sm:p-8 bg-slate-900/80 rounded-2xl sm:rounded-3xl border border-slate-800 space-y-4">
             <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
               <Video className="w-8 h-8" />
             </div>
@@ -252,10 +252,10 @@ export const PlayPage: React.FC<PlayPageProps> = ({ onNavigate }) => {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-start">
             {/* Primary Player Stage */}
-            <div className="lg:col-span-7 flex flex-col items-center">
-              <div className="relative w-full max-w-md h-[620px] sm:h-[680px] bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-slate-800 flex flex-col justify-between">
+            <div className="lg:col-span-7 flex flex-col items-center w-full">
+              <div className="relative w-full sm:max-w-md h-[460px] sm:h-[640px] bg-slate-900 rounded-2xl sm:rounded-3xl overflow-hidden shadow-2xl border border-slate-800 flex flex-col justify-between">
                 {/* Video Element / Embed */}
                 <div className="absolute inset-0 bg-black flex items-center justify-center">
                   {embedInfo?.type === 'direct' ? (

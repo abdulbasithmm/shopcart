@@ -363,9 +363,9 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   const isInWish = isInWishlist(product.id);
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-12 bg-white">
+    <div className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-6 sm:space-y-12 bg-white w-full">
       {/* 1. Breadcrumb Navigation */}
-      <nav className="flex items-center gap-2 text-xs text-slate-500">
+      <nav className="flex items-center gap-2 text-xs text-slate-500 overflow-x-auto no-scrollbar">
         <button
           onClick={() => onNavigate('home')}
           className="hover:text-[#0b5c37] transition-colors cursor-pointer"
@@ -391,12 +391,12 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       </nav>
 
       {/* 2. Main Contiguous Product Showcase (PDP) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-10 items-start">
         {/* Left Column: Large Product Image Gallery & Zoom */}
         <div className="lg:col-span-7 space-y-4">
-          <div className="flex flex-col-reverse sm:flex-row gap-4 items-start">
+          <div className="flex flex-col-reverse sm:flex-row gap-3 sm:gap-4 items-start">
             {/* Gallery Thumbnails Column */}
-            <div className="flex sm:flex-col gap-2.5 overflow-x-auto sm:overflow-visible w-full sm:w-24 shrink-0 pb-2 sm:pb-0">
+            <div className="flex sm:flex-col gap-2.5 overflow-x-auto sm:overflow-visible w-full sm:w-24 shrink-0 pb-1 sm:pb-0">
               {galleryViews.map((view, idx) => (
                 <button
                   key={view.id}
@@ -427,9 +427,9 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
             </div>
 
             {/* Main Interactive Image Canvas with Zoom Lens */}
-            <div className="flex-1 w-full bg-white rounded-3xl border border-slate-200/90 shadow-2xs relative overflow-hidden group">
+            <div className="flex-1 w-full bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 shadow-2xs relative overflow-hidden group">
               <div
-                className="relative w-full h-96 sm:h-[480px] flex items-center justify-center p-6 cursor-crosshair overflow-hidden select-none"
+                className="relative w-full h-72 sm:h-[480px] flex items-center justify-center p-3 sm:p-6 cursor-crosshair overflow-hidden select-none"
                 onMouseEnter={() => setIsZooming(true)}
                 onMouseLeave={() => setIsZooming(false)}
                 onMouseMove={handleMouseMove}
@@ -780,12 +780,12 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
       </div>
 
       {/* 3. Deep Dive Tabs: Description, Specs, Reviews, Shipping */}
-      <div id="product-tabs-section" className="bg-white rounded-3xl border border-slate-200/90 shadow-2xs overflow-hidden">
+      <div id="product-tabs-section" className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 shadow-2xs overflow-hidden">
         {/* Tab Headers */}
-        <div className="flex flex-wrap border-b border-slate-200 bg-slate-50/50">
+        <div className="flex overflow-x-auto no-scrollbar sm:flex-wrap border-b border-slate-200 bg-slate-50/50">
           <button
             onClick={() => setActiveTab('details')}
-            className={`px-6 py-4 text-xs sm:text-sm font-bold transition-colors border-b-2 cursor-pointer ${
+            className={`px-3.5 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-bold transition-colors border-b-2 cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'details'
                 ? 'border-[#0b5c37] text-[#0b5c37] bg-white'
                 : 'border-transparent text-slate-600 hover:text-slate-900'
@@ -795,7 +795,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
           </button>
           <button
             onClick={() => setActiveTab('specs')}
-            className={`px-6 py-4 text-xs sm:text-sm font-bold transition-colors border-b-2 cursor-pointer ${
+            className={`px-3.5 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-bold transition-colors border-b-2 cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'specs'
                 ? 'border-[#0b5c37] text-[#0b5c37] bg-white'
                 : 'border-transparent text-slate-600 hover:text-slate-900'
@@ -805,7 +805,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
           </button>
           <button
             onClick={() => setActiveTab('reviews')}
-            className={`px-6 py-4 text-xs sm:text-sm font-bold transition-colors border-b-2 cursor-pointer ${
+            className={`px-3.5 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-bold transition-colors border-b-2 cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'reviews'
                 ? 'border-[#0b5c37] text-[#0b5c37] bg-white'
                 : 'border-transparent text-slate-600 hover:text-slate-900'
@@ -815,7 +815,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
           </button>
           <button
             onClick={() => setActiveTab('shipping')}
-            className={`px-6 py-4 text-xs sm:text-sm font-bold transition-colors border-b-2 cursor-pointer ${
+            className={`px-3.5 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-bold transition-colors border-b-2 cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'shipping'
                 ? 'border-[#0b5c37] text-[#0b5c37] bg-white'
                 : 'border-transparent text-slate-600 hover:text-slate-900'
@@ -826,7 +826,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
         </div>
 
         {/* Tab Content Panes */}
-        <div className="p-6 sm:p-8">
+        <div className="p-3.5 sm:p-8">
           {/* Tab 1: Overview & Features */}
           {activeTab === 'details' && (
             <div className="space-y-8">
@@ -892,7 +892,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
           {activeTab === 'reviews' && (
             <div className="space-y-8">
               {/* Rating Summary Bar */}
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-6 p-6 sm:p-8 bg-slate-50 rounded-3xl border border-slate-200/80 items-center">
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-4 sm:gap-6 p-4 sm:p-8 bg-slate-50 rounded-2xl sm:rounded-3xl border border-slate-200/80 items-center">
                 <div className="md:col-span-4 flex flex-col items-center sm:items-start text-center sm:text-left space-y-2">
                   <div className="text-5xl font-black text-slate-950 tabular-nums">
                     {totalReviewsCount > 0 ? computedAverageRating : '0.0'}
@@ -1155,12 +1155,12 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
               {/* Reviews List */}
               {isReviewsLoading ? (
-                <div className="p-12 text-center text-slate-400 flex flex-col items-center justify-center gap-2">
+                <div className="p-6 sm:p-12 text-center text-slate-400 flex flex-col items-center justify-center gap-2">
                   <Loader2 className="w-6 h-6 animate-spin text-[#0b5c37]" />
                   <span className="text-xs font-medium">{t.common.loading}</span>
                 </div>
               ) : filteredReviews.length === 0 ? (
-                <div className="p-10 rounded-2xl bg-slate-50 border border-slate-200 text-center space-y-2">
+                <div className="p-5 sm:p-10 rounded-2xl bg-slate-50 border border-slate-200 text-center space-y-2">
                   <p className="text-sm font-bold text-slate-800">{t.product.noReviewsYet}</p>
                   <p className="text-xs text-slate-500">{t.product.beFirstVerifiedBuyer}</p>
                   {ratingFilter !== null && (
@@ -1285,11 +1285,11 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-6">
             {relatedProducts.map((relProduct) => (
               <div
                 key={relProduct.id}
-                className="group bg-white rounded-3xl border border-slate-200/90 hover:border-[#0b5c37] hover:shadow-xl transition-all duration-300 p-4 flex flex-col justify-between"
+                className="group bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 hover:border-[#0b5c37] hover:shadow-xl transition-all duration-300 p-2.5 sm:p-4 flex flex-col justify-between"
               >
                 <div
                   className="cursor-pointer"

@@ -449,8 +449,8 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
 
   if (!isAuthenticated || !user) {
     return (
-      <div className="min-h-[60vh] flex items-center justify-center px-4 py-16">
-        <div className="max-w-md w-full bg-white rounded-3xl p-8 border border-slate-200/90 shadow-xl text-center space-y-5">
+      <div className="flex items-center justify-center px-2.5 sm:px-4 py-6 sm:py-16 w-full">
+        <div className="w-full sm:max-w-md bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-8 border border-slate-200/90 shadow-xl text-center space-y-5">
           <div className="w-16 h-16 bg-emerald-50 border border-emerald-200 text-[#0b5c37] rounded-2xl flex items-center justify-center mx-auto">
             <Lock className="w-8 h-8" />
           </div>
@@ -547,9 +547,9 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
+    <div className="max-w-6xl mx-auto px-2.5 sm:px-6 lg:px-8 py-4 sm:py-10 space-y-5 sm:space-y-8 w-full">
       {/* 1. Header Profile Banner */}
-      <div className="bg-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden">
+      <div className="bg-slate-900 rounded-2xl sm:rounded-3xl p-4 sm:p-8 text-white shadow-xl relative overflow-hidden">
         <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-gradient-to-l from-[#0b5c37]/20 to-transparent pointer-events-none" />
 
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 relative z-10">
@@ -666,7 +666,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
 
       {/* TAB 1: Profile & Shipping */}
       {activeTab === 'profile' && (
-        <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/90 shadow-sm space-y-6">
+        <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-8 border border-slate-200/90 shadow-sm space-y-5 sm:space-y-6">
           <div>
             <h2 className="text-base font-bold text-slate-900">Personal Information &amp; Default Shipping</h2>
             <p className="text-xs text-slate-500 mt-0.5">
@@ -989,12 +989,12 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
           </div>
 
           {isLoadingOrders ? (
-            <div className="bg-white rounded-3xl p-12 border border-slate-200/90 text-center space-y-3">
+            <div className="bg-white rounded-2xl sm:rounded-3xl p-6 sm:p-12 border border-slate-200/90 text-center space-y-3">
               <RefreshCw className="w-6 h-6 animate-spin text-[#0b5c37] mx-auto" />
               <p className="text-xs text-slate-500 font-medium">Fetching your orders from Supabase...</p>
             </div>
           ) : orders.length === 0 ? (
-            <div className="bg-white rounded-3xl p-12 border border-slate-200/90 text-center space-y-4">
+            <div className="bg-white rounded-2xl sm:rounded-3xl p-6 sm:p-12 border border-slate-200/90 text-center space-y-4">
               <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 mx-auto">
                 <Package className="w-8 h-8" />
               </div>
@@ -1012,7 +1012,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
               </button>
             </div>
           ) : (
-            <div className="space-y-6">
+            <div className="space-y-4 sm:space-y-6">
               {orders
                 .filter((ord) => {
                   if (orderFilterTab === 'in_progress') {
@@ -1047,8 +1047,8 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
                       className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden transition-all hover:border-slate-300"
                     >
                       {/* 1. Amazon-Style Order Header Ribbon */}
-                      <div className="bg-slate-50/90 px-5 sm:px-6 py-3.5 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-4 text-xs">
-                        <div className="flex flex-wrap items-center gap-6 text-slate-500">
+                      <div className="bg-slate-50/90 px-3.5 sm:px-6 py-3 sm:py-3.5 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-3 sm:gap-4 text-xs">
+                        <div className="flex flex-wrap items-center gap-3.5 sm:gap-6 text-slate-500">
                           <div>
                             <span className="block uppercase text-[10px] font-mono text-slate-400">Order Placed</span>
                             <span className="font-semibold text-slate-800">{orderDate}</span>
@@ -1122,7 +1122,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
                       </div>
 
                       {/* 2. Amazon-Style Order Body */}
-                      <div className="p-5 sm:p-6 space-y-6">
+                      <div className="p-3.5 sm:p-6 space-y-4 sm:space-y-6">
                         {/* Delivery Status & Primary Action Row */}
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                           <div>
@@ -1358,7 +1358,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
 
       {/* TAB 3: Customer Wishlist */}
       {activeTab === 'wishlist' && (
-        <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/90 shadow-sm space-y-6">
+        <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-8 border border-slate-200/90 shadow-sm space-y-5 sm:space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
             <div>
               <div className="flex items-center gap-2">
@@ -1486,7 +1486,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
 
       {/* TAB 4: Security & Password */}
       {activeTab === 'security' && (
-        <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/90 shadow-sm space-y-6">
+        <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-8 border border-slate-200/90 shadow-sm space-y-5 sm:space-y-6">
           <div>
             <h2 className="text-base font-bold text-slate-900">Security &amp; Account Password</h2>
             <p className="text-xs text-slate-500 mt-0.5">

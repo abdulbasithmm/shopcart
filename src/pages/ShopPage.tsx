@@ -263,7 +263,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
     inStockOnly;
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+    <div className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-4 sm:space-y-6 w-full">
       {/* Breadcrumb Navigation */}
       <nav className="flex items-center gap-2 text-xs text-slate-500">
         <button
@@ -664,7 +664,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
 
           {/* Empty State */}
           {filteredProducts.length === 0 ? (
-            <div className="bg-white rounded-3xl p-12 text-center border border-slate-200/90 shadow-2xs space-y-4">
+            <div className="bg-white rounded-2xl sm:rounded-3xl p-6 sm:p-12 text-center border border-slate-200/90 shadow-2xs space-y-4">
               <div className="w-16 h-16 rounded-full bg-emerald-50 text-[#0b5c37] flex items-center justify-center mx-auto shadow-inner">
                 <ShoppingBag className="w-8 h-8" />
               </div>
@@ -683,17 +683,17 @@ export const ShopPage: React.FC<ShopPageProps> = ({
             </div>
           ) : viewMode === 'grid' ? (
             /* Responsive Product Grid */
-            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-3 sm:gap-6">
+            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-2 sm:gap-6">
               {paginatedProducts.map((product) => {
                 const inWish = isInWishlist(product.id);
                 return (
                   <div
                     key={product.id}
-                    className="group bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 hover:border-[#0b5c37] hover:shadow-xl transition-all duration-300 flex flex-col justify-between overflow-hidden"
+                    className="group bg-white rounded-xl sm:rounded-3xl border border-slate-200/90 hover:border-[#0b5c37] hover:shadow-xl transition-all duration-300 flex flex-col justify-between overflow-hidden"
                   >
                     {/* Image Area with Badges & Action Buttons */}
                     <div
-                      className="relative cursor-pointer p-2.5 sm:p-4 pb-1 sm:pb-2"
+                      className="relative cursor-pointer p-2 sm:p-4 pb-1 sm:pb-2"
                       onClick={() => onNavigate('product', { productId: product.id })}
                     >
                       <ProductImage product={product} size="md" />

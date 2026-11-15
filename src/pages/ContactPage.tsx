@@ -213,7 +213,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-12">
+    <div className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-6 sm:space-y-12 w-full">
       {/* Breadcrumb Navigation */}
       <nav className="flex items-center gap-2 text-xs text-slate-500">
         <button onClick={() => onNavigate('home')} className="hover:text-[#0b5c37] cursor-pointer">
@@ -240,10 +240,10 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
       {/* ===================================================================== */}
       {/* 4 PRIMARY CONTACT CHANNELS STRIP */}
       {/* ===================================================================== */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">
         
         {/* 1. CALL CUSTOMER SUPPORT */}
-        <ScrollReveal animation="fade-up" delay={50} className="p-6 bg-white rounded-3xl border border-slate-200/90 shadow-2xs flex flex-col justify-between space-y-4 hover:border-emerald-300 transition-all">
+        <ScrollReveal animation="fade-up" delay={50} className="p-4 sm:p-6 bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 shadow-2xs flex flex-col justify-between space-y-4 hover:border-emerald-300 transition-all">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="w-11 h-11 rounded-2xl bg-emerald-50 text-[#0b5c37] flex items-center justify-center shadow-xs">
@@ -295,7 +295,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
         </ScrollReveal>
 
         {/* 2. EMAIL SUPPORT */}
-        <ScrollReveal animation="fade-up" delay={100} className="p-6 bg-white rounded-3xl border border-slate-200/90 shadow-2xs flex flex-col justify-between space-y-4 hover:border-emerald-300 transition-all">
+        <ScrollReveal animation="fade-up" delay={100} className="p-4 sm:p-6 bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 shadow-2xs flex flex-col justify-between space-y-4 hover:border-emerald-300 transition-all">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="w-11 h-11 rounded-2xl bg-blue-50 text-blue-700 flex items-center justify-center shadow-xs">
@@ -339,7 +339,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
         </ScrollReveal>
 
         {/* 3. INSTANT LIVE CHAT */}
-        <ScrollReveal animation="fade-up" delay={150} className="p-6 bg-white rounded-3xl border border-slate-200/90 shadow-2xs flex flex-col justify-between space-y-4 hover:border-emerald-300 transition-all">
+        <ScrollReveal animation="fade-up" delay={150} className="p-4 sm:p-6 bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 shadow-2xs flex flex-col justify-between space-y-4 hover:border-emerald-300 transition-all">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="w-11 h-11 rounded-2xl bg-[#25D366]/15 text-[#128C7E] flex items-center justify-center shadow-xs">
@@ -377,7 +377,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
         </ScrollReveal>
 
         {/* 4. DISTRIBUTION & FULFILLMENT CENTRE */}
-        <ScrollReveal animation="fade-up" delay={200} className="p-6 bg-white rounded-3xl border border-slate-200/90 shadow-2xs flex flex-col justify-between space-y-4 hover:border-emerald-300 transition-all">
+        <ScrollReveal animation="fade-up" delay={200} className="p-4 sm:p-6 bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 shadow-2xs flex flex-col justify-between space-y-4 hover:border-emerald-300 transition-all">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="w-11 h-11 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center shadow-xs">
@@ -422,7 +422,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
       {/* ===================================================================== */}
       {/* 3. DEDICATED INSTANT LIVE CHAT SECTION */}
       {/* ===================================================================== */}
-      <ScrollReveal animation="fade-up" className="bg-gradient-to-br from-emerald-900 via-[#0b5c37] to-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden">
+      <ScrollReveal animation="fade-up" className="bg-gradient-to-br from-emerald-900 via-[#0b5c37] to-slate-900 rounded-2xl sm:rounded-3xl p-4 sm:p-8 text-white shadow-xl relative overflow-hidden">
         <div className="absolute right-0 top-0 translate-x-12 -translate-y-12 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
         
         <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
@@ -487,9 +487,9 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
       {/* ===================================================================== */}
       {/* 5. DIRECT MESSAGE FORM & FAQ ACCORDION */}
       {/* ===================================================================== */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-8 items-start">
         {/* Left Column: Direct Message Contact Form */}
-        <ScrollReveal animation="slide-left" className="lg:col-span-7 bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/90 shadow-2xs space-y-6">
+        <ScrollReveal animation="slide-left" className="lg:col-span-7 bg-white p-4 sm:p-8 rounded-2xl sm:rounded-3xl border border-slate-200/90 shadow-2xs space-y-5 sm:space-y-6">
           <div>
             <div className="flex items-center gap-2 text-xs font-bold text-[#0b5c37] uppercase tracking-wider">
               <Send className="w-4 h-4" />
@@ -726,7 +726,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
       {/* 4. VERIFIED PRODUCT REVIEWS POLICY NOTICE */}
       {/* ===================================================================== */}
       <ScrollReveal animation="fade-up" className="pt-4 border-t border-slate-200">
-        <div className="bg-emerald-50/70 border border-emerald-200 rounded-3xl p-6 sm:p-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="bg-emerald-50/70 border border-emerald-200 rounded-2xl sm:rounded-3xl p-4 sm:p-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="space-y-1.5 max-w-2xl">
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#0b5c37]">
               <ShieldCheck className="w-4 h-4 text-[#0b5c37]" />
