@@ -9,8 +9,10 @@ import {
 } from 'lucide-react';
 import { PageView } from '../../types';
 import { useToast } from '../../context/ToastContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { AmazonLogo } from './AmazonLogo';
 import { PWAInstallButton } from './PWAInstallButton';
+import { LanguageSwitcher } from '../navigation/LanguageSwitcher';
 
 interface FooterProps {
   onNavigate: (page: PageView, params?: { category?: string }) => void;
@@ -18,6 +20,7 @@ interface FooterProps {
 
 export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
   const { showToast } = useToast();
+  const { t } = useLanguage();
   const [email, setEmail] = useState('');
   const [subscribed, setSubscribed] = useState(false);
 
@@ -42,10 +45,10 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
       <button
         onClick={scrollToTop}
         className="w-full py-3.5 bg-[#37475a] hover:bg-[#485769] text-center text-xs text-white font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-        aria-label="Back to top"
+        aria-label={t.common.backToTop}
       >
         <ChevronUp className="w-4 h-4 text-slate-300" />
-        <span>Back to top</span>
+        <span>{t.common.backToTop}</span>
       </button>
 
       {/* Main Multi-Column Links Section */}
@@ -54,14 +57,14 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-xs leading-relaxed">
             {/* Column 1 */}
             <div>
-              <h4 className="font-bold text-white text-sm mb-3">Get to Know Us</h4>
+              <h4 className="font-bold text-white text-sm mb-3">{t.footer.getToKnowUs}</h4>
               <ul className="space-y-2 text-[#ccc]">
                 <li>
                   <button
                     onClick={() => onNavigate('home')}
                     className="hover:underline transition-colors text-left cursor-pointer"
                   >
-                    About Shop Cart
+                    {t.footer.aboutShopCart}
                   </button>
                 </li>
                 <li>
@@ -93,7 +96,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
 
             {/* Column 2 */}
             <div>
-              <h4 className="font-bold text-white text-sm mb-3">Connect with Us</h4>
+              <h4 className="font-bold text-white text-sm mb-3">{t.footer.connectWithUs}</h4>
               <ul className="space-y-2 text-[#ccc]">
                 <li>
                   <button
@@ -120,10 +123,10 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                   </button>
                 </li>
                 <li className="pt-2">
-                  <span className="text-[11px] text-slate-400">Newsletter:</span>
+                  <span className="text-[11px] text-slate-400">{t.footer.newsletter}:</span>
                   {subscribed ? (
                     <div className="flex items-center gap-1 text-[#22c55e] text-[11px] font-medium mt-1">
-                      <Check className="w-3.5 h-3.5" /> Subscribed
+                      <Check className="w-3.5 h-3.5" /> {t.footer.subscribed}
                     </div>
                   ) : (
                     <form onSubmit={handleSubscribe} className="flex gap-1 mt-1">
@@ -138,7 +141,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                         type="submit"
                         className="px-2.5 py-1 bg-[#0b5c37] hover:bg-[#08482b] text-white rounded text-xs font-bold shrink-0 transition-colors cursor-pointer"
                       >
-                        Join
+                        {t.footer.join}
                       </button>
                     </form>
                   )}
@@ -148,7 +151,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
 
             {/* Column 3 */}
             <div>
-              <h4 className="font-bold text-white text-sm mb-3">Make Money with Us</h4>
+              <h4 className="font-bold text-white text-sm mb-3">{t.footer.makeMoneyWithUs}</h4>
               <ul className="space-y-2 text-[#ccc]">
                 <li>
                   <button
@@ -203,7 +206,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
 
             {/* Column 4 */}
             <div>
-              <h4 className="font-bold text-white text-sm mb-3">Let Us Help You</h4>
+              <h4 className="font-bold text-white text-sm mb-3">{t.footer.letUsHelpYou}</h4>
               <ul className="space-y-2 text-[#ccc]">
                 <li>
                   <button
@@ -238,9 +241,9 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                   </button>
                 </li>
                 <li className="pt-2 border-t border-[#3a4553]/60 text-[11px] space-y-1 text-[#bbb]">
-                  <p className="text-white font-semibold">Support Desk:</p>
+                  <p className="text-white font-semibold">{t.footer.supportDesk}:</p>
                   <p><a href="tel:+919496660968" className="hover:text-emerald-400 text-white font-mono">+91 9496660968</a></p>
-                  <p className="text-[10px] text-slate-400">Hours: 9:00 AM – 10:00 PM</p>
+                  <p className="text-[10px] text-slate-400">{t.footer.hoursLabel}: 9:00 AM – 10:00 PM</p>
                   <p><a href="mailto:basithmm08@gmail.com" className="hover:text-emerald-400 text-[#ccc]">basithmm08@gmail.com</a></p>
                   <p className="text-[10px] text-slate-400">Kondotty, Malappuram, Kerala</p>
                 </li>
@@ -258,23 +261,12 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
               <AmazonLogo variant="light" className="h-7 w-auto" />
             </div>
 
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => showToast('Language: English (India)', 'info')}
-                className="flex items-center gap-1.5 px-3 py-1.5 border border-[#848688] rounded text-xs text-white hover:border-white transition-colors cursor-pointer"
-              >
-                <Globe className="w-3.5 h-3.5" />
-                <span>English</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => showToast('Country / Region: India (₹ INR)', 'info')}
-                className="flex items-center gap-1.5 px-3 py-1.5 border border-[#848688] rounded text-xs text-white hover:border-white transition-colors cursor-pointer"
-              >
-                <span>🇮🇳</span>
-                <span>India (₹)</span>
-              </button>
+            <div className="flex items-center gap-3 flex-wrap justify-center">
+              <LanguageSwitcher variant="footer" />
+              <div className="flex items-center gap-1.5 px-3 py-1.5 border border-[#848688] rounded text-xs text-white">
+                <span>IN</span>
+                <span>India (₹ INR)</span>
+              </div>
             </div>
           </div>
         </div>
@@ -328,7 +320,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
               <span>·</span>
               <button onClick={() => showToast('Interest-Based Ads: You can customize your cookie preferences in account settings.', 'info')} className="hover:underline cursor-pointer">Interest-Based Ads</button>
             </div>
-            <p>© 1996-2026, Shop Cart Inc. or its affiliates</p>
+            <p>{t.footer.copyright}</p>
           </div>
         </div>
       </div>

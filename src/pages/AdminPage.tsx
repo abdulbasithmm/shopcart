@@ -60,8 +60,24 @@ import {
   ArchiveRestore,
   Ban,
   History,
+  Video,
+  MessageSquare,
+  Star,
+  Upload,
+  Heart,
+  EyeOff,
 } from 'lucide-react';
-import { PageView, Product, Order, OrderStatus, ShipmentUpdate, MerchantPaymentSettings, AIScreenshotAnalysis } from '../types';
+import {
+  PageView,
+  Product,
+  Order,
+  OrderStatus,
+  ShipmentUpdate,
+  MerchantPaymentSettings,
+  AIScreenshotAnalysis,
+  VideoItem,
+  Review,
+} from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { PRODUCTS, CATEGORIES } from '../data/mockData';
@@ -93,6 +109,18 @@ import {
   normalizeOrderStatus,
 } from '../utils/orderTracking';
 import { updateCustomerProfile } from '../services/profileService';
+import {
+  fetchAdminVideos,
+  createAdminVideo,
+  updateAdminVideo,
+  deleteAdminVideo,
+  uploadDemoVideoFile,
+} from '../services/videoService';
+import {
+  fetchAdminReviews,
+  moderateAdminReview,
+  deleteAdminReview,
+} from '../services/reviewService';
 
 interface AdminPageProps {
   initialSection?: AdminSection;
@@ -109,6 +137,8 @@ export type AdminSection =
   | 'customers'
   | 'inventory'
   | 'payments'
+  | 'videos'
+  | 'reviews'
   | 'analytics'
   | 'settings';
 
@@ -306,6 +336,28 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const [newCatName, setNewCatName] = useState('');
   const [newCatSlug, setNewCatSlug] = useState('');
   const [newCatDesc, setNewCatDesc] = useState('');
+
+  // Demo Videos CRUD State
+  const [adminVideos, setAdminVideos] = useState<VideoItem[]>([]);
+  const [isLoadingVideos, setIsLoadingVideos] = useState(false);
+  const [videoMigrationPending, setVideoMigrationPending] = useState(false);
+  const [isVideoModalOpen, setIsVideoModalOpen] = useState(false);
+  const [editingVideo, setEditingVideo] = useState<VideoItem | null>(null);
+  const [isUploadingVideoFile, setIsUploadingVideoFile] = useState(false);
+  const [isSavingVideo, setIsSavingVideo] = useState(false);
+  const [videoForm, setVideoForm] = useState({
+    title: '',
+    description: '',
+    videoUrl: '',
+    thumbnailUrl: '',
+    productId: '',
+    isActive: true,
+  });
+
+  // Reviews Moderation State
+  const [adminReviews, setAdminReviews] = useState<Review[]>([]);
+  const [isLoadingReviews, setIsLoadingReviews] = useState(false);
+  const [reviewStatusFilter, setReviewStatusFilter] = useState<'all' | 'approved' | 'hidden' | 'pending' | 'rejected'>('all');
 
   // Fetch all administrative records from Supabase
   const loadAdminData = async () => {
@@ -529,9 +581,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       const isRejected = rawStatus === 'rejected' || rawStatus === 'failed' || orderStatus === 'cancelled';
       const isPending = !isVerified && !isRejected;
 
-      // 1. Filter by Gateway (Universal UPI)
+      // 1. Filter by Gateway (ShopCart UPI & historical UPI methods)
       if (paymentGatewayFilter === 'all_upi') {
-        if (!method.includes('all_upi') && !method.includes('universal')) return false;
+        if (!method.includes('upi') && !method.includes('universal')) return false;
       } else if (paymentGatewayFilter === 'gpay') {
         if (!method.includes('gpay')) return false;
       } else if (paymentGatewayFilter === 'phonepe') {
@@ -1524,6 +1576,164 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     }
   };
 
+  // Load Demo Videos & Reviews Moderation lists
+  const loadAdminVideos = async () => {
+    setIsLoadingVideos(true);
+    try {
+      const res = await fetchAdminVideos();
+      setAdminVideos(res.videos || []);
+      setVideoMigrationPending(Boolean(res.migrationPending));
+      if (res.error && !res.migrationPending) {
+        showToast(res.error, 'error');
+      }
+    } finally {
+      setIsLoadingVideos(false);
+    }
+  };
+
+  const loadAdminReviews = async () => {
+    setIsLoadingReviews(true);
+    try {
+      const res = await fetchAdminReviews();
+      setAdminReviews(res.reviews || []);
+      if (res.error) {
+        showToast(res.error, 'error');
+      }
+    } finally {
+      setIsLoadingReviews(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSection === 'videos') {
+      loadAdminVideos();
+    } else if (activeSection === 'reviews') {
+      loadAdminReviews();
+    }
+  }, [activeSection]);
+
+  const handleOpenCreateVideoModal = () => {
+    setEditingVideo(null);
+    setVideoForm({
+      title: '',
+      description: '',
+      videoUrl: '',
+      thumbnailUrl: '',
+      productId: '',
+      isActive: true,
+    });
+    setIsVideoModalOpen(true);
+  };
+
+  const handleOpenEditVideoModal = (vid: VideoItem) => {
+    setEditingVideo(vid);
+    setVideoForm({
+      title: vid.title || '',
+      description: vid.description || '',
+      videoUrl: vid.videoUrl || '',
+      thumbnailUrl: vid.thumbnailUrl || '',
+      productId: vid.productId || '',
+      isActive: vid.isActive !== false,
+    });
+    setIsVideoModalOpen(true);
+  };
+
+  const handleUploadVideoFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingVideoFile(true);
+    try {
+      const res = await uploadDemoVideoFile(file);
+      if (res.success && res.url) {
+        setVideoForm((prev) => ({ ...prev, videoUrl: res.url! }));
+        showToast('Video uploaded successfully!', 'success');
+      } else {
+        showToast(res.error || 'Video upload failed', 'error');
+      }
+    } finally {
+      setIsUploadingVideoFile(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleSaveAdminVideo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!videoForm.title.trim() || !videoForm.videoUrl.trim()) {
+      showToast('Video title and video URL/file are required.', 'error');
+      return;
+    }
+    setIsSavingVideo(true);
+    try {
+      const payload = {
+        title: videoForm.title.trim(),
+        description: videoForm.description.trim(),
+        videoUrl: videoForm.videoUrl.trim(),
+        thumbnailUrl: videoForm.thumbnailUrl.trim() || null,
+        productId: videoForm.productId.trim() || null,
+        isActive: videoForm.isActive,
+      };
+      const res = editingVideo
+        ? await updateAdminVideo(editingVideo.id, payload)
+        : await createAdminVideo(payload);
+
+      if (res.success) {
+        showToast(editingVideo ? 'Demo video updated.' : 'Demo video published!', 'success');
+        setIsVideoModalOpen(false);
+        setEditingVideo(null);
+        loadAdminVideos();
+      } else {
+        showToast(res.error || 'Failed to save demo video', 'error');
+      }
+    } finally {
+      setIsSavingVideo(false);
+    }
+  };
+
+  const handleToggleVideoActive = async (vid: VideoItem) => {
+    const res = await updateAdminVideo(vid.id, { isActive: !vid.isActive });
+    if (res.success) {
+      showToast(`Video ${!vid.isActive ? 'activated' : 'hidden'}.`, 'success');
+      loadAdminVideos();
+    } else {
+      showToast(res.error || 'Failed to update video status', 'error');
+    }
+  };
+
+  const handleDeleteVideo = async (vid: VideoItem) => {
+    const res = await deleteAdminVideo(vid.id);
+    if (res.success) {
+      showToast('Demo video deleted.', 'success');
+      setAdminVideos((prev) => prev.filter((v) => v.id !== vid.id));
+    } else {
+      showToast(res.error || 'Failed to delete video', 'error');
+    }
+  };
+
+  const handleModerateReview = async (
+    reviewId: string,
+    status: 'approved' | 'hidden' | 'rejected'
+  ) => {
+    const res = await moderateAdminReview(reviewId, status);
+    if (res.success) {
+      showToast(`Review marked as ${status}.`, 'success');
+      setAdminReviews((prev) =>
+        prev.map((r) => (r.id === reviewId ? { ...r, moderationStatus: status } : r))
+      );
+    } else {
+      showToast(res.error || 'Failed to update review moderation status', 'error');
+    }
+  };
+
+  const handleDeleteAdminReview = async (reviewId: string) => {
+    const res = await deleteAdminReview(reviewId);
+    if (res.success) {
+      showToast('Review deleted.', 'success');
+      setAdminReviews((prev) => prev.filter((r) => r.id !== reviewId));
+    } else {
+      showToast(res.error || 'Failed to delete review', 'error');
+    }
+  };
+
   // Navigation Item List
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -1533,6 +1743,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     { id: 'customers', label: 'Customers', icon: Users, count: customers.length },
     { id: 'inventory', label: 'Inventory', icon: Boxes, badge: lowStockProducts > 0 ? `${lowStockProducts} Low` : null },
     { id: 'payments', label: 'Payments', icon: CreditCard, badge: pendingUpiPayments.length > 0 ? `${pendingUpiPayments.length} Check` : null },
+    { id: 'videos', label: 'Demo Videos', icon: Video },
+    { id: 'reviews', label: 'Product Reviews', icon: MessageSquare },
     { id: 'analytics', label: 'Sales Analytics', icon: BarChart3 },
     { id: 'settings', label: 'Admin Profile', icon: ShieldCheck },
   ];
@@ -1615,7 +1827,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
             <div className="flex items-center gap-1.5" title="Supabase Database Status">
               <span
                 className={`w-2 h-2 rounded-full ${
-                  isSupabaseConfigured() ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+                  isSupabaseConfigured() ? 'bg-emerald-400' : 'bg-amber-400'
                 }`}
               />
               <span className="text-[10px] font-mono font-bold text-slate-400">
@@ -1734,7 +1946,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                 }`}
                 title="Click to view or update Supabase database connection"
               >
-                <span className={`w-1.5 h-1.5 rounded-full ${isSupabaseConfigured() ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                <span className={`w-1.5 h-1.5 rounded-full ${isSupabaseConfigured() ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                 <span>{isSupabaseConfigured() ? 'LIVE SUPABASE (POSTGRESQL)' : 'LOCAL STORAGE FALLBACK'}</span>
               </button>
             </div>
@@ -2201,7 +2413,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                                   ? 'Google Pay (UPI)'
                                   : pMethod.includes('paytm')
                                   ? 'Paytm (UPI)'
-                                  : 'Universal UPI'}
+                                  : 'ShopCart UPI'}
                               </span>
                               <span className="text-[10px] font-mono text-slate-500 truncate max-w-[130px] block" title={ref}>
                                 UTR: {ref}
@@ -2811,9 +3023,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                     <QrCode className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-sm text-slate-900">Universal UPI Payment Reconciliation Hub</h3>
+                    <h3 className="font-bold text-sm text-slate-900">ShopCart UPI Payment Reconciliation Hub</h3>
                     <p className="text-xs text-slate-500">
-                      Audit settlements, Gemini AI fraud analysis, and verify 12-digit UTRs
+                      Audit settlements, AI advisory fraud screening, and manually verify 12-digit UTRs
                     </p>
                   </div>
                 </div>
@@ -2834,7 +3046,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                   <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs">
                     {[
                       { id: 'all', label: 'All Gateways' },
-                      { id: 'all_upi', label: 'Universal UPI' },
+                      { id: 'all_upi', label: 'ShopCart UPI' },
                       { id: 'gpay', label: 'Google Pay' },
                       { id: 'phonepe', label: 'PhonePe' },
                       { id: 'paytm', label: 'Paytm' },
@@ -3005,7 +3217,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                               ) : (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-50 text-[#0b5c37] border border-emerald-200">
                                   <QrCode className="w-3 h-3" />
-                                  <span>Universal UPI</span>
+                                  <span>ShopCart UPI</span>
                                 </span>
                               )}
                             </td>
@@ -3104,7 +3316,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                                   <span>Rejected</span>
                                 </span>
                               ) : (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1 w-fit animate-pulse">
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1 w-fit">
                                   <Clock className="w-3 h-3" />
                                   <span>Pending</span>
                                 </span>
@@ -3610,9 +3822,285 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                 <li>Server-side role verification queries PostgreSQL profiles table directly.</li>
                 <li>Admin credentials and sensitive service role keys are never sent to the client browser.</li>
                 <li>RLS policies block customers from accessing foreign orders or administrative inventory tables.</li>
-                <li>Full-stack Express backend handles Google Pay &amp; PhonePe UPI verification and bank ledger reconciliation.</li>
+                <li>Full-stack backend enforces strict manual UTR bank reconciliation for all ShopCart UPI payments.</li>
                 <li>Database trigger <code>trg_protect_user_role</code> prevents customer privilege escalation.</li>
               </ul>
+            </div>
+          </div>
+        )}
+
+        {/* ===================================================================== */}
+        {/* 10. DEMO VIDEOS MANAGEMENT                                            */}
+        {/* ===================================================================== */}
+        {activeSection === 'videos' && (
+          <div className="space-y-5">
+            <div className="bg-white rounded-2xl p-5 border border-slate-200/90 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-[#0b5c37] border border-emerald-200 flex items-center justify-center">
+                  <Video className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900">Product Demo Videos &amp; Reels</h3>
+                  <p className="text-xs text-slate-500">
+                    Upload MP4/WebM/MOV files or link YouTube/Vimeo demo videos synced to Play &amp; Homepage
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={loadAdminVideos}
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer inline-flex items-center gap-1.5"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingVideos ? 'animate-spin' : ''}`} />
+                  <span>Refresh</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenCreateVideoModal}
+                  className="px-4 py-2 bg-[#0b5c37] hover:bg-[#08482b] text-white text-xs font-bold rounded-xl cursor-pointer inline-flex items-center gap-1.5 shadow-xs"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Add Demo Video</span>
+                </button>
+              </div>
+            </div>
+
+            {videoMigrationPending && (
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900">
+                <strong>Database Migration Notice:</strong> Run <code>supabase/upgrade_migration.sql</code> in Supabase SQL Editor to create <code>public.videos</code>, <code>public.video_likes</code>, and the <code>product-videos</code> storage bucket.
+              </div>
+            )}
+
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-slate-500 uppercase font-mono tracking-wider text-[10px] border-b border-slate-200">
+                    <tr>
+                      <th className="py-3 px-4">Video</th>
+                      <th className="py-3 px-4">Linked Product</th>
+                      <th className="py-3 px-4">Likes</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {isLoadingVideos ? (
+                      <tr>
+                        <td colSpan={5} className="py-10 text-center text-slate-400">
+                          Loading demo videos...
+                        </td>
+                      </tr>
+                    ) : adminVideos.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-10 text-center text-slate-400">
+                          No demo videos uploaded yet. Click &ldquo;Add Demo Video&rdquo; to publish your first showcase.
+                        </td>
+                      </tr>
+                    ) : (
+                      adminVideos.map((vid) => (
+                        <tr key={vid.id} className="hover:bg-slate-50/70">
+                          <td className="py-3.5 px-4">
+                            <div className="font-bold text-slate-900">{vid.title}</div>
+                            <div className="text-[11px] text-slate-500 line-clamp-1 max-w-xs">{vid.description}</div>
+                            <div className="text-[10px] font-mono text-slate-400 truncate max-w-xs">{vid.videoUrl}</div>
+                          </td>
+                          <td className="py-3.5 px-4 text-slate-700 font-medium">
+                            {vid.product?.name || vid.productId || 'General Showcase'}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <span className="inline-flex items-center gap-1 font-bold text-rose-600 tabular-nums">
+                              <Heart className="w-3.5 h-3.5 fill-current" />
+                              <span>{vid.likesCount}</span>
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleVideoActive(vid)}
+                              className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border cursor-pointer ${
+                                vid.isActive
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : 'bg-slate-100 text-slate-600 border-slate-200'
+                              }`}
+                            >
+                              {vid.isActive ? 'Active' : 'Hidden'}
+                            </button>
+                          </td>
+                          <td className="py-3.5 px-4 text-right space-x-1.5 whitespace-nowrap">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditVideoModal(vid)}
+                              className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg cursor-pointer"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteVideo(vid)}
+                              className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold rounded-lg cursor-pointer"
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ===================================================================== */}
+        {/* 11. PRODUCT REVIEWS MODERATION                                        */}
+        {/* ===================================================================== */}
+        {activeSection === 'reviews' && (
+          <div className="space-y-5">
+            <div className="bg-white rounded-2xl p-5 border border-slate-200/90 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-700 border border-amber-200 flex items-center justify-center">
+                  <MessageSquare className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900">Verified Product Reviews Moderation</h3>
+                  <p className="text-xs text-slate-500">
+                    Review customer-submitted verified purchase feedback and moderate visibility
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {(['all', 'approved', 'hidden', 'pending', 'rejected'] as const).map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setReviewStatusFilter(st)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold capitalize cursor-pointer ${
+                      reviewStatusFilter === st
+                        ? 'bg-[#0b5c37] text-white'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {st}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={loadAdminReviews}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer inline-flex items-center gap-1"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingReviews ? 'animate-spin' : ''}`} />
+                  <span>Refresh</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-slate-500 uppercase font-mono tracking-wider text-[10px] border-b border-slate-200">
+                    <tr>
+                      <th className="py-3 px-4">Customer &amp; Product</th>
+                      <th className="py-3 px-4">Rating</th>
+                      <th className="py-3 px-4">Review</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4 text-right">Moderation</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {isLoadingReviews ? (
+                      <tr>
+                        <td colSpan={5} className="py-10 text-center text-slate-400">
+                          Loading verified customer reviews...
+                        </td>
+                      </tr>
+                    ) : (
+                      (() => {
+                        const visible = adminReviews.filter(
+                          (r) => reviewStatusFilter === 'all' || (r.moderationStatus || 'approved') === reviewStatusFilter
+                        );
+                        if (visible.length === 0) {
+                          return (
+                            <tr>
+                              <td colSpan={5} className="py-10 text-center text-slate-400">
+                                No product reviews match the selected filter.
+                              </td>
+                            </tr>
+                          );
+                        }
+                        return visible.map((rev) => {
+                          const prodName =
+                            products.find((p) => p.id === rev.productId)?.name || rev.productId;
+                          const st = rev.moderationStatus || 'approved';
+                          return (
+                            <tr key={rev.id} className="hover:bg-slate-50/70">
+                              <td className="py-3.5 px-4">
+                                <div className="font-bold text-slate-900">{rev.author}</div>
+                                <div className="text-[11px] text-[#0b5c37] font-semibold truncate max-w-[180px]">
+                                  {prodName}
+                                </div>
+                                <div className="text-[10px] text-slate-400">{rev.date}</div>
+                              </td>
+                              <td className="py-3.5 px-4 whitespace-nowrap">
+                                <span className="inline-flex items-center gap-1 font-bold text-amber-500">
+                                  <Star className="w-3.5 h-3.5 fill-amber-400" />
+                                  <span>{rev.rating}/5</span>
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-4 max-w-sm">
+                                {rev.title && <div className="font-bold text-slate-800">{rev.title}</div>}
+                                <p className="text-slate-600 line-clamp-2">{rev.comment}</p>
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
+                                    st === 'approved'
+                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                      : st === 'hidden'
+                                      ? 'bg-slate-100 text-slate-600 border-slate-200'
+                                      : 'bg-rose-50 text-rose-700 border-rose-200'
+                                  }`}
+                                >
+                                  {st}
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-4 text-right whitespace-nowrap space-x-1">
+                                {st !== 'approved' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleModerateReview(rev.id, 'approved')}
+                                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg cursor-pointer"
+                                  >
+                                    Approve
+                                  </button>
+                                )}
+                                {st !== 'hidden' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleModerateReview(rev.id, 'hidden')}
+                                    className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg cursor-pointer inline-flex items-center gap-1"
+                                  >
+                                    <EyeOff className="w-3 h-3" />
+                                    <span>Hide</span>
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteAdminReview(rev.id)}
+                                  className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-lg cursor-pointer"
+                                >
+                                  Delete
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        });
+                      })()
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
@@ -3928,14 +4416,29 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                         Complete Delivery Address
                       </span>
                       <div className="bg-white p-3 rounded-xl border border-slate-200 space-y-1">
-                        {(shipAddr.houseBuilding || shipAddr.apartment) && (
-                          <p className="font-bold text-slate-900">
-                            {shipAddr.houseBuilding || shipAddr.apartment}
-                          </p>
+                        {shipAddr.flatHouseNumber || shipAddr.buildingApartment ? (
+                          <div className="space-y-0.5">
+                            {shipAddr.flatHouseNumber && (
+                              <p className="font-bold text-slate-900">
+                                Flat / House No.: {shipAddr.flatHouseNumber}
+                              </p>
+                            )}
+                            {shipAddr.buildingApartment && (
+                              <p className="font-semibold text-slate-800">
+                                Building / Apartment: {shipAddr.buildingApartment}
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          (shipAddr.houseBuilding || shipAddr.apartment) && (
+                            <p className="font-bold text-slate-900">
+                              {shipAddr.houseBuilding || shipAddr.apartment}
+                            </p>
+                          )
                         )}
                         {(shipAddr.streetArea || shipAddr.street) && (
                           <p className="text-slate-700">
-                            {shipAddr.streetArea || shipAddr.street}
+                            Street / Road: {shipAddr.streetArea || shipAddr.street}
                           </p>
                         )}
                         {shipAddr.landmark && (
@@ -3969,7 +4472,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                         Payment Reconciliation &amp; Audit
                       </h4>
                     </div>
-                    <span className="text-[10px] font-mono text-slate-500">Universal UPI</span>
+                    <span className="text-[10px] font-mono text-slate-500">ShopCart UPI</span>
                   </div>
 
                   <div className="space-y-3 text-xs">
@@ -3985,7 +4488,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                               ? 'Google Pay (UPI)'
                               : pMethod.includes('paytm')
                               ? 'Paytm (UPI)'
-                              : 'Universal UPI'}
+                              : 'ShopCart UPI'}
                           </span>
                         </div>
                       </div>
@@ -6241,6 +6744,136 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                 Close Customer Profile
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* ADD / EDIT DEMO VIDEO MODAL                                           */}
+      {/* ===================================================================== */}
+      {isVideoModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-lg w-full border border-slate-200 shadow-2xl p-6 space-y-4 my-8 text-slate-900">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <Video className="w-5 h-5 text-[#0b5c37]" />
+                <h3 className="font-bold text-base text-slate-900">
+                  {editingVideo ? 'Edit Demo Video' : 'Add Product Demo Video'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsVideoModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAdminVideo} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Video Title *</label>
+                <input
+                  type="text"
+                  required
+                  value={videoForm.title}
+                  onChange={(e) => setVideoForm((prev) => ({ ...prev, title: e.target.value }))}
+                  placeholder="e.g. Unboxing & Acoustic Demo"
+                  className="w-full min-h-[40px] px-3 py-2 bg-white text-slate-900 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0b5c37]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Description</label>
+                <textarea
+                  rows={2}
+                  value={videoForm.description}
+                  onChange={(e) => setVideoForm((prev) => ({ ...prev, description: e.target.value }))}
+                  placeholder="Short description shown on Play and Homepage..."
+                  className="w-full px-3 py-2 bg-white text-slate-900 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0b5c37]"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-bold text-slate-700">Video URL or Upload File *</label>
+                  <label className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-[#0b5c37] font-bold rounded-lg border border-emerald-200 cursor-pointer">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>{isUploadingVideoFile ? 'Uploading...' : 'Upload MP4/WebM'}</span>
+                    <input
+                      type="file"
+                      accept="video/mp4,video/webm,video/quicktime"
+                      onChange={handleUploadVideoFile}
+                      className="hidden"
+                      disabled={isUploadingVideoFile}
+                    />
+                  </label>
+                </div>
+                <input
+                  type="url"
+                  required
+                  value={videoForm.videoUrl}
+                  onChange={(e) => setVideoForm((prev) => ({ ...prev, videoUrl: e.target.value }))}
+                  placeholder="https://... (MP4, WebM, YouTube, or Vimeo URL)"
+                  className="w-full min-h-[40px] px-3 py-2 bg-white text-slate-900 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0b5c37]"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Thumbnail URL (Optional)</label>
+                  <input
+                    type="url"
+                    value={videoForm.thumbnailUrl}
+                    onChange={(e) => setVideoForm((prev) => ({ ...prev, thumbnailUrl: e.target.value }))}
+                    placeholder="https://..."
+                    className="w-full min-h-[40px] px-3 py-2 bg-white text-slate-900 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0b5c37]"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Linked Product (Optional)</label>
+                  <select
+                    value={videoForm.productId}
+                    onChange={(e) => setVideoForm((prev) => ({ ...prev, productId: e.target.value }))}
+                    className="w-full min-h-[40px] px-3 py-2 bg-white text-slate-900 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0b5c37]"
+                  >
+                    <option value="">None (General Video)</option>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <label className="flex items-center gap-2 cursor-pointer pt-1">
+                <input
+                  type="checkbox"
+                  checked={videoForm.isActive}
+                  onChange={(e) => setVideoForm((prev) => ({ ...prev, isActive: e.target.checked }))}
+                  className="w-4 h-4 accent-[#0b5c37]"
+                />
+                <span className="font-semibold text-slate-700">Active (visible on Storefront &amp; Play)</span>
+              </label>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsVideoModalOpen(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingVideo || isUploadingVideoFile}
+                  className="px-5 py-2 bg-[#0b5c37] hover:bg-[#08482b] disabled:opacity-50 text-white font-bold rounded-xl cursor-pointer"
+                >
+                  {isSavingVideo ? 'Saving...' : editingVideo ? 'Save Changes' : 'Publish Video'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

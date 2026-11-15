@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, Trash2, ArrowRight, ShoppingBag, ShieldCheck } from 'lucide-react';
 import { useCart } from '../../context/CartContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { ProductImage } from './ProductImage';
 import { formatPrice } from '../../utils/format';
 
@@ -9,6 +10,7 @@ interface CartDrawerProps {
 }
 
 export const CartDrawer: React.FC<CartDrawerProps> = ({ onNavigate }) => {
+  const { t } = useLanguage();
   const {
     cart,
     isCartDrawerOpen,
@@ -213,7 +215,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ onNavigate }) => {
                 }}
                 className="w-full py-2.5 px-3 border border-slate-300 hover:bg-white text-slate-800 text-xs font-semibold rounded-lg transition-colors text-center"
               >
-                Go to Cart
+                {t.cart.goToCart}
               </button>
 
               <button
@@ -223,13 +225,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ onNavigate }) => {
                 }}
                 className="w-full py-2.5 px-3 bg-[#0b5c37] hover:bg-[#08482b] text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
               >
-                Proceed to Buy <ArrowRight className="w-3.5 h-3.5" />
+                {t.cart.proceedToBuy} <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
 
             <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-500 pt-1">
               <ShieldCheck className="w-3.5 h-3.5 text-[#0b5c37]" />
-              <span>Safe 256-Bit SSL Encrypted Checkout</span>
+              <span>{t.cart.sslEncrypted}</span>
             </div>
           </div>
         )}

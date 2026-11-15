@@ -41,6 +41,7 @@ import { formatPrice } from '../utils/format';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useCart } from '../context/CartContext';
+import { useLanguage } from '../context/LanguageContext';
 import {
   fetchUserOrders,
   requestCustomerCancellation,
@@ -79,6 +80,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
   } = useAuth();
   const { showToast } = useToast();
   const { addToCart, wishlist, toggleWishlist } = useCart();
+  const { t } = useLanguage();
 
   const [activeTab, setActiveTab] = useState<'profile' | 'orders' | 'wishlist' | 'security'>(
     initialTab || 'profile'
@@ -146,6 +148,8 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
     phone: '',
     email: '',
     country: 'India',
+    flatHouseNumber: '',
+    buildingApartment: '',
     houseBuilding: '',
     streetArea: '',
     landmark: '',
@@ -206,12 +210,14 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
       phone: user?.phone || '',
       email: user?.email || '',
       country: 'India',
+      flatHouseNumber: '',
+      buildingApartment: '',
       houseBuilding: '',
       streetArea: '',
       landmark: '',
-      city: user?.address?.city || 'Bengaluru',
+      city: user?.address?.city || '',
       district: '',
-      state: user?.address?.state || 'Karnataka',
+      state: user?.address?.state || '',
       pinCode: user?.address?.zipCode || '',
       isDefault: (user?.savedAddresses?.length || 0) === 0,
       deliveryInstructions: '',
@@ -221,13 +227,17 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
 
   const handleOpenEditAddress = (addr: SavedAddress) => {
     setEditingAddress(addr);
+    const flat = addr.flatHouseNumber || addr.houseBuilding || '';
+    const building = addr.buildingApartment || addr.apartment || '';
     setAddressForm({
       label: addr.label || 'Home',
       fullName: addr.fullName || '',
       phone: addr.phone || '',
       email: addr.email || user?.email || '',
       country: addr.country || 'India',
-      houseBuilding: addr.houseBuilding || addr.apartment || '',
+      flatHouseNumber: flat,
+      buildingApartment: building,
+      houseBuilding: [flat, building].filter(Boolean).join(', '),
       streetArea: addr.streetArea || addr.street || '',
       landmark: addr.landmark || '',
       city: addr.city || '',
@@ -243,23 +253,35 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
   const handleSaveAddressForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+    const cleanFlat = (addressForm.flatHouseNumber || '').trim();
+    const cleanBuilding = (addressForm.buildingApartment || '').trim();
+    const composedHouse = [cleanFlat, cleanBuilding].filter(Boolean).join(', ');
     if (
       !addressForm.fullName.trim() ||
       !addressForm.phone.trim() ||
-      !addressForm.houseBuilding.trim() ||
+      !cleanFlat ||
       !addressForm.streetArea.trim() ||
       !addressForm.city.trim() ||
-      !addressForm.pinCode.trim()
+      !/^\d{6}$/.test((addressForm.pinCode || '').trim())
     ) {
-      showToast('Please complete all required address fields.', 'error');
+      showToast('Please complete all required address fields and enter a 6-digit PIN code.', 'error');
       return;
     }
+
+    const payload: Omit<SavedAddress, 'id'> = {
+      ...addressForm,
+      flatHouseNumber: cleanFlat,
+      buildingApartment: cleanBuilding,
+      houseBuilding: composedHouse,
+      apartment: cleanBuilding || undefined,
+      pinCode: (addressForm.pinCode || '').trim(),
+    };
 
     setIsSavingAddress(true);
     try {
       if (editingAddress) {
         const res = await updateCustomerSavedAddress(user.id, {
-          ...addressForm,
+          ...payload,
           id: editingAddress.id,
         });
         if (res.success) {
@@ -270,7 +292,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
           showToast(res.error || 'Failed to update address', 'error');
         }
       } else {
-        const res = await addCustomerSavedAddress(user.id, addressForm);
+        const res = await addCustomerSavedAddress(user.id, payload);
         if (res.success) {
           showToast('New delivery address added successfully!', 'success');
           await refreshProfile();
@@ -600,7 +622,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
           }`}
         >
           <UserIcon className="w-4 h-4" />
-          <span>Profile &amp; Shipping Details</span>
+          <span>{t.account.profileTab}</span>
         </button>
 
         <button
@@ -612,7 +634,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
           }`}
         >
           <Package className="w-4 h-4" />
-          <span>Order History ({orders.length})</span>
+          <span>{t.account.ordersTab} ({orders.length})</span>
         </button>
 
         <button
@@ -624,7 +646,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
           }`}
         >
           <Heart className="w-4 h-4 text-rose-500" />
-          <span>Your Wishlist ({wishlist.length})</span>
+          <span>{t.account.wishlistTab} ({wishlist.length})</span>
         </button>
 
         <button
@@ -636,7 +658,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
           }`}
         >
           <Lock className="w-4 h-4" />
-          <span>Security &amp; Password</span>
+          <span>{t.account.securityTab}</span>
         </button>
       </div>
 
@@ -885,7 +907,9 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
                       <div className="text-xs space-y-0.5">
                         <p className="font-bold text-slate-800">{addr.fullName || user.name}</p>
                         <p className="text-slate-600">
-                          {addr.houseBuilding ? `${addr.houseBuilding}, ` : ''}
+                          {[addr.flatHouseNumber, addr.buildingApartment].filter(Boolean).join(', ') || addr.houseBuilding
+                            ? `${[addr.flatHouseNumber, addr.buildingApartment].filter(Boolean).join(', ') || addr.houseBuilding}, `
+                            : ''}
                           {addr.streetArea || ''}
                         </p>
                         {addr.landmark && (
@@ -1084,7 +1108,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
                                 ? 'BHIM UPI'
                                 : pm.includes('gpay') || pm.includes('google')
                                 ? 'Google Pay'
-                                : 'Universal UPI';
+                                : 'UPI';
                               const statusLabel =
                                 ord.paymentStatus === 'verified'
                                   ? 'Verified & Paid'
@@ -1220,7 +1244,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
                                           isDone
                                             ? 'bg-emerald-600 text-white'
                                             : isCurrent
-                                            ? 'bg-[#0b5c37] text-white ring-2 ring-emerald-200 animate-pulse'
+                                            ? 'bg-[#0b5c37] text-white ring-2 ring-emerald-200'
                                             : 'bg-white text-slate-400 border border-slate-300'
                                         }`}
                                       >
@@ -1766,87 +1790,102 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
                   />
                 </div>
 
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Flat / House No. / Building / Apartment <span className="text-rose-500">*</span>
+                <div>
+                  <label className="block text-xs font-bold text-slate-800 mb-1">
+                    {t.checkout.flatHouseNumber} <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="text"
                     required
-                    value={addressForm.houseBuilding}
-                    onChange={(e) => setAddressForm({ ...addressForm, houseBuilding: e.target.value })}
-                    placeholder="e.g. Flat 402, Lotus Tower"
-                    className="w-full py-2 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
+                    value={addressForm.flatHouseNumber || ''}
+                    onChange={(e) => setAddressForm({ ...addressForm, flatHouseNumber: e.target.value })}
+                    placeholder={t.checkout.flatHousePlaceholder}
+                    className="w-full py-2.5 px-3 min-h-[40px] text-xs text-slate-900 placeholder:text-slate-400 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0b5c37]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-800 mb-1">
+                    {t.checkout.buildingApartment}
+                  </label>
+                  <input
+                    type="text"
+                    value={addressForm.buildingApartment || ''}
+                    onChange={(e) => setAddressForm({ ...addressForm, buildingApartment: e.target.value })}
+                    placeholder={t.checkout.buildingPlaceholder}
+                    className="w-full py-2.5 px-3 min-h-[40px] text-xs text-slate-900 placeholder:text-slate-400 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0b5c37]"
                   />
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Street / Road / Area / Sector <span className="text-rose-500">*</span>
+                  <label className="block text-xs font-bold text-slate-800 mb-1">
+                    {t.checkout.streetRoad} <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="text"
                     required
                     value={addressForm.streetArea}
                     onChange={(e) => setAddressForm({ ...addressForm, streetArea: e.target.value })}
-                    placeholder="e.g. 100 Feet Road, Indiranagar"
-                    className="w-full py-2 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
+                    placeholder={t.checkout.streetPlaceholder}
+                    className="w-full py-2.5 px-3 min-h-[40px] text-xs text-slate-900 placeholder:text-slate-400 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0b5c37]"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Landmark (Optional)
+                  <label className="block text-xs font-bold text-slate-800 mb-1">
+                    {t.checkout.landmark}
                   </label>
                   <input
                     type="text"
                     value={addressForm.landmark || ''}
                     onChange={(e) => setAddressForm({ ...addressForm, landmark: e.target.value })}
-                    placeholder="e.g. Near Indiranagar Metro"
-                    className="w-full py-2 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
+                    placeholder={t.checkout.landmarkPlaceholder}
+                    className="w-full py-2.5 px-3 min-h-[40px] text-xs text-slate-900 placeholder:text-slate-400 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0b5c37]"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Town / City <span className="text-rose-500">*</span>
+                  <label className="block text-xs font-bold text-slate-800 mb-1">
+                    {t.checkout.townCity} <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="text"
                     required
                     value={addressForm.city}
                     onChange={(e) => setAddressForm({ ...addressForm, city: e.target.value })}
-                    placeholder="e.g. Bengaluru"
-                    className="w-full py-2 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
+                    placeholder={t.checkout.cityPlaceholder}
+                    className="w-full py-2.5 px-3 min-h-[40px] text-xs text-slate-900 placeholder:text-slate-400 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0b5c37]"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    State / Union Territory <span className="text-rose-500">*</span>
+                  <label className="block text-xs font-bold text-slate-800 mb-1">
+                    {t.checkout.stateLabel} <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="text"
                     required
                     value={addressForm.state}
                     onChange={(e) => setAddressForm({ ...addressForm, state: e.target.value })}
-                    placeholder="e.g. Karnataka"
-                    className="w-full py-2 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
+                    placeholder={t.checkout.statePlaceholder}
+                    className="w-full py-2.5 px-3 min-h-[40px] text-xs text-slate-900 placeholder:text-slate-400 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0b5c37]"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    6-Digit Postal PIN Code <span className="text-rose-500">*</span>
+                  <label className="block text-xs font-bold text-slate-800 mb-1">
+                    {t.checkout.pinCode} <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     required
                     maxLength={6}
                     value={addressForm.pinCode}
-                    onChange={(e) => setAddressForm({ ...addressForm, pinCode: e.target.value.replace(/\D/g, '') })}
-                    placeholder="e.g. 560038"
-                    className="w-full py-2 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37] font-mono"
+                    onChange={(e) => setAddressForm({ ...addressForm, pinCode: e.target.value.replace(/\D/g, '').slice(0, 6) })}
+                    placeholder={t.checkout.pinCodePlaceholder}
+                    className="w-full py-2.5 px-3 min-h-[40px] text-xs text-slate-900 placeholder:text-slate-400 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0b5c37] font-mono tracking-wider"
                   />
                 </div>
 

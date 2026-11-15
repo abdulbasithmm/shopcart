@@ -15,6 +15,7 @@ import {
 import { PageView } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { useLanguage } from '../context/LanguageContext';
 
 interface RegisterPageProps {
   onNavigate: (page: PageView) => void;
@@ -23,6 +24,7 @@ interface RegisterPageProps {
 export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
   const { register, resendVerificationEmail, isSupabaseBackend } = useAuth();
   const { showToast } = useToast();
+  const { t } = useLanguage();
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -136,7 +138,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
           </div>
 
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900">
-            {awaitingVerification ? 'Verify Your Email' : 'Create an Account'}
+            {awaitingVerification ? 'Verify Your Email' : t.common.createAccount}
           </h1>
           <p className="text-xs text-slate-500 leading-relaxed px-1">
             {awaitingVerification
@@ -317,10 +319,10 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
               className="w-full min-h-[46px] py-3 bg-[#0b5c37] hover:bg-[#08482b] text-white font-bold text-sm rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98]"
             >
               {isLoading ? (
-                <span>Creating Account...</span>
+                <span>{t.common.loading}</span>
               ) : (
                 <>
-                  <span>Complete Registration</span>
+                  <span>{t.common.createAccount}</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
@@ -331,12 +333,11 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
         {/* Login footer link */}
         {!awaitingVerification && (
           <div className="pt-4 border-t border-slate-100 text-center text-xs text-slate-500">
-            Already registered with Shop Cart?{' '}
             <button
               onClick={() => onNavigate('login')}
               className="text-[#0b5c37] font-bold hover:underline ml-1 cursor-pointer py-1 inline-block"
             >
-              Sign In Here
+              {t.common.signIn}
             </button>
           </div>
         )}

@@ -34,17 +34,18 @@ import { PageView, CartItem, AIScreenshotAnalysis, MerchantPaymentSettings, Save
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { useLanguage } from '../context/LanguageContext';
 import { ProductImage } from '../components/common/ProductImage';
 import { formatPrice } from '../utils/format';
-import { createOrder, OrderResult } from '../services/orderService';
+import { createOrder } from '../services/orderService';
 import { addCustomerSavedAddress } from '../services/profileService';
-import { isSupabaseConfigured, supabase } from '../lib/supabase';
 
 interface CheckoutPageProps {
   onNavigate: (page: PageView, params?: { productId?: string; category?: string; query?: string }) => void;
 }
 
 export type PaymentMethodType =
+  | 'upi'
   | 'all_upi'
   | 'gpay_upi'
   | 'phonepe_upi'
@@ -56,7 +57,9 @@ export interface CheckoutFormState {
   fullName: string;
   phone: string; // 10-digit Indian Mobile Number
   email: string;
-  houseBuilding: string; // House / Flat / Building Name
+  flatHouseNumber: string; // Flat / House Number
+  buildingApartment: string; // Building / Apartment Name
+  houseBuilding: string; // Composed House / Flat / Building Name for backward compatibility
   streetArea: string; // Street / Road / Area / Locality
   city: string;
   state: string;
@@ -78,6 +81,8 @@ export interface CheckoutFormErrors {
   fullName?: string;
   phone?: string;
   email?: string;
+  flatHouseNumber?: string;
+  buildingApartment?: string;
   houseBuilding?: string;
   streetArea?: string;
   city?: string;
@@ -139,6 +144,12 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
   } = useCart();
   const { user } = useAuth();
   const { showToast } = useToast();
+  const { t } = useLanguage();
+
+  // Generate unique order reference upfront
+  const [currentOrderNumber] = useState(
+    () => `SC-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`
+  );
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [completedOrder, setCompletedOrder] = useState<CompletedOrderState | null>(null);
@@ -176,28 +187,44 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
   const [aiAnalysis, setAiAnalysis] = useState<AIScreenshotAnalysis | null>(null);
   const [aiAnalysisError, setAiAnalysisError] = useState<string | null>(null);
 
+  // Guard so auth refreshes never overwrite actively edited address inputs
+  const hydratedUserIdRef = React.useRef<string | null>(null);
+
   // Form Fields State
   const [selectedAddressId, setSelectedAddressId] = useState<string>('default');
   const [saveAddressToProfile, setSaveAddressToProfile] = useState<boolean>(true);
-  const [formData, setFormData] = useState<CheckoutFormState>({
-    fullName: user?.name || '',
-    phone: user?.phone || '',
-    email: user?.email || '',
-    houseBuilding: user?.shippingAddress?.houseBuilding || '',
-    streetArea: user?.shippingAddress?.streetArea || '',
-    city: user?.shippingAddress?.city || user?.address?.city || 'Bengaluru',
-    state: user?.shippingAddress?.state || user?.address?.state || 'Karnataka',
-    pinCode: user?.shippingAddress?.pinCode || user?.address?.zipCode || '560038',
-    landmark: user?.shippingAddress?.landmark || '',
-    deliveryInstructions: user?.shippingAddress?.deliveryInstructions || '',
-    country: user?.shippingAddress?.country || 'India',
-    address: user?.address?.street || '',
-    apartment: '',
-    postalCode: user?.address?.zipCode || '560038',
-    deliveryNotes: '',
-    billingSameAsDelivery: true,
-    paymentMethod: 'all_upi',
-    upiTransactionRef: '',
+  const [formData, setFormData] = useState<CheckoutFormState>(() => {
+    const initialFlat =
+      user?.shippingAddress?.flatHouseNumber ||
+      user?.shippingAddress?.houseBuilding ||
+      '';
+    const initialBuilding =
+      user?.shippingAddress?.buildingApartment ||
+      user?.shippingAddress?.apartment ||
+      '';
+    const initialComposed = [initialFlat, initialBuilding].filter(Boolean).join(', ');
+    return {
+      fullName: user?.name || '',
+      phone: user?.phone || '',
+      email: user?.email || '',
+      flatHouseNumber: initialFlat,
+      buildingApartment: initialBuilding,
+      houseBuilding: initialComposed,
+      streetArea: user?.shippingAddress?.streetArea || '',
+      city: user?.shippingAddress?.city || user?.address?.city || '',
+      state: user?.shippingAddress?.state || user?.address?.state || '',
+      pinCode: user?.shippingAddress?.pinCode || user?.address?.zipCode || '',
+      landmark: user?.shippingAddress?.landmark || '',
+      deliveryInstructions: user?.shippingAddress?.deliveryInstructions || '',
+      country: user?.shippingAddress?.country || 'India',
+      address: user?.address?.street || '',
+      apartment: initialBuilding,
+      postalCode: user?.shippingAddress?.pinCode || user?.address?.zipCode || '',
+      deliveryNotes: '',
+      billingSameAsDelivery: true,
+      paymentMethod: 'upi',
+      upiTransactionRef: '',
+    };
   });
 
   const handleCopyUpiId = () => {
@@ -315,62 +342,84 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     setAiAnalysisError(null);
   };
 
-  // Synchronize user profile & saved addresses if signed in
+  // Synchronize user profile & saved addresses once per signed-in user session
   React.useEffect(() => {
-    if (user) {
-      const defaultSaved =
-        user.savedAddresses?.find((a) => a.isDefault) ||
-        user.savedAddresses?.[0] ||
-        user.shippingAddress;
+    if (!user) {
+      hydratedUserIdRef.current = null;
+      return;
+    }
+    if (hydratedUserIdRef.current === user.id) {
+      return;
+    }
+    hydratedUserIdRef.current = user.id;
 
-      if (defaultSaved) {
-        setSelectedAddressId(defaultSaved.id || 'default');
-        setFormData((prev) => ({
-          ...prev,
-          fullName: prev.fullName || defaultSaved.fullName || user.name || '',
-          email: prev.email || user.email || '',
-          phone: prev.phone || defaultSaved.phone || user.phone || '',
-          houseBuilding: prev.houseBuilding || defaultSaved.houseBuilding || defaultSaved.apartment || '',
-          streetArea: prev.streetArea || defaultSaved.streetArea || defaultSaved.street || '',
-          landmark: prev.landmark || defaultSaved.landmark || '',
-          city: prev.city || defaultSaved.city || user.address?.city || 'Bengaluru',
-          state: prev.state || defaultSaved.state || user.address?.state || 'Karnataka',
-          pinCode: prev.pinCode || defaultSaved.pinCode || defaultSaved.postalCode || user.address?.zipCode || '560038',
-          deliveryInstructions: prev.deliveryInstructions || defaultSaved.deliveryInstructions || '',
-          country: defaultSaved.country || 'India',
-          address: `${defaultSaved.houseBuilding || ''}, ${defaultSaved.streetArea || ''}`.trim() || prev.address || '',
-        }));
-      } else {
-        setFormData((prev) => ({
-          ...prev,
-          fullName: prev.fullName || user.name || '',
-          email: prev.email || user.email || '',
-          phone: prev.phone || user.phone || '',
-          address: prev.address || user.address?.street || '',
-          city: prev.city || user.address?.city || 'Bengaluru',
-          state: prev.state || user.address?.state || 'Karnataka',
-          pinCode: prev.pinCode || user.address?.zipCode || '560038',
-          country: 'India',
-        }));
-      }
+    const defaultSaved =
+      user.savedAddresses?.find((a) => a.isDefault) ||
+      user.savedAddresses?.[0] ||
+      user.shippingAddress;
+
+    if (defaultSaved) {
+      setSelectedAddressId(defaultSaved.id || 'default');
+      const savedFlat = defaultSaved.flatHouseNumber || defaultSaved.houseBuilding || '';
+      const savedBuilding = defaultSaved.buildingApartment || defaultSaved.apartment || '';
+      const composedHouse = [savedFlat, savedBuilding].filter(Boolean).join(', ');
+      setFormData((prev) => ({
+        ...prev,
+        fullName: prev.fullName || defaultSaved.fullName || user.name || '',
+        email: prev.email || user.email || '',
+        phone: prev.phone || defaultSaved.phone || user.phone || '',
+        flatHouseNumber: prev.flatHouseNumber || savedFlat,
+        buildingApartment: prev.buildingApartment || savedBuilding,
+        houseBuilding: prev.houseBuilding || composedHouse,
+        streetArea: prev.streetArea || defaultSaved.streetArea || defaultSaved.street || '',
+        landmark: prev.landmark || defaultSaved.landmark || '',
+        city: prev.city || defaultSaved.city || user.address?.city || '',
+        state: prev.state || defaultSaved.state || user.address?.state || '',
+        pinCode: prev.pinCode || defaultSaved.pinCode || defaultSaved.postalCode || user.address?.zipCode || '',
+        postalCode: prev.postalCode || defaultSaved.pinCode || defaultSaved.postalCode || user.address?.zipCode || '',
+        deliveryInstructions: prev.deliveryInstructions || defaultSaved.deliveryInstructions || '',
+        country: defaultSaved.country || 'India',
+        address: prev.address || [composedHouse, defaultSaved.streetArea || ''].filter(Boolean).join(', '),
+      }));
+    } else {
+      setFormData((prev) => ({
+        ...prev,
+        fullName: prev.fullName || user.name || '',
+        email: prev.email || user.email || '',
+        phone: prev.phone || user.phone || '',
+        address: prev.address || user.address?.street || '',
+        city: prev.city || user.address?.city || '',
+        state: prev.state || user.address?.state || '',
+        pinCode: prev.pinCode || user.address?.zipCode || '',
+        postalCode: prev.postalCode || user.address?.zipCode || '',
+        country: 'India',
+      }));
     }
   }, [user]);
 
   const handleSelectSavedAddress = (addr: SavedAddress) => {
     setSelectedAddressId(addr.id);
+    const savedFlat = addr.flatHouseNumber || addr.houseBuilding || '';
+    const savedBuilding = addr.buildingApartment || addr.apartment || '';
+    const composedHouse = [savedFlat, savedBuilding].filter(Boolean).join(', ');
+    const pin = addr.pinCode || addr.postalCode || '';
     setFormData((prev) => ({
       ...prev,
       fullName: addr.fullName || prev.fullName,
       phone: addr.phone || prev.phone,
-      houseBuilding: addr.houseBuilding || addr.apartment || '',
+      flatHouseNumber: savedFlat,
+      buildingApartment: savedBuilding,
+      houseBuilding: composedHouse,
+      apartment: savedBuilding,
       streetArea: addr.streetArea || addr.street || '',
       city: addr.city || prev.city,
       state: addr.state || prev.state,
-      pinCode: addr.pinCode || addr.postalCode || prev.pinCode,
+      pinCode: pin,
+      postalCode: pin,
       landmark: addr.landmark || '',
       deliveryInstructions: addr.deliveryInstructions || prev.deliveryInstructions,
       country: addr.country || 'India',
-      address: `${addr.houseBuilding || ''}, ${addr.streetArea || ''}`.trim(),
+      address: [composedHouse, addr.streetArea || addr.street || ''].filter(Boolean).join(', '),
     }));
     setErrors({});
   };
@@ -379,14 +428,19 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     setSelectedAddressId('new');
     setFormData((prev) => ({
       ...prev,
+      flatHouseNumber: '',
+      buildingApartment: '',
       houseBuilding: '',
+      apartment: '',
       streetArea: '',
       landmark: '',
       pinCode: '',
+      postalCode: '',
       city: '',
       state: '',
       address: '',
     }));
+    setErrors({});
   };
 
   // Validation function for delivery details and 12-digit UPI UTR
@@ -394,72 +448,90 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     const errs: CheckoutFormErrors = {};
 
     if (!data.fullName.trim()) {
-      errs.fullName = 'Full legal name is required';
+      errs.fullName = t.checkout.errNameRequired;
     }
 
     // 10-digit Indian Mobile Number validation
     const cleanPhone = data.phone.replace(/[\s\-\+\(\)]/g, '').replace(/^91/, '');
     if (!data.phone.trim()) {
-      errs.phone = 'Mobile number is required for dispatch notifications';
+      errs.phone = t.checkout.errPhoneRequired;
     } else if (cleanPhone.length !== 10 || !/^[6-9]\d{9}$/.test(cleanPhone)) {
-      errs.phone = 'Please enter a valid 10-digit Indian mobile number (e.g. 9876543210)';
+      errs.phone = t.checkout.errPhoneInvalid;
     }
 
     if (!data.email.trim()) {
-      errs.email = 'Email address is required for invoice delivery';
+      errs.email = t.checkout.errEmailRequired;
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email.trim())) {
-      errs.email = 'Please provide a valid email address';
+      errs.email = t.checkout.errEmailInvalid;
     }
 
-    if (!data.houseBuilding.trim()) {
-      errs.houseBuilding = 'House / Flat / Building name or number is required';
+    if (!data.flatHouseNumber.trim()) {
+      errs.flatHouseNumber = t.checkout.errFlatHouseRequired;
     }
 
     if (!data.streetArea.trim()) {
-      errs.streetArea = 'Street / Road / Area / Sector name is required';
+      errs.streetArea = t.checkout.errStreetRequired;
     }
 
     if (!data.city.trim()) {
-      errs.city = 'City / Town name is required';
+      errs.city = t.checkout.errCityRequired;
     }
 
     if (!data.state.trim()) {
-      errs.state = 'State / Union Territory is required';
+      errs.state = t.checkout.errStateRequired;
     }
 
     // 6-digit Indian PIN Code validation
     const cleanPin = (data.pinCode || '').trim();
     if (!cleanPin) {
-      errs.pinCode = '6-digit PIN code is required';
+      errs.pinCode = t.checkout.errPinRequired;
     } else if (!/^\d{6}$/.test(cleanPin)) {
-      errs.pinCode = 'Please enter a valid 6-digit Indian postal PIN code (e.g. 560001)';
+      errs.pinCode = t.checkout.errPinInvalid;
     }
 
     // 12-character alphanumeric UPI UTR Reference validation
     const cleanUtr = (data.upiTransactionRef || '').replace(/[\s-]/g, '').trim();
     if (!cleanUtr) {
-      errs.upiTransactionRef = '12-character alphanumeric UPI Transaction Reference (UTR) is required to verify payment';
+      errs.upiTransactionRef = t.checkout.errUtrRequired;
     } else if (cleanUtr.length !== 12 || !/^[0-9A-Za-z]{12}$/.test(cleanUtr)) {
-      errs.upiTransactionRef = 'Please enter a valid 12-character alphanumeric UPI UTR reference (e.g. 431029482910)';
+      errs.upiTransactionRef = t.checkout.errUtrInvalid;
     }
 
     return errs;
   };
 
-  const handleFieldChange = (field: keyof CheckoutFormState, value: any) => {
-    const updated = { ...formData, [field]: value };
-    setFormData(updated);
+  // Safe functional batch updater (prevents stale closure drops on multi-field changes)
+  const updateFields = (
+    patch: Partial<CheckoutFormState>,
+    fieldsToCheck?: (keyof CheckoutFormState)[]
+  ) => {
+    setFormData((prev) => {
+      const next: CheckoutFormState = { ...prev, ...patch };
+      const composedHouse = [next.flatHouseNumber.trim(), next.buildingApartment.trim()]
+        .filter(Boolean)
+        .join(', ');
+      next.houseBuilding = composedHouse;
+      next.apartment = next.buildingApartment;
+      next.address = [composedHouse, next.streetArea.trim()].filter(Boolean).join(', ');
+      if ('pinCode' in patch) {
+        next.postalCode = next.pinCode;
+      }
 
-    if (touched[field]) {
-      const errs = validateForm(updated);
-      setErrors(errs);
-    }
+      const checkList = fieldsToCheck || (Object.keys(patch) as (keyof CheckoutFormState)[]);
+      if (checkList.some((f) => touched[f])) {
+        setErrors(validateForm(next));
+      }
+      return next;
+    });
+  };
+
+  const handleFieldChange = (field: keyof CheckoutFormState, value: any) => {
+    updateFields({ [field]: value } as Partial<CheckoutFormState>, [field]);
   };
 
   const handleBlur = (field: keyof CheckoutFormState) => {
     setTouched((prev) => ({ ...prev, [field]: true }));
-    const errs = validateForm(formData);
-    setErrors(errs);
+    setErrors(validateForm(formData));
   };
 
   const handleApplyCoupon = (e: React.FormEvent) => {
@@ -476,10 +548,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     }, 300);
   };
 
-  // Generate unique order reference
-  const [currentOrderNumber] = useState(() => `SC-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`);
-
-  // UPI SUBMISSION HANDLER (GOOGLE PAY & PHONEPE & UNIVERSAL UPI)
+  // SINGLE SHOPCART UPI SUBMISSION HANDLER
   const handleUPIOrderSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -487,7 +556,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
       fullName: true,
       phone: true,
       email: true,
-      houseBuilding: true,
+      flatHouseNumber: true,
+      buildingApartment: true,
       streetArea: true,
       city: true,
       state: true,
@@ -513,6 +583,10 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     try {
       const cleanRef = (formData.upiTransactionRef || '').replace(/[\s-]/g, '').trim().toUpperCase();
       const cleanPhone = formData.phone.replace(/[\s\-\+\(\)]/g, '').replace(/^91/, '');
+      const cleanFlat = formData.flatHouseNumber.trim();
+      const cleanBuilding = formData.buildingApartment.trim();
+      const composedHouse = [cleanFlat, cleanBuilding].filter(Boolean).join(', ');
+      const cleanStreet = formData.streetArea.trim();
 
       // 1. Submit order via Secure Backend Order Creation API
       const orderRes = await createOrder({
@@ -531,10 +605,12 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
           fullName: formData.fullName.trim(),
           phone: cleanPhone,
           email: formData.email.trim(),
-          houseBuilding: formData.houseBuilding.trim(),
-          streetArea: formData.streetArea.trim(),
-          street: `${formData.houseBuilding.trim()}, ${formData.streetArea.trim()}`,
-          apartment: formData.houseBuilding.trim(),
+          flatHouseNumber: cleanFlat,
+          buildingApartment: cleanBuilding,
+          houseBuilding: composedHouse,
+          streetArea: cleanStreet,
+          street: [composedHouse, cleanStreet].filter(Boolean).join(', '),
+          apartment: cleanBuilding || composedHouse,
           city: formData.city.trim(),
           state: formData.state.trim(),
           postalCode: formData.pinCode.trim(),
@@ -544,7 +620,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
           country: formData.country || 'India',
         },
         customerNotes: (formData.deliveryInstructions || '').trim() || undefined,
-        paymentMethod: formData.paymentMethod,
+        paymentMethod: 'upi',
         paymentStatus: 'pending_admin_verification',
         transactionReference: cleanRef,
         screenshotUrl: screenshotPreview || undefined,
@@ -559,7 +635,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         orderId: orderRes.orderId,
         customerName: formData.fullName.trim(),
         customerEmail: formData.email.trim(),
-        paymentMethod: formData.paymentMethod,
+        paymentMethod: 'upi',
         paymentStatus: 'pending_admin_verification',
         transactionReference: cleanRef,
         totalAmount: orderRes.pricing?.totalAmount ?? finalPayableTotal,
@@ -578,8 +654,10 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
           fullName: formData.fullName.trim(),
           phone: cleanPhone,
           email: formData.email.trim(),
-          houseBuilding: formData.houseBuilding.trim(),
-          streetArea: formData.streetArea.trim(),
+          flatHouseNumber: cleanFlat,
+          buildingApartment: cleanBuilding,
+          houseBuilding: composedHouse,
+          streetArea: cleanStreet,
           landmark: (formData.landmark || '').trim(),
           city: formData.city.trim(),
           district: '',
@@ -600,26 +678,28 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     }
   };
 
-  // Demo auto-fill helper with Indian delivery address
+  // Sample auto-fill helper with Indian delivery address
   const handleLoadDemoProfile = () => {
     setFormData({
       fullName: 'Rahul Sharma',
       phone: '9876543210',
       email: 'rahul.sharma@example.in',
-      houseBuilding: 'Flat 402, Lotus Tower',
-      streetArea: 'MG Road, Indiranagar',
+      flatHouseNumber: 'Flat 402',
+      buildingApartment: 'Lotus Tower, 4th Floor',
+      houseBuilding: 'Flat 402, Lotus Tower, 4th Floor',
+      streetArea: '100 Feet Road, Indiranagar',
       city: 'Bengaluru',
       state: 'Karnataka',
       pinCode: '560038',
       landmark: 'Near Indiranagar Metro Station',
       deliveryInstructions: 'Please call on arrival; leave with building security if unavailable.',
       country: 'India',
-      address: 'Flat 402, Lotus Tower, MG Road, Indiranagar',
-      apartment: 'Flat 402, Lotus Tower',
+      address: 'Flat 402, Lotus Tower, 4th Floor, 100 Feet Road, Indiranagar',
+      apartment: 'Lotus Tower, 4th Floor',
       postalCode: '560038',
       deliveryNotes: 'Please call on arrival.',
       billingSameAsDelivery: true,
-      paymentMethod: formData.paymentMethod,
+      paymentMethod: 'upi',
       upiTransactionRef: '431029482910',
     });
     setErrors({});
@@ -692,10 +772,10 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
               </span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-              Order Checkout &amp; Real Payments
+              {t.checkout.title}
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 mt-1">
-              Select Google Pay or PhonePe to scan the merchant QR code and complete your UPI purchase.
+              {t.checkout.upiPaymentSubtitle}
             </p>
           </div>
 
@@ -714,7 +794,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
               className="text-xs px-3.5 py-2 border border-slate-200 hover:bg-slate-50 font-semibold rounded-lg text-slate-700 transition-colors cursor-pointer flex items-center gap-1.5"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Back to Cart</span>
+              <span>{t.checkout.backToCart}</span>
             </button>
           </div>
         </div>
@@ -737,73 +817,80 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Full Legal Name <span className="text-rose-500">*</span>
+                  <label htmlFor="checkout-fullname" className="block text-xs font-bold text-slate-800 mb-1.5">
+                    {t.checkout.fullName} <span className="text-rose-500">*</span>
                   </label>
                   <input
+                    id="checkout-fullname"
                     type="text"
                     name="fullName"
+                    autoComplete="name"
                     value={formData.fullName}
                     onChange={(e) => handleFieldChange('fullName', e.target.value)}
                     onBlur={() => handleBlur('fullName')}
                     placeholder="e.g. Aarav Sharma"
-                    className={`w-full px-3.5 py-2.5 text-xs bg-slate-50 border rounded-lg transition-colors focus:outline-none focus:bg-white focus:ring-2 ${
+                    className={`w-full px-3.5 py-2.5 min-h-[42px] text-sm text-slate-900 placeholder:text-slate-400 bg-white border rounded-lg transition-colors focus:outline-none focus:ring-2 ${
                       errors.fullName && touched.fullName
-                        ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/30'
-                        : 'border-slate-200 focus:ring-emerald-200 focus:border-[#0b5c37]'
+                        ? 'border-rose-400 focus:ring-rose-200 bg-rose-50/30'
+                        : 'border-slate-300 focus:ring-emerald-200 focus:border-[#0b5c37]'
                     }`}
                   />
                   {errors.fullName && touched.fullName && (
                     <p className="mt-1 text-[11px] text-rose-600 font-medium flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" /> {errors.fullName}
+                      <AlertCircle className="w-3 h-3 shrink-0" /> {errors.fullName}
                     </p>
                   )}
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Email Address <span className="text-rose-500">*</span>
+                  <label htmlFor="checkout-email" className="block text-xs font-bold text-slate-800 mb-1.5">
+                    {t.checkout.emailAddress} <span className="text-rose-500">*</span>
                   </label>
                   <input
+                    id="checkout-email"
                     type="email"
                     name="email"
+                    autoComplete="email"
                     value={formData.email}
                     onChange={(e) => handleFieldChange('email', e.target.value)}
                     onBlur={() => handleBlur('email')}
                     placeholder="aarav@example.in"
-                    className={`w-full px-3.5 py-2.5 text-xs bg-slate-50 border rounded-lg transition-colors focus:outline-none focus:bg-white focus:ring-2 ${
+                    className={`w-full px-3.5 py-2.5 min-h-[42px] text-sm text-slate-900 placeholder:text-slate-400 bg-white border rounded-lg transition-colors focus:outline-none focus:ring-2 ${
                       errors.email && touched.email
-                        ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/30'
-                        : 'border-slate-200 focus:ring-emerald-200 focus:border-[#0b5c37]'
+                        ? 'border-rose-400 focus:ring-rose-200 bg-rose-50/30'
+                        : 'border-slate-300 focus:ring-emerald-200 focus:border-[#0b5c37]'
                     }`}
                   />
                   {errors.email && touched.email && (
                     <p className="mt-1 text-[11px] text-rose-600 font-medium flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" /> {errors.email}
+                      <AlertCircle className="w-3 h-3 shrink-0" /> {errors.email}
                     </p>
                   )}
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Phone Number <span className="text-rose-500">*</span>
+                  <label htmlFor="checkout-phone" className="block text-xs font-bold text-slate-800 mb-1.5">
+                    {t.checkout.mobileNumber} <span className="text-rose-500">*</span>
                   </label>
                   <input
+                    id="checkout-phone"
                     type="tel"
+                    inputMode="tel"
+                    autoComplete="tel"
                     name="phone"
                     value={formData.phone}
                     onChange={(e) => handleFieldChange('phone', e.target.value)}
                     onBlur={() => handleBlur('phone')}
                     placeholder="9876543210"
-                    className={`w-full px-3.5 py-2.5 text-xs bg-slate-50 border rounded-lg transition-colors focus:outline-none focus:bg-white focus:ring-2 ${
+                    className={`w-full px-3.5 py-2.5 min-h-[42px] text-sm text-slate-900 placeholder:text-slate-400 bg-white border rounded-lg transition-colors focus:outline-none focus:ring-2 ${
                       errors.phone && touched.phone
-                        ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/30'
-                        : 'border-slate-200 focus:ring-emerald-200 focus:border-[#0b5c37]'
+                        ? 'border-rose-400 focus:ring-rose-200 bg-rose-50/30'
+                        : 'border-slate-300 focus:ring-emerald-200 focus:border-[#0b5c37]'
                     }`}
                   />
                   {errors.phone && touched.phone && (
                     <p className="mt-1 text-[11px] text-rose-600 font-medium flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" /> {errors.phone}
+                      <AlertCircle className="w-3 h-3 shrink-0" /> {errors.phone}
                     </p>
                   )}
                 </div>
@@ -872,7 +959,9 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                             {addr.fullName || user.name} · {addr.phone || user.phone}
                           </p>
                           <p className="text-[11px] text-slate-500 line-clamp-2 mt-0.5">
-                            {addr.houseBuilding ? `${addr.houseBuilding}, ` : ''}
+                            {[addr.flatHouseNumber, addr.buildingApartment].filter(Boolean).join(', ') || addr.houseBuilding
+                              ? `${[addr.flatHouseNumber, addr.buildingApartment].filter(Boolean).join(', ') || addr.houseBuilding}, `
+                              : ''}
                             {addr.streetArea ? `${addr.streetArea}, ` : ''}
                             {addr.city}, {addr.state} - {addr.pinCode}
                           </p>
@@ -899,160 +988,184 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
               {/* Delivery Address Input Fields */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Flat / House No. / Building / Apartment <span className="text-rose-500">*</span>
+                <div>
+                  <label htmlFor="checkout-flat-house" className="block text-xs font-bold text-slate-800 mb-1.5">
+                    {t.checkout.flatHouseNumber} <span className="text-rose-500">*</span>
                   </label>
                   <input
+                    id="checkout-flat-house"
                     type="text"
-                    name="houseBuilding"
-                    value={formData.houseBuilding}
-                    onChange={(e) => {
-                      handleFieldChange('houseBuilding', e.target.value);
-                      handleFieldChange('address', `${e.target.value}, ${formData.streetArea}`.trim());
-                    }}
-                    onBlur={() => handleBlur('houseBuilding')}
-                    placeholder="e.g. Flat 402, Lotus Tower, 4th Floor"
-                    className={`w-full px-3.5 py-2.5 text-xs bg-slate-50 border rounded-lg transition-colors focus:outline-none focus:bg-white focus:ring-2 ${
-                      errors.houseBuilding && touched.houseBuilding
-                        ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/30'
-                        : 'border-slate-200 focus:ring-emerald-200 focus:border-[#0b5c37]'
+                    name="flatHouseNumber"
+                    autoComplete="address-line1"
+                    value={formData.flatHouseNumber}
+                    onChange={(e) => handleFieldChange('flatHouseNumber', e.target.value)}
+                    onBlur={() => handleBlur('flatHouseNumber')}
+                    placeholder={t.checkout.flatHousePlaceholder}
+                    className={`w-full px-3.5 py-2.5 min-h-[42px] text-sm text-slate-900 placeholder:text-slate-400 bg-white border rounded-lg transition-colors focus:outline-none focus:ring-2 ${
+                      errors.flatHouseNumber && touched.flatHouseNumber
+                        ? 'border-rose-400 focus:ring-rose-200 bg-rose-50/30'
+                        : 'border-slate-300 focus:ring-emerald-200 focus:border-[#0b5c37]'
                     }`}
                   />
-                  {errors.houseBuilding && touched.houseBuilding && (
+                  {errors.flatHouseNumber && touched.flatHouseNumber && (
                     <p className="mt-1 text-[11px] text-rose-600 font-medium flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" /> {errors.houseBuilding}
+                      <AlertCircle className="w-3 h-3 shrink-0" /> {errors.flatHouseNumber}
                     </p>
                   )}
                 </div>
 
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Street / Road / Area / Locality <span className="text-rose-500">*</span>
+                <div>
+                  <label htmlFor="checkout-building" className="block text-xs font-bold text-slate-800 mb-1.5">
+                    {t.checkout.buildingApartment}
                   </label>
                   <input
+                    id="checkout-building"
+                    type="text"
+                    name="buildingApartment"
+                    autoComplete="address-line2"
+                    value={formData.buildingApartment}
+                    onChange={(e) => handleFieldChange('buildingApartment', e.target.value)}
+                    onBlur={() => handleBlur('buildingApartment')}
+                    placeholder={t.checkout.buildingPlaceholder}
+                    className="w-full px-3.5 py-2.5 min-h-[42px] text-sm text-slate-900 placeholder:text-slate-400 bg-white border border-slate-300 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-[#0b5c37]"
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label htmlFor="checkout-street" className="block text-xs font-bold text-slate-800 mb-1.5">
+                    {t.checkout.streetRoad} <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    id="checkout-street"
                     type="text"
                     name="streetArea"
+                    autoComplete="street-address"
                     value={formData.streetArea}
-                    onChange={(e) => {
-                      handleFieldChange('streetArea', e.target.value);
-                      handleFieldChange('address', `${formData.houseBuilding}, ${e.target.value}`.trim());
-                    }}
+                    onChange={(e) => handleFieldChange('streetArea', e.target.value)}
                     onBlur={() => handleBlur('streetArea')}
-                    placeholder="e.g. 100 Feet Road, Indiranagar, Stage 2"
-                    className={`w-full px-3.5 py-2.5 text-xs bg-slate-50 border rounded-lg transition-colors focus:outline-none focus:bg-white focus:ring-2 ${
+                    placeholder={t.checkout.streetPlaceholder}
+                    className={`w-full px-3.5 py-2.5 min-h-[42px] text-sm text-slate-900 placeholder:text-slate-400 bg-white border rounded-lg transition-colors focus:outline-none focus:ring-2 ${
                       errors.streetArea && touched.streetArea
-                        ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/30'
-                        : 'border-slate-200 focus:ring-emerald-200 focus:border-[#0b5c37]'
+                        ? 'border-rose-400 focus:ring-rose-200 bg-rose-50/30'
+                        : 'border-slate-300 focus:ring-emerald-200 focus:border-[#0b5c37]'
                     }`}
                   />
                   {errors.streetArea && touched.streetArea && (
                     <p className="mt-1 text-[11px] text-rose-600 font-medium flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" /> {errors.streetArea}
+                      <AlertCircle className="w-3 h-3 shrink-0" /> {errors.streetArea}
                     </p>
                   )}
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Landmark (Optional)
+                  <label htmlFor="checkout-landmark" className="block text-xs font-bold text-slate-800 mb-1.5">
+                    {t.checkout.landmark}
                   </label>
                   <input
+                    id="checkout-landmark"
                     type="text"
                     name="landmark"
                     value={formData.landmark || ''}
                     onChange={(e) => handleFieldChange('landmark', e.target.value)}
-                    placeholder="e.g. Near Metro Station / Behind Mall"
-                    className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white focus:ring-2 focus:ring-emerald-200 focus:border-[#0b5c37]"
+                    placeholder={t.checkout.landmarkPlaceholder}
+                    className="w-full px-3.5 py-2.5 min-h-[42px] text-sm text-slate-900 placeholder:text-slate-400 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-[#0b5c37]"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Town / City <span className="text-rose-500">*</span>
+                  <label htmlFor="checkout-city" className="block text-xs font-bold text-slate-800 mb-1.5">
+                    {t.checkout.townCity} <span className="text-rose-500">*</span>
                   </label>
                   <input
+                    id="checkout-city"
                     type="text"
                     name="city"
+                    autoComplete="address-level2"
                     value={formData.city}
                     onChange={(e) => handleFieldChange('city', e.target.value)}
                     onBlur={() => handleBlur('city')}
-                    placeholder="e.g. Bengaluru"
-                    className={`w-full px-3.5 py-2.5 text-xs bg-slate-50 border rounded-lg transition-colors focus:outline-none focus:bg-white focus:ring-2 ${
+                    placeholder={t.checkout.cityPlaceholder}
+                    className={`w-full px-3.5 py-2.5 min-h-[42px] text-sm text-slate-900 placeholder:text-slate-400 bg-white border rounded-lg transition-colors focus:outline-none focus:ring-2 ${
                       errors.city && touched.city
-                        ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/30'
-                        : 'border-slate-200 focus:ring-emerald-200 focus:border-[#0b5c37]'
+                        ? 'border-rose-400 focus:ring-rose-200 bg-rose-50/30'
+                        : 'border-slate-300 focus:ring-emerald-200 focus:border-[#0b5c37]'
                     }`}
                   />
                   {errors.city && touched.city && (
                     <p className="mt-1 text-[11px] text-rose-600 font-medium flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" /> {errors.city}
+                      <AlertCircle className="w-3 h-3 shrink-0" /> {errors.city}
                     </p>
                   )}
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    State / Union Territory <span className="text-rose-500">*</span>
+                  <label htmlFor="checkout-state" className="block text-xs font-bold text-slate-800 mb-1.5">
+                    {t.checkout.stateLabel} <span className="text-rose-500">*</span>
                   </label>
                   <input
+                    id="checkout-state"
                     type="text"
                     name="state"
+                    autoComplete="address-level1"
                     value={formData.state}
                     onChange={(e) => handleFieldChange('state', e.target.value)}
                     onBlur={() => handleBlur('state')}
-                    placeholder="e.g. Karnataka"
-                    className={`w-full px-3.5 py-2.5 text-xs bg-slate-50 border rounded-lg transition-colors focus:outline-none focus:bg-white focus:ring-2 ${
+                    placeholder={t.checkout.statePlaceholder}
+                    className={`w-full px-3.5 py-2.5 min-h-[42px] text-sm text-slate-900 placeholder:text-slate-400 bg-white border rounded-lg transition-colors focus:outline-none focus:ring-2 ${
                       errors.state && touched.state
-                        ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/30'
-                        : 'border-slate-200 focus:ring-emerald-200 focus:border-[#0b5c37]'
+                        ? 'border-rose-400 focus:ring-rose-200 bg-rose-50/30'
+                        : 'border-slate-300 focus:ring-emerald-200 focus:border-[#0b5c37]'
                     }`}
                   />
                   {errors.state && touched.state && (
                     <p className="mt-1 text-[11px] text-rose-600 font-medium flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" /> {errors.state}
+                      <AlertCircle className="w-3 h-3 shrink-0" /> {errors.state}
                     </p>
                   )}
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    6-Digit Postal PIN Code <span className="text-rose-500">*</span>
+                  <label htmlFor="checkout-pincode" className="block text-xs font-bold text-slate-800 mb-1.5">
+                    {t.checkout.pinCode} <span className="text-rose-500">*</span>
                   </label>
                   <input
+                    id="checkout-pincode"
                     type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete="postal-code"
                     maxLength={6}
                     name="pinCode"
                     value={formData.pinCode}
                     onChange={(e) => {
-                      const val = e.target.value.replace(/\D/g, '');
-                      handleFieldChange('pinCode', val);
-                      handleFieldChange('postalCode', val);
+                      const val = e.target.value.replace(/\D/g, '').slice(0, 6);
+                      updateFields({ pinCode: val, postalCode: val }, ['pinCode']);
                     }}
                     onBlur={() => handleBlur('pinCode')}
-                    placeholder="e.g. 560038"
-                    className={`w-full px-3.5 py-2.5 text-xs bg-slate-50 border rounded-lg font-mono transition-colors focus:outline-none focus:bg-white focus:ring-2 ${
+                    placeholder={t.checkout.pinCodePlaceholder}
+                    className={`w-full px-3.5 py-2.5 min-h-[42px] text-sm text-slate-900 placeholder:text-slate-400 bg-white border rounded-lg font-mono tracking-wider transition-colors focus:outline-none focus:ring-2 ${
                       errors.pinCode && touched.pinCode
-                        ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/30'
-                        : 'border-slate-200 focus:ring-emerald-200 focus:border-[#0b5c37]'
+                        ? 'border-rose-400 focus:ring-rose-200 bg-rose-50/30'
+                        : 'border-slate-300 focus:ring-emerald-200 focus:border-[#0b5c37]'
                     }`}
                   />
                   {errors.pinCode && touched.pinCode && (
                     <p className="mt-1 text-[11px] text-rose-600 font-medium flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" /> {errors.pinCode}
+                      <AlertCircle className="w-3 h-3 shrink-0" /> {errors.pinCode}
                     </p>
                   )}
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Country
+                  <label htmlFor="checkout-country" className="block text-xs font-bold text-slate-800 mb-1.5">
+                    {t.checkout.countryLabel}
                   </label>
                   <select
+                    id="checkout-country"
                     name="country"
                     value={formData.country}
                     onChange={(e) => handleFieldChange('country', e.target.value)}
-                    className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white focus:ring-2 focus:ring-emerald-200"
+                    className="w-full px-3.5 py-2.5 min-h-[42px] text-sm text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-[#0b5c37]"
                   >
                     {COUNTRIES.map((c) => (
                       <option key={c} value={c}>
@@ -1063,16 +1176,17 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Delivery Instructions / Notes (Optional)
+                  <label htmlFor="checkout-notes" className="block text-xs font-bold text-slate-800 mb-1.5">
+                    {t.checkout.deliveryInstructions}
                   </label>
                   <input
+                    id="checkout-notes"
                     type="text"
                     name="deliveryInstructions"
                     value={formData.deliveryInstructions || ''}
                     onChange={(e) => handleFieldChange('deliveryInstructions', e.target.value)}
                     placeholder="e.g. Please ring doorbell twice; leave with security if unavailable"
-                    className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white focus:ring-2 focus:ring-emerald-200"
+                    className="w-full px-3.5 py-2.5 min-h-[42px] text-sm text-slate-900 placeholder:text-slate-400 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-[#0b5c37]"
                   />
                 </div>
 
@@ -1088,7 +1202,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                       />
                       <span className="font-medium flex items-center gap-1.5">
                         <Bookmark className="w-3.5 h-3.5 text-[#0b5c37]" />
-                        <span>Save or update this delivery address to my account profile for faster checkout</span>
+                        <span>{t.checkout.saveAddressToProfile}</span>
                       </span>
                     </label>
                   </div>
@@ -1096,16 +1210,16 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
               </div>
             </section>
 
-            {/* SECTION 8: Universal UPI Payment System & AI Screenshot Fraud Analysis */}
+            {/* SECTION 3 / PAYMENT: SINGLE SHOPCART UPI PAYMENT FLOW */}
             <section className="bg-white rounded-2xl border border-slate-200/90 p-6 sm:p-7 shadow-xs space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 gap-2">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-lg bg-[#0b5c37] text-white font-black text-xs flex items-center justify-center">
-                    8
+                    3
                   </div>
                   <div>
-                    <h2 className="text-base font-bold text-slate-900">Universal UPI Payment System</h2>
-                    <p className="text-xs text-slate-500">Pay via Google Pay, PhonePe, Paytm, BHIM, or any UPI app</p>
+                    <h2 className="text-base font-bold text-slate-900">{t.checkout.upiPaymentTitle}</h2>
+                    <p className="text-xs text-slate-500">{t.checkout.upiPaymentSubtitle}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1116,57 +1230,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                 </div>
               </div>
 
-              {/* Universal UPI App Selection Grid */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-2">
-                  Choose Your Preferred UPI Application
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {[
-                    { id: 'all_upi', name: 'All UPI Apps', sub: 'Scan Any UPI QR', icon: QrCode, color: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
-                    { id: 'gpay_upi', name: 'Google Pay', sub: 'GPay UPI', icon: Smartphone, color: 'text-blue-700 bg-blue-50 border-blue-200' },
-                    { id: 'phonepe_upi', name: 'PhonePe', sub: 'PhonePe UPI', icon: Smartphone, color: 'text-purple-700 bg-purple-50 border-purple-200' },
-                    { id: 'paytm_upi', name: 'Paytm', sub: 'Paytm Wallet/UPI', icon: Smartphone, color: 'text-sky-700 bg-sky-50 border-sky-200' },
-                    { id: 'bhim_upi', name: 'BHIM UPI', sub: 'NPCI BHIM', icon: QrCode, color: 'text-amber-700 bg-amber-50 border-amber-200' },
-                    { id: 'other_upi', name: 'Other UPI', sub: 'Cred / Amazon / Bank', icon: ExternalLink, color: 'text-slate-700 bg-slate-50 border-slate-200' },
-                  ].map((provider) => {
-                    const isSelected = formData.paymentMethod === provider.id;
-                    const IconComp = provider.icon;
-                    return (
-                      <div
-                        key={provider.id}
-                        onClick={() => handleFieldChange('paymentMethod', provider.id as PaymentMethodType)}
-                        className={`p-3 rounded-xl border cursor-pointer transition-all flex flex-col justify-between ${
-                          isSelected
-                            ? 'border-[#0b5c37] bg-emerald-50/50 ring-2 ring-[#0b5c37]/20 shadow-xs'
-                            : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/60'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className={`w-6 h-6 rounded-md flex items-center justify-center text-xs font-bold border ${provider.color}`}>
-                            <IconComp className="w-3.5 h-3.5" />
-                          </span>
-                          <input
-                            type="radio"
-                            name="paymentMethod"
-                            value={provider.id}
-                            checked={isSelected}
-                            onChange={() => handleFieldChange('paymentMethod', provider.id as PaymentMethodType)}
-                            className="accent-[#0b5c37] w-3.5 h-3.5 cursor-pointer"
-                          />
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold text-slate-900 truncate">{provider.name}</p>
-                          <p className="text-[10px] text-slate-500 truncate">{provider.sub}</p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* DEDICATED UNIVERSAL UPI CONSOLE */}
-              <div className="bg-slate-50 rounded-2xl border border-slate-200 p-5 space-y-6 animate-in fade-in duration-200">
+              {/* Single Unified ShopCart UPI Payment Console */}
+              <div className="bg-slate-50 rounded-2xl border border-slate-200 p-5 space-y-6">
                 {/* Console Header */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200/80">
                   <div className="flex items-center gap-2.5">
@@ -1175,19 +1240,30 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                     </div>
                     <div>
                       <h4 className="text-xs font-bold text-slate-900">
-                        Universal Merchant UPI QR &amp; Gateway
+                        {t.checkout.upiSingleGatewayHeading}
                       </h4>
                       <p className="text-[11px] text-slate-500">
-                        Scan with any UPI app to transfer exact order amount
+                        {t.checkout.upiSingleGatewayDesc}
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs self-start sm:self-auto">
-                    <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Payable Total:</span>
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{t.checkout.payableTotal}:</span>
                     <span className="text-base font-black text-[#0b5c37] font-mono tabular-nums">
                       {formatPrice(finalPayableTotal)}
                     </span>
                   </div>
+                </div>
+
+                {/* Supported Apps Note */}
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-slate-700">
+                  <Smartphone className="w-3.5 h-3.5 text-[#0b5c37] shrink-0" />
+                  <span className="text-slate-500 mr-1">Works with:</span>
+                  <span className="px-2 py-0.5 rounded bg-white border border-slate-200">Google Pay</span>
+                  <span className="px-2 py-0.5 rounded bg-white border border-slate-200">PhonePe</span>
+                  <span className="px-2 py-0.5 rounded bg-white border border-slate-200">Paytm</span>
+                  <span className="px-2 py-0.5 rounded bg-white border border-slate-200">BHIM UPI</span>
+                  <span className="px-2 py-0.5 rounded bg-white border border-slate-200">Any Bank UPI App</span>
                 </div>
 
                 {/* QR Display + Merchant Info */}
@@ -1372,7 +1448,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
 
                       {/* AI Screening In Progress Spinner */}
                       {isAnalyzingScreenshot && (
-                        <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl flex items-center gap-3 text-xs text-emerald-950 animate-pulse">
+                        <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl flex items-center gap-3 text-xs text-emerald-950">
                           <RefreshCw className="w-5 h-5 text-[#0b5c37] animate-spin shrink-0" />
                           <div>
                             <p className="font-bold text-emerald-900">
@@ -1403,10 +1479,10 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                               )}
                               <span className="font-bold">
                                 {aiAnalysis.recommended_action === 'DETAILS_MATCH'
-                                  ? 'AI Screening: Receipt Verified Genuine'
+                                  ? 'AI Advisory: Receipt Details Match (Pending Admin Verification)'
                                   : aiAnalysis.recommended_action === 'REVIEW_REQUIRED'
-                                  ? 'AI Screening: Manual Review Required'
-                                  : 'AI Screening: Potential Risk / Discrepancy'}
+                                  ? 'AI Advisory: Manual Review Recommended'
+                                  : 'AI Advisory: Possible Discrepancy — Admin Will Verify'}
                               </span>
                             </div>
                             <span className="font-mono font-bold text-[11px] px-2 py-0.5 rounded bg-white/80 border border-black/10 self-start sm:self-auto">
@@ -1490,10 +1566,10 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                 <div className="p-3.5 bg-amber-50 rounded-xl border border-amber-200/90 text-xs space-y-1 text-amber-950">
                   <div className="flex items-center gap-2 font-bold text-amber-900">
                     <Clock className="w-4 h-4 text-amber-600 shrink-0" />
-                    <span>Fraud Prevention &amp; Bank Ledger Verification Protocol</span>
+                    <span>Bank Ledger Verification Protocol</span>
                   </div>
                   <p className="text-[11px] text-amber-900/90 leading-relaxed">
-                    AI screening is for preliminary fraud prevention only. Your order will initially be set to <strong>Pending Admin Verification</strong>. An administrator must reconcile the 12-digit UTR against official merchant bank statements before marking the order as paid and dispatching items.
+                    {t.checkout.aiAdvisoryNotice}
                   </p>
                 </div>
 
@@ -1519,12 +1595,12 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                     {isSubmitting ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>Submitting Payment &amp; Screenshot Audit...</span>
+                        <span>{t.checkout.processingOrder}</span>
                       </>
                     ) : (
                       <>
                         <Lock className="w-4 h-4 text-emerald-200" />
-                        <span>Submit Payment for Verification ({formatPrice(finalPayableTotal)})</span>
+                        <span>{t.checkout.placeOrder} ({formatPrice(finalPayableTotal)})</span>
                       </>
                     )}
                   </button>

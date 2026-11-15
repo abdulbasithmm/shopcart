@@ -104,12 +104,17 @@ const inFlightOrderNumbers = new Set<string>();
 const inFlightUtrs = new Set<string>();
 
 const SUPPORTED_UPI_METHODS = new Set([
+  'upi',
   'google_pay',
   'phonepe',
   'paytm',
   'bhim',
   'all_upi',
   'gpay_upi',
+  'phonepe_upi',
+  'paytm_upi',
+  'bhim_upi',
+  'other_upi',
 ]);
 
 function roundCurrency(value: number): number {
@@ -690,8 +695,8 @@ export function createApiApp(): express.Express {
   // ---------------------------------------------------------------------------
   app.all('/api/paypal/*', (_req: Request, res: Response) => {
     return res.status(410).json({
-      error: 'PayPal checkout has been completely retired. Shopcart operates strictly with Universal UPI payments (Google Pay, PhonePe, Paytm, BHIM, Cred, and all UPI applications).',
-      supportedPaymentMethods: ['google_pay', 'phonepe', 'paytm', 'bhim', 'all_upi'],
+      error: 'PayPal checkout has been retired. Shopcart accepts UPI payments across Google Pay, PhonePe, Paytm, BHIM, and all UPI applications.',
+      supportedPaymentMethods: ['upi'],
     });
   });
 
@@ -710,6 +715,8 @@ export function createApiApp(): express.Express {
         customerName,
         customerEmail,
         customerPhone,
+        flatHouseNumber,
+        buildingApartment,
         houseBuilding,
         streetArea,
         city,
@@ -721,7 +728,7 @@ export function createApiApp(): express.Express {
         shippingSpeed: rawShippingSpeed,
         cartItems = [],
         pricing = {},
-        paymentMethod = 'all_upi',
+        paymentMethod = 'upi',
         transactionReference,
         screenshotBase64,
         screenshotUrl: providedScreenshotUrl,
@@ -779,13 +786,16 @@ export function createApiApp(): express.Express {
         });
       }
 
-      const cleanHouse = typeof houseBuilding === 'string' ? houseBuilding.trim() : '';
+      const cleanFlatHouse = typeof flatHouseNumber === 'string' ? flatHouseNumber.trim() : '';
+      const cleanBuilding = typeof buildingApartment === 'string' ? buildingApartment.trim() : '';
+      const cleanHouseRaw = typeof houseBuilding === 'string' ? houseBuilding.trim() : '';
+      const cleanHouse = cleanHouseRaw || [cleanFlatHouse, cleanBuilding].filter(Boolean).join(', ');
       const cleanStreet = typeof streetArea === 'string' ? streetArea.trim() : '';
       const cleanCity = typeof city === 'string' ? city.trim() : '';
       const cleanState = typeof state === 'string' ? state.trim() : '';
       const cleanPin = String(pinCode || '').replace(/\s+/g, '').trim();
 
-      if (!cleanHouse) return res.status(400).json({ error: 'House or Building name/number is required.' });
+      if (!cleanHouse) return res.status(400).json({ error: 'Flat / House number and Building / Apartment details are required.' });
       if (!cleanStreet) return res.status(400).json({ error: 'Street or Area name is required.' });
       if (!cleanCity) return res.status(400).json({ error: 'City is required.' });
       if (!cleanState) return res.status(400).json({ error: 'State is required.' });
@@ -868,7 +878,7 @@ export function createApiApp(): express.Express {
         qtyByProduct.set(pId, (qtyByProduct.get(pId) || 0) + qty);
       }
 
-      const normalizedPaymentMethod = String(paymentMethod || 'all_upi').trim().toLowerCase();
+      const normalizedPaymentMethod = String(paymentMethod || 'upi').trim().toLowerCase();
       if (!SUPPORTED_UPI_METHODS.has(normalizedPaymentMethod)) {
         return res.status(400).json({
           error: `Unsupported payment method "${normalizedPaymentMethod}". Shopcart accepts UPI payments only.`,
@@ -1183,10 +1193,12 @@ export function createApiApp(): express.Express {
         fullName: cleanCustomerName,
         phone: cleanPhone,
         email: cleanCustomerEmail,
+        flatHouseNumber: cleanFlatHouse || undefined,
+        buildingApartment: cleanBuilding || undefined,
         houseBuilding: cleanHouse,
         streetArea: cleanStreet,
         street: `${cleanHouse}, ${cleanStreet}`,
-        apartment: cleanHouse,
+        apartment: cleanBuilding || cleanHouse,
         city: cleanCity,
         state: cleanState,
         postalCode: cleanPin,
@@ -3480,6 +3492,895 @@ export function createApiApp(): express.Express {
       });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err.message || 'Failed to save configuration' });
+    }
+  });
+
+  // ===========================================================================
+  // DEMO & PROMOTIONAL VIDEOS + PERSISTENT LIKES API
+  // ===========================================================================
+  const isSafeMediaUrl = (rawUrl: string): boolean => {
+    const trimmed = String(rawUrl || '').trim();
+    if (!trimmed) return false;
+    if (trimmed.startsWith('/')) return true;
+    try {
+      const parsed = new URL(trimmed);
+      return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+    } catch {
+      return false;
+    }
+  };
+
+  app.get('/api/videos', async (req: Request, res: Response) => {
+    try {
+      const db = supabaseAdmin || supabaseAnon;
+      if (!db) {
+        return res.json({ videos: [] });
+      }
+
+      let viewerUserId: string | null = null;
+      if (req.headers.authorization) {
+        const authCheck = await verifySupabaseBearerToken(req);
+        if (authCheck.user && !authCheck.errorStatus) {
+          viewerUserId = authCheck.user.id;
+        }
+      }
+
+      const { data: videoRows, error: vidErr } = await db
+        .from('videos')
+        .select('*')
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
+
+      if (vidErr) {
+        // Gracefully handle table not yet migrated in live DB (42P01 or PostgREST PGRST205 schema cache)
+        const errCode = String(vidErr.code || '');
+        const errMsg = String(vidErr.message || '').toLowerCase();
+        if (errCode === '42P01' || errCode === 'PGRST205' || errMsg.includes('relation') || errMsg.includes('schema cache')) {
+          return res.json({ videos: [], migrationPending: true });
+        }
+        return res.status(400).json({ error: vidErr.message });
+      }
+
+      const videosList = videoRows || [];
+      const videoIds = videosList.map((v: any) => v.id);
+      const likedVideoIds = new Set<string>();
+      const likesCountMap = new Map<string, number>();
+
+      if (videoIds.length > 0) {
+        const { data: likesRows } = await db
+          .from('video_likes')
+          .select('video_id, user_id')
+          .in('video_id', videoIds);
+
+        if (Array.isArray(likesRows)) {
+          for (const lr of likesRows) {
+            likesCountMap.set(lr.video_id, (likesCountMap.get(lr.video_id) || 0) + 1);
+            if (viewerUserId && lr.user_id === viewerUserId) {
+              likedVideoIds.add(lr.video_id);
+            }
+          }
+        }
+      }
+
+      const productIds = Array.from(
+        new Set(videosList.map((v: any) => v.product_id).filter(Boolean))
+      ) as string[];
+      const productMap = new Map<string, any>();
+
+      if (productIds.length > 0) {
+        const { data: prodRows } = await db
+          .from('products')
+          .select('id, name, brand, category, price, original_price, image, images, visual_type, accent_color, in_stock')
+          .in('id', productIds);
+        if (Array.isArray(prodRows)) {
+          for (const p of prodRows) {
+            productMap.set(p.id, {
+              id: p.id,
+              name: p.name,
+              brand: p.brand,
+              category: p.category,
+              price: Number(p.price || 0),
+              originalPrice: Number(p.original_price || p.price || 0),
+              image: p.image || p.images?.[0] || null,
+              images: Array.isArray(p.images) ? p.images : p.image ? [p.image] : [],
+              visualType: p.visual_type || 'headphones',
+              accentColor: p.accent_color || '#0b5c37',
+              inStock: p.in_stock !== false,
+            });
+          }
+        }
+      }
+
+      const formatted = videosList.map((v: any) => ({
+        id: v.id,
+        title: v.title,
+        description: v.description || '',
+        videoUrl: v.video_url,
+        thumbnailUrl: v.thumbnail_url || null,
+        productId: v.product_id || null,
+        likesCount: likesCountMap.has(v.id) ? likesCountMap.get(v.id)! : Number(v.likes_count || 0),
+        userHasLiked: likedVideoIds.has(v.id),
+        isActive: v.is_active !== false,
+        createdAt: v.created_at,
+        updatedAt: v.updated_at,
+        product: v.product_id ? productMap.get(v.product_id) || null : null,
+      }));
+
+      return res.json({ videos: formatted });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to load videos' });
+    }
+  });
+
+  app.post('/api/videos/:id/like', async (req: Request, res: Response) => {
+    try {
+      const verification = await verifySupabaseBearerToken(req);
+      if (verification.errorStatus || !verification.user) {
+        return res.status(verification.errorStatus || 401).json({
+          error: 'Sign in required to like demo videos.',
+        });
+      }
+
+      const db = supabaseAdmin || verification.userClient;
+      if (!db) {
+        return res.status(503).json({ error: 'Database client unavailable.' });
+      }
+
+      const videoId = String(req.params.id || '').trim();
+      if (!UUID_REGEX.test(videoId)) {
+        return res.status(400).json({ error: 'Invalid video ID.' });
+      }
+
+      const { data: videoRow, error: videoCheckErr } = await db
+        .from('videos')
+        .select('id, is_active')
+        .eq('id', videoId)
+        .maybeSingle();
+
+      if (videoCheckErr) {
+        return res.status(400).json({ error: videoCheckErr.message });
+      }
+      if (!videoRow || videoRow.is_active === false) {
+        return res.status(404).json({ error: 'Video not found.' });
+      }
+
+      const userId = verification.user.id;
+      const { data: existingLike } = await db
+        .from('video_likes')
+        .select('id')
+        .eq('video_id', videoId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      let liked = false;
+      if (existingLike?.id) {
+        const { error: delErr } = await db
+          .from('video_likes')
+          .delete()
+          .eq('video_id', videoId)
+          .eq('user_id', userId);
+        if (delErr) {
+          return res.status(400).json({ error: delErr.message });
+        }
+        liked = false;
+      } else {
+        const { error: insErr } = await db
+          .from('video_likes')
+          .upsert({ video_id: videoId, user_id: userId }, { onConflict: 'video_id,user_id', ignoreDuplicates: true });
+        if (insErr) {
+          return res.status(400).json({ error: insErr.message });
+        }
+        liked = true;
+      }
+
+      const { count: realCount } = await db
+        .from('video_likes')
+        .select('*', { count: 'exact', head: true })
+        .eq('video_id', videoId);
+
+      const finalCount = typeof realCount === 'number' ? realCount : 0;
+      if (supabaseAdmin) {
+        await supabaseAdmin
+          .from('videos')
+          .update({ likes_count: finalCount, updated_at: new Date().toISOString() })
+          .eq('id', videoId);
+      }
+
+      return res.json({
+        success: true,
+        videoId,
+        liked,
+        likesCount: finalCount,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to update video like' });
+    }
+  });
+
+  app.get('/api/admin/videos', async (req: Request, res: Response) => {
+    try {
+      const db = (req as any).adminSupabase || supabaseAdmin;
+      if (!db) return res.status(503).json({ error: 'Database unavailable' });
+
+      const { data, error } = await db
+        .from('videos')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        const errCode = String(error.code || '');
+        const errMsg = String(error.message || '').toLowerCase();
+        if (errCode === '42P01' || errCode === 'PGRST205' || errMsg.includes('relation') || errMsg.includes('schema cache')) {
+          return res.json({ videos: [], migrationPending: true });
+        }
+        return res.status(400).json({ error: error.message });
+      }
+
+      return res.json({
+        videos: (data || []).map((v: any) => ({
+          id: v.id,
+          title: v.title,
+          description: v.description || '',
+          videoUrl: v.video_url,
+          thumbnailUrl: v.thumbnail_url || null,
+          productId: v.product_id || null,
+          likesCount: Number(v.likes_count || 0),
+          userHasLiked: false,
+          isActive: v.is_active !== false,
+          createdAt: v.created_at,
+          updatedAt: v.updated_at,
+        })),
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to load admin videos' });
+    }
+  });
+
+  app.post('/api/admin/videos', async (req: Request, res: Response) => {
+    try {
+      const db = (req as any).adminSupabase || supabaseAdmin;
+      if (!db) return res.status(503).json({ error: 'Database unavailable' });
+
+      const { title, description = '', videoUrl, thumbnailUrl = null, productId = null, isActive = true } = req.body || {};
+      const cleanTitle = typeof title === 'string' ? title.trim() : '';
+      const cleanVideoUrl = typeof videoUrl === 'string' ? videoUrl.trim() : '';
+      const cleanThumbUrl = typeof thumbnailUrl === 'string' && thumbnailUrl.trim() ? thumbnailUrl.trim() : null;
+      const cleanProductId = typeof productId === 'string' && productId.trim() ? productId.trim() : null;
+
+      if (!cleanTitle) {
+        return res.status(400).json({ error: 'Video title is required.' });
+      }
+      if (!isSafeMediaUrl(cleanVideoUrl)) {
+        return res.status(400).json({ error: 'A valid HTTP(S) video URL or uploaded video path is required.' });
+      }
+      if (cleanThumbUrl && !isSafeMediaUrl(cleanThumbUrl)) {
+        return res.status(400).json({ error: 'Invalid thumbnail URL format.' });
+      }
+
+      const { data, error } = await db
+        .from('videos')
+        .insert({
+          title: cleanTitle,
+          description: typeof description === 'string' ? description.trim() : '',
+          video_url: cleanVideoUrl,
+          thumbnail_url: cleanThumbUrl,
+          product_id: cleanProductId,
+          is_active: isActive !== false,
+          created_by: (req as any).adminUser?.id || null,
+        })
+        .select('*')
+        .single();
+
+      if (error) {
+        return res.status(400).json({ error: error.message });
+      }
+
+      return res.status(201).json({
+        success: true,
+        video: {
+          id: data.id,
+          title: data.title,
+          description: data.description || '',
+          videoUrl: data.video_url,
+          thumbnailUrl: data.thumbnail_url || null,
+          productId: data.product_id || null,
+          likesCount: Number(data.likes_count || 0),
+          userHasLiked: false,
+          isActive: data.is_active !== false,
+          createdAt: data.created_at,
+        },
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to create video' });
+    }
+  });
+
+  app.patch('/api/admin/videos/:id', async (req: Request, res: Response) => {
+    try {
+      const db = (req as any).adminSupabase || supabaseAdmin;
+      if (!db) return res.status(503).json({ error: 'Database unavailable' });
+
+      const videoId = String(req.params.id || '').trim();
+      if (!UUID_REGEX.test(videoId)) {
+        return res.status(400).json({ error: 'Invalid video ID.' });
+      }
+
+      const updates: Record<string, any> = { updated_at: new Date().toISOString() };
+      const { title, description, videoUrl, thumbnailUrl, productId, isActive } = req.body || {};
+
+      if (title !== undefined) {
+        const cleanTitle = String(title).trim();
+        if (!cleanTitle) return res.status(400).json({ error: 'Title cannot be empty.' });
+        updates.title = cleanTitle;
+      }
+      if (description !== undefined) updates.description = String(description || '').trim();
+      if (videoUrl !== undefined) {
+        const cleanVideoUrl = String(videoUrl).trim();
+        if (!isSafeMediaUrl(cleanVideoUrl)) return res.status(400).json({ error: 'Invalid video URL.' });
+        updates.video_url = cleanVideoUrl;
+      }
+      if (thumbnailUrl !== undefined) {
+        const cleanThumb = thumbnailUrl ? String(thumbnailUrl).trim() : null;
+        if (cleanThumb && !isSafeMediaUrl(cleanThumb)) return res.status(400).json({ error: 'Invalid thumbnail URL.' });
+        updates.thumbnail_url = cleanThumb;
+      }
+      if (productId !== undefined) updates.product_id = productId ? String(productId).trim() : null;
+      if (isActive !== undefined) updates.is_active = Boolean(isActive);
+
+      const { data, error } = await db
+        .from('videos')
+        .update(updates)
+        .eq('id', videoId)
+        .select('*')
+        .single();
+
+      if (error) return res.status(400).json({ error: error.message });
+
+      return res.json({
+        success: true,
+        video: {
+          id: data.id,
+          title: data.title,
+          description: data.description || '',
+          videoUrl: data.video_url,
+          thumbnailUrl: data.thumbnail_url || null,
+          productId: data.product_id || null,
+          likesCount: Number(data.likes_count || 0),
+          userHasLiked: false,
+          isActive: data.is_active !== false,
+          createdAt: data.created_at,
+        },
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to update video' });
+    }
+  });
+
+  app.delete('/api/admin/videos/:id', async (req: Request, res: Response) => {
+    try {
+      const db = (req as any).adminSupabase || supabaseAdmin;
+      if (!db) return res.status(503).json({ error: 'Database unavailable' });
+
+      const videoId = String(req.params.id || '').trim();
+      if (!UUID_REGEX.test(videoId)) {
+        return res.status(400).json({ error: 'Invalid video ID.' });
+      }
+
+      const { error } = await db.from('videos').delete().eq('id', videoId);
+      if (error) return res.status(400).json({ error: error.message });
+
+      return res.json({ success: true, id: videoId });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to delete video' });
+    }
+  });
+
+  app.post('/api/admin/videos/upload', async (req: Request, res: Response) => {
+    try {
+      const db = (req as any).adminSupabase || supabaseAdmin;
+      if (!db) return res.status(503).json({ error: 'Database storage client unavailable.' });
+
+      const { fileName = 'demo-video.mp4', mimeType = 'video/mp4', base64Data } = req.body || {};
+      if (!base64Data || typeof base64Data !== 'string') {
+        return res.status(400).json({ error: 'Missing video base64 payload.' });
+      }
+
+      const allowedMimes = new Set(['video/mp4', 'video/webm', 'video/quicktime']);
+      const normalizedMime = String(mimeType).toLowerCase();
+      if (!allowedMimes.has(normalizedMime)) {
+        return res.status(400).json({ error: 'Unsupported video format. Allowed: MP4, WebM, QuickTime.' });
+      }
+
+      const cleanBase64 = base64Data.replace(/^data:video\/[a-zA-Z0-9+.-]+;base64,/i, '');
+      const buffer = Buffer.from(cleanBase64, 'base64');
+      const ext = normalizedMime.includes('webm') ? 'webm' : normalizedMime.includes('quicktime') ? 'mov' : 'mp4';
+      const safeSlug = String(fileName).replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 48);
+      const storagePath = `demos/${Date.now()}-${safeSlug}.${ext}`;
+
+      const { error: uploadErr } = await db.storage
+        .from('product-videos')
+        .upload(storagePath, buffer, {
+          contentType: normalizedMime,
+          upsert: false,
+        });
+
+      if (uploadErr) {
+        return res.status(400).json({ error: uploadErr.message });
+      }
+
+      const { data: pubUrl } = db.storage.from('product-videos').getPublicUrl(storagePath);
+      return res.json({
+        success: true,
+        url: pubUrl.publicUrl,
+        storagePath,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to upload video file' });
+    }
+  });
+
+  // ===========================================================================
+  // VERIFIED-PURCHASE PRODUCT REVIEWS & ADMIN MODERATION API
+  // ===========================================================================
+  async function recalculateProductRatingSummary(db: any, productId: string) {
+    try {
+      const { data: approvedRows } = await db
+        .from('reviews')
+        .select('rating, moderation_status')
+        .eq('product_id', productId);
+
+      const eligibleRows = (approvedRows || []).filter(
+        (r: any) => !r.moderation_status || r.moderation_status === 'approved'
+      );
+      const count = eligibleRows.length;
+      const avg =
+        count > 0
+          ? Number(
+              (
+                eligibleRows.reduce((acc: number, r: any) => acc + Number(r.rating || 0), 0) / count
+              ).toFixed(1)
+            )
+          : 0;
+
+      if (supabaseAdmin) {
+        await supabaseAdmin
+          .from('products')
+          .update({ rating: avg, reviews_count: count })
+          .eq('id', productId);
+      }
+      return { rating: avg, reviewsCount: count };
+    } catch {
+      return null;
+    }
+  }
+
+  async function checkUserVerifiedProductPurchase(
+    db: any,
+    userId: string,
+    productId: string
+  ): Promise<{ eligible: boolean; orderId: string | null }> {
+    const { data: userOrders, error: ordErr } = await db
+      .from('orders')
+      .select('id, status, payment_status')
+      .eq('user_id', userId)
+      .not('status', 'in', '(cancelled,refunded)');
+
+    if (ordErr || !Array.isArray(userOrders) || userOrders.length === 0) {
+      return { eligible: false, orderId: null };
+    }
+
+    const validOrderIds = userOrders
+      .filter((o: any) => o.status === 'delivered' || o.payment_status === 'verified')
+      .map((o: any) => o.id);
+
+    if (validOrderIds.length === 0) {
+      return { eligible: false, orderId: null };
+    }
+
+    const { data: matchingItems } = await db
+      .from('order_items')
+      .select('order_id')
+      .in('order_id', validOrderIds)
+      .eq('product_id', productId)
+      .limit(1);
+
+    if (Array.isArray(matchingItems) && matchingItems.length > 0) {
+      return { eligible: true, orderId: matchingItems[0].order_id };
+    }
+    return { eligible: false, orderId: null };
+  }
+
+  const formatReviewRow = (row: any) => ({
+    id: row.id,
+    productId: row.product_id,
+    userId: row.user_id || undefined,
+    orderId: row.order_id || null,
+    author: row.author_name || 'Customer',
+    rating: Number(row.rating || 5),
+    date: row.created_at,
+    title: row.title || '',
+    comment: row.comment || '',
+    verified: row.verified_purchase !== false,
+    helpful: Number(row.helpful_votes || 0),
+    moderationStatus: row.moderation_status || 'approved',
+    updatedAt: row.updated_at || row.created_at,
+  });
+
+  app.get('/api/products/:productId/reviews', async (req: Request, res: Response) => {
+    try {
+      const productId = String(req.params.productId || '').trim();
+      if (!productId) {
+        return res.status(400).json({ error: 'Product ID is required.' });
+      }
+
+      const db = supabaseAdmin || supabaseAnon;
+      if (!db) {
+        return res.json({
+          reviews: [],
+          eligibility: { canReview: false, hasPurchased: false, reason: 'auth_required' },
+        });
+      }
+
+      let viewerUser: any = null;
+      let viewerClient: any = null;
+      if (req.headers.authorization) {
+        const authCheck = await verifySupabaseBearerToken(req);
+        if (authCheck.user && !authCheck.errorStatus) {
+          viewerUser = authCheck.user;
+          viewerClient = authCheck.userClient;
+        }
+      }
+
+      const { data: reviewRows, error: revErr } = await db
+        .from('reviews')
+        .select('*')
+        .eq('product_id', productId)
+        .order('created_at', { ascending: false });
+
+      if (revErr) {
+        const errCode = String(revErr.code || '');
+        const errMsg = String(revErr.message || '').toLowerCase();
+        if (errCode === '42P01' || errCode === 'PGRST205' || errMsg.includes('relation') || errMsg.includes('schema cache')) {
+          return res.json({
+            reviews: [],
+            eligibility: { canReview: false, hasPurchased: false, reason: 'auth_required' },
+            migrationPending: true,
+          });
+        }
+        return res.status(400).json({ error: revErr.message });
+      }
+
+      const visibleReviews = (reviewRows || [])
+        .filter((r: any) => !r.moderation_status || r.moderation_status === 'approved' || (viewerUser && r.user_id === viewerUser.id))
+        .map(formatReviewRow);
+
+      let eligibility: {
+        canReview: boolean;
+        hasPurchased: boolean;
+        reason?: string;
+        existingReview?: any;
+      } = {
+        canReview: false,
+        hasPurchased: false,
+        reason: viewerUser ? 'not_purchased' : 'auth_required',
+        existingReview: null,
+      };
+
+      if (viewerUser) {
+        const existingRow = (reviewRows || []).find((r: any) => r.user_id === viewerUser.id);
+        const purchaseDb = supabaseAdmin || viewerClient || db;
+        const purchaseCheck = await checkUserVerifiedProductPurchase(purchaseDb, viewerUser.id, productId);
+        eligibility = {
+          canReview: purchaseCheck.eligible,
+          hasPurchased: purchaseCheck.eligible,
+          reason: purchaseCheck.eligible ? 'eligible' : 'not_purchased',
+          existingReview: existingRow ? formatReviewRow(existingRow) : null,
+        };
+      }
+
+      return res.json({
+        reviews: visibleReviews,
+        eligibility,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to load product reviews' });
+    }
+  });
+
+  app.post('/api/reviews', async (req: Request, res: Response) => {
+    try {
+      const verification = await verifySupabaseBearerToken(req);
+      if (verification.errorStatus || !verification.user) {
+        return res.status(verification.errorStatus || 401).json({
+          error: 'Please sign in to submit a verified product review.',
+        });
+      }
+
+      const db = supabaseAdmin || verification.userClient;
+      if (!db) return res.status(503).json({ error: 'Database client unavailable.' });
+
+      const { productId, rating, title = '', comment } = req.body || {};
+      const cleanProductId = typeof productId === 'string' ? productId.trim() : '';
+      const numericRating = Number(rating);
+      const cleanTitle = typeof title === 'string' ? title.trim() : '';
+      const cleanComment = typeof comment === 'string' ? comment.trim() : '';
+
+      if (!cleanProductId) {
+        return res.status(400).json({ error: 'Product ID is required.' });
+      }
+      if (!Number.isInteger(numericRating) || numericRating < 1 || numericRating > 5) {
+        return res.status(400).json({ error: 'Rating must be an integer between 1 and 5.' });
+      }
+      if (!cleanComment || cleanComment.length < 5) {
+        return res.status(400).json({ error: 'Please write at least 5 characters for your review.' });
+      }
+
+      const purchaseCheck = await checkUserVerifiedProductPurchase(db, verification.user.id, cleanProductId);
+      if (!purchaseCheck.eligible) {
+        return res.status(403).json({
+          error: 'Only customers who have a verified purchase or delivered order for this product can submit a review.',
+        });
+      }
+
+      const { data: existingReview } = await db
+        .from('reviews')
+        .select('id')
+        .eq('product_id', cleanProductId)
+        .eq('user_id', verification.user.id)
+        .maybeSingle();
+
+      if (existingReview?.id) {
+        return res.status(409).json({
+          error: 'You have already reviewed this product. Please edit your existing review instead.',
+        });
+      }
+
+      const authorName =
+        verification.profile?.full_name ||
+        verification.user.user_metadata?.full_name ||
+        verification.user.email?.split('@')[0] ||
+        'Verified Customer';
+
+      const insertPayload: Record<string, any> = {
+        product_id: cleanProductId,
+        user_id: verification.user.id,
+        order_id: purchaseCheck.orderId,
+        author_name: authorName,
+        author_email: verification.user.email || null,
+        rating: numericRating,
+        title: cleanTitle || 'Verified Buyer Review',
+        comment: cleanComment,
+        verified_purchase: true,
+        helpful_votes: 0,
+        moderation_status: 'approved',
+      };
+
+      let { data: inserted, error: insErr } = await db
+        .from('reviews')
+        .insert(insertPayload)
+        .select('*')
+        .single();
+
+      // Fallback if upgrade_migration columns haven't been executed yet
+      if (insErr && (insErr.message?.includes('moderation_status') || insErr.message?.includes('order_id'))) {
+        delete insertPayload.moderation_status;
+        delete insertPayload.order_id;
+        const retry = await db.from('reviews').insert(insertPayload).select('*').single();
+        inserted = retry.data;
+        insErr = retry.error;
+      }
+
+      if (insErr || !inserted) {
+        if (insErr?.code === '23505') {
+          return res.status(409).json({
+            error: 'You have already reviewed this product. Please edit your existing review instead.',
+          });
+        }
+        return res.status(400).json({ error: insErr?.message || 'Failed to save review.' });
+      }
+
+      const summary = await recalculateProductRatingSummary(db, cleanProductId);
+      return res.status(201).json({
+        success: true,
+        review: formatReviewRow(inserted),
+        summary,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to submit review' });
+    }
+  });
+
+  app.patch('/api/reviews/:reviewId', async (req: Request, res: Response) => {
+    try {
+      const verification = await verifySupabaseBearerToken(req);
+      if (verification.errorStatus || !verification.user) {
+        return res.status(verification.errorStatus || 401).json({
+          error: 'Sign in required to edit your review.',
+        });
+      }
+
+      const db = supabaseAdmin || verification.userClient;
+      if (!db) return res.status(503).json({ error: 'Database client unavailable.' });
+
+      const reviewId = String(req.params.reviewId || '').trim();
+      if (!UUID_REGEX.test(reviewId)) {
+        return res.status(400).json({ error: 'Invalid review ID.' });
+      }
+
+      const { data: existing, error: fetchErr } = await db
+        .from('reviews')
+        .select('*')
+        .eq('id', reviewId)
+        .maybeSingle();
+
+      if (fetchErr || !existing) {
+        return res.status(404).json({ error: 'Review not found.' });
+      }
+
+      const isAdminRole = String(verification.profile?.role || '').trim().toLowerCase() === 'admin';
+      if (existing.user_id !== verification.user.id && !isAdminRole) {
+        return res.status(403).json({ error: 'You can only edit your own reviews.' });
+      }
+
+      const updates: Record<string, any> = { updated_at: new Date().toISOString() };
+      if (req.body?.rating !== undefined) {
+        const numericRating = Number(req.body.rating);
+        if (!Number.isInteger(numericRating) || numericRating < 1 || numericRating > 5) {
+          return res.status(400).json({ error: 'Rating must be between 1 and 5.' });
+        }
+        updates.rating = numericRating;
+      }
+      if (req.body?.title !== undefined) updates.title = String(req.body.title || '').trim();
+      if (req.body?.comment !== undefined) {
+        const cleanComment = String(req.body.comment || '').trim();
+        if (cleanComment.length < 5) {
+          return res.status(400).json({ error: 'Review comment must be at least 5 characters.' });
+        }
+        updates.comment = cleanComment;
+      }
+
+      const { data: updated, error: updErr } = await db
+        .from('reviews')
+        .update(updates)
+        .eq('id', reviewId)
+        .select('*')
+        .single();
+
+      if (updErr || !updated) {
+        return res.status(400).json({ error: updErr?.message || 'Failed to update review.' });
+      }
+
+      const summary = await recalculateProductRatingSummary(db, updated.product_id);
+      return res.json({
+        success: true,
+        review: formatReviewRow(updated),
+        summary,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to update review' });
+    }
+  });
+
+  app.post('/api/reviews/:reviewId/helpful', async (req: Request, res: Response) => {
+    try {
+      const reviewId = String(req.params.reviewId || '').trim();
+      if (!UUID_REGEX.test(reviewId)) {
+        return res.status(400).json({ error: 'Invalid review ID.' });
+      }
+      const db = supabaseAdmin || supabaseAnon;
+      if (!db) return res.status(503).json({ error: 'Database unavailable' });
+
+      const { data: existing, error: fetchErr } = await db
+        .from('reviews')
+        .select('id, helpful_votes')
+        .eq('id', reviewId)
+        .maybeSingle();
+
+      if (fetchErr || !existing) {
+        return res.status(404).json({ error: 'Review not found.' });
+      }
+
+      const nextCount = Number(existing.helpful_votes || 0) + 1;
+      if (supabaseAdmin) {
+        await supabaseAdmin
+          .from('reviews')
+          .update({ helpful_votes: nextCount })
+          .eq('id', reviewId);
+      }
+
+      return res.json({ success: true, reviewId, newCount: nextCount });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to record helpful vote' });
+    }
+  });
+
+  app.get('/api/admin/reviews', async (req: Request, res: Response) => {
+    try {
+      const db = (req as any).adminSupabase || supabaseAdmin;
+      if (!db) return res.status(503).json({ error: 'Database unavailable' });
+
+      const { data, error } = await db
+        .from('reviews')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        const errCode = String(error.code || '');
+        const errMsg = String(error.message || '').toLowerCase();
+        if (errCode === '42P01' || errCode === 'PGRST205' || errMsg.includes('relation') || errMsg.includes('schema cache')) {
+          return res.json({ reviews: [], migrationPending: true });
+        }
+        return res.status(400).json({ error: error.message });
+      }
+
+      const reviews = (data || []).map(formatReviewRow);
+      return res.json({ reviews });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to load reviews' });
+    }
+  });
+
+  app.patch('/api/admin/reviews/:reviewId', async (req: Request, res: Response) => {
+    try {
+      const db = (req as any).adminSupabase || supabaseAdmin;
+      if (!db) return res.status(503).json({ error: 'Database unavailable' });
+
+      const reviewId = String(req.params.reviewId || '').trim();
+      if (!UUID_REGEX.test(reviewId)) {
+        return res.status(400).json({ error: 'Invalid review ID.' });
+      }
+
+      const moderationStatus = String(req.body?.moderationStatus || '').trim().toLowerCase();
+      if (!['approved', 'hidden', 'rejected', 'pending'].includes(moderationStatus)) {
+        return res.status(400).json({ error: 'Invalid moderation status.' });
+      }
+
+      const { data, error } = await db
+        .from('reviews')
+        .update({
+          moderation_status: moderationStatus,
+          moderated_by: (req as any).adminUser?.id || null,
+          moderated_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', reviewId)
+        .select('*')
+        .single();
+
+      if (error) return res.status(400).json({ error: error.message });
+
+      await recalculateProductRatingSummary(db, data.product_id);
+      return res.json({ success: true, review: formatReviewRow(data) });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to moderate review' });
+    }
+  });
+
+  app.delete('/api/admin/reviews/:reviewId', async (req: Request, res: Response) => {
+    try {
+      const db = (req as any).adminSupabase || supabaseAdmin;
+      if (!db) return res.status(503).json({ error: 'Database unavailable' });
+
+      const reviewId = String(req.params.reviewId || '').trim();
+      if (!UUID_REGEX.test(reviewId)) {
+        return res.status(400).json({ error: 'Invalid review ID.' });
+      }
+
+      const { data: existing } = await db
+        .from('reviews')
+        .select('product_id')
+        .eq('id', reviewId)
+        .maybeSingle();
+
+      const { error } = await db.from('reviews').delete().eq('id', reviewId);
+      if (error) return res.status(400).json({ error: error.message });
+
+      if (existing?.product_id) {
+        await recalculateProductRatingSummary(db, existing.product_id);
+      }
+      return res.json({ success: true, id: reviewId });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Failed to delete review' });
     }
   });
 

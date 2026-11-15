@@ -14,6 +14,7 @@ import {
 import { PageView } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { useLanguage } from '../context/LanguageContext';
 
 interface LoginPageProps {
   onNavigate: (page: PageView) => void;
@@ -22,6 +23,7 @@ interface LoginPageProps {
 export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
   const { login, forgotPassword, resendVerificationEmail, isSupabaseBackend } = useAuth();
   const { showToast } = useToast();
+  const { t } = useLanguage();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -125,7 +127,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
           </div>
 
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900">
-            {isForgotPasswordMode ? 'Reset Your Password' : 'Sign in to Shop Cart'}
+            {isForgotPasswordMode ? 'Reset Your Password' : t.common.signIn}
           </h1>
           <p className="text-xs text-slate-500 leading-relaxed px-1">
             {isForgotPasswordMode
@@ -320,10 +322,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
               className="w-full min-h-[46px] py-3 bg-[#0b5c37] hover:bg-[#08482b] text-white font-bold text-sm rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98]"
             >
               {isLoading ? (
-                <span>Signing In...</span>
+                <span>{t.common.loading}</span>
               ) : (
                 <>
-                  <span>Sign In</span>
+                  <span>{t.common.signIn}</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
@@ -333,12 +335,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
 
         {/* Register footer link */}
         <div className="pt-4 border-t border-slate-100 text-center text-xs text-slate-500">
-          Don&apos;t have a Shop Cart account?{' '}
+          {t.nav.newCustomer}{' '}
           <button
             onClick={() => onNavigate('register')}
             className="text-[#0b5c37] font-bold hover:underline ml-1 cursor-pointer py-1 inline-block"
           >
-            Create an Account
+            {t.common.createAccount}
           </button>
         </div>
 

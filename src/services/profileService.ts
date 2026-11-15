@@ -1,5 +1,11 @@
-import { User, SavedAddress } from '../types';
+import { User, SavedAddress, SupportedLanguage } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+
+function normalizeLang(val: any): SupportedLanguage {
+  const s = String(val || '').trim().toLowerCase();
+  if (s === 'ml' || s === 'hi') return s;
+  return 'en';
+}
 
 export async function fetchCustomerProfile(userId: string): Promise<User | null> {
   if (!isSupabaseConfigured() || !userId) return null;
@@ -20,7 +26,7 @@ export async function fetchCustomerProfile(userId: string): Promise<User | null>
 
     if (Array.isArray(data.saved_addresses)) {
       savedAddrs = data.saved_addresses;
-    } else if (addr && (addr.houseBuilding || addr.street || addr.streetArea)) {
+    } else if (addr && (addr.houseBuilding || addr.flatHouseNumber || addr.buildingApartment || addr.street || addr.streetArea)) {
       // Synthesize default saved address from primary address
       savedAddrs = [
         {
@@ -31,7 +37,9 @@ export async function fetchCustomerProfile(userId: string): Promise<User | null>
           phone: data.phone || addr.phone || '',
           email: data.email,
           country: addr.country || 'India',
-          houseBuilding: addr.houseBuilding || addr.apartment || addr.street || '',
+          flatHouseNumber: addr.flatHouseNumber || '',
+          buildingApartment: addr.buildingApartment || '',
+          houseBuilding: addr.houseBuilding || [addr.flatHouseNumber, addr.buildingApartment].filter(Boolean).join(', ') || addr.apartment || addr.street || '',
           streetArea: addr.streetArea || addr.street || '',
           landmark: addr.landmark || '',
           city: addr.city || '',
@@ -67,6 +75,7 @@ export async function fetchCustomerProfile(userId: string): Promise<User | null>
         : undefined,
       shippingAddress: primaryShippingAddress,
       savedAddresses: savedAddrs,
+      preferredLanguage: data.preferred_language ? normalizeLang(data.preferred_language) : undefined,
     };
   } catch (err) {
     console.warn('Error fetching customer profile:', err);
@@ -112,6 +121,9 @@ export async function updateCustomerProfile(userId: string, updates: Partial<Use
     if (updates.savedAddresses !== undefined) {
       payload.saved_addresses = updates.savedAddresses;
     }
+    if (updates.preferredLanguage !== undefined) {
+      payload.preferred_language = normalizeLang(updates.preferredLanguage);
+    }
 
     const { error } = await supabase
       .from('profiles')
@@ -119,6 +131,12 @@ export async function updateCustomerProfile(userId: string, updates: Partial<Use
       .eq('id', userId);
 
     if (error) {
+      // If preferred_language column has not yet been migrated on live DB, retry without it so other profile fields still persist
+      if (updates.preferredLanguage !== undefined && error.message?.includes('preferred_language')) {
+        delete payload.preferred_language;
+        const { error: retryErr } = await supabase.from('profiles').update(payload).eq('id', userId);
+        if (!retryErr) return true;
+      }
       console.warn('Failed to update customer profile in Supabase:', error.message);
       return false;
     }

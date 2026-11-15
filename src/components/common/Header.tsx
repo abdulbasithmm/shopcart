@@ -18,12 +18,14 @@ import {
 } from 'lucide-react';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { PageView, Product } from '../../types';
 import { PRODUCTS, CATEGORIES } from '../../data/mockData';
 import { fetchProducts } from '../../services/productService';
 import { AmazonLogo } from './AmazonLogo';
 import { formatPrice } from '../../utils/format';
 import { PWAInstallButton } from './PWAInstallButton';
+import { LanguageSwitcher } from '../navigation/LanguageSwitcher';
 
 interface HeaderProps {
   currentPage: PageView;
@@ -38,18 +40,29 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const { cartCount, setIsCartDrawerOpen, wishlist } = useCart();
   const { user, isAuthenticated, logout } = useAuth();
+  const { t } = useLanguage();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-  const [isLangMenuOpen, setIsLangMenuOpen] = useState(false);
+  const [isScrolledPastTop, setIsScrolledPastTop] = useState(false);
   const [catalogProducts, setCatalogProducts] = useState<Product[]>(PRODUCTS);
 
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
-  const langMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const updateScroll = () => {
+      if (typeof window !== 'undefined') {
+        setIsScrolledPastTop(window.scrollY > 48);
+      }
+    };
+    updateScroll();
+    window.addEventListener('scroll', updateScroll, { passive: true });
+    return () => window.removeEventListener('scroll', updateScroll);
+  }, [currentPage]);
 
   useEffect(() => {
     let mounted = true;
@@ -73,9 +86,6 @@ export const Header: React.FC<HeaderProps> = ({
       if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
         setIsUserMenuOpen(false);
       }
-      if (langMenuRef.current && !langMenuRef.current.contains(e.target as Node)) {
-        setIsLangMenuOpen(false);
-      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -97,27 +107,39 @@ export const Header: React.FC<HeaderProps> = ({
       ).slice(0, 5)
     : [];
 
+  const isHomePage = currentPage === 'home';
+  const showFloatingHomeHeader = !isHomePage || isScrolledPastTop || isMobileMenuOpen || isSearchFocused;
+
   return (
-    <header className="sticky top-0 z-40 bg-white border-b border-slate-200">
-      {/* 1. TOP ANNOUNCEMENT BAR (DARK GREEN MATCHING SCREENSHOT) */}
+    <header
+      className={
+        isHomePage
+          ? `fixed top-0 left-0 right-0 z-40 bg-white border-b border-slate-200 transition-all duration-300 ease-out ${
+              showFloatingHomeHeader
+                ? 'translate-y-0 opacity-100 shadow-sm'
+                : '-translate-y-full opacity-0 pointer-events-none'
+            }`
+          : 'sticky top-0 z-40 bg-white border-b border-slate-200'
+      }
+    >
+      {/* 1. TOP ANNOUNCEMENT BAR */}
       <div className="bg-[#093d22] text-white text-[11px] sm:text-xs py-1.5 sm:py-2 px-3 sm:px-4 font-medium">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-1.5 sm:gap-2">
           <div className="flex items-center gap-1.5 sm:gap-2 overflow-hidden text-ellipsis whitespace-nowrap min-w-0">
-            <span className="text-xs sm:text-sm shrink-0">🌱</span>
             <span className="tracking-wide truncate text-[10px] sm:text-xs">
-              Summer Sale: Up to 50% Off on Top Brands | Limited Time Offer!
+              {t.nav.announcement}
             </span>
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-auto">
             <span className="hidden sm:inline text-[10px] text-emerald-200/90 font-semibold">
-              Free Express Delivery on orders over ₹499
+              {t.nav.freeDeliveryBanner}
             </span>
             <button
               onClick={() => onNavigate('shop')}
               className="px-2.5 sm:px-3.5 py-0.5 sm:py-1 bg-white hover:bg-slate-100 text-[#093d22] text-[10px] sm:text-[11px] font-bold rounded-md shadow-xs transition-colors shrink-0 cursor-pointer"
             >
-              Shop Now
+              {t.common.shopNow}
             </button>
           </div>
         </div>
@@ -174,7 +196,7 @@ export const Header: React.FC<HeaderProps> = ({
                   onChange={(e) => setSelectedCategory(e.target.value)}
                   className="bg-[#f3f4f6] hover:bg-[#e5e7eb] text-xs font-semibold text-slate-700 pl-3 pr-6 py-2.5 rounded-l-md border border-r-0 border-slate-300 focus:outline-none appearance-none cursor-pointer transition-colors"
                 >
-                  <option value="all">All</option>
+                  <option value="all">{t.common.all}</option>
                   <option value="Mobiles">Mobiles</option>
                   <option value="Electronics">Electronics</option>
                   <option value="Fashion">Fashion</option>
@@ -189,7 +211,7 @@ export const Header: React.FC<HeaderProps> = ({
               {/* Search input field */}
               <input
                 type="text"
-                placeholder="Search Shop Cart"
+                placeholder={t.common.searchPlaceholder}
                 value={searchQuery}
                 onChange={(e) => {
                   setSearchQuery(e.target.value);
@@ -244,27 +266,8 @@ export const Header: React.FC<HeaderProps> = ({
             {/* PWA In-App Install Prompt */}
             <PWAInstallButton variant="header" />
 
-            {/* Language / Country Selector: Indian Flag EN */}
-            <div ref={langMenuRef} className="relative hidden lg:block">
-              <button
-                onClick={() => setIsLangMenuOpen(!isLangMenuOpen)}
-                className="flex items-center gap-1.5 p-1.5 hover:bg-slate-100 rounded-md transition-colors cursor-pointer text-xs font-bold"
-              >
-                <span className="text-base" role="img" aria-label="India flag">🇮🇳</span>
-                <span>EN</span>
-                <ChevronDown className="w-3 h-3 text-slate-500" />
-              </button>
-              {isLangMenuOpen && (
-                <div className="absolute right-0 top-full mt-2 w-52 bg-white rounded-xl shadow-xl border border-slate-200 p-3 z-50 text-xs text-slate-700 space-y-1.5">
-                  <div className="font-bold text-slate-900 flex items-center gap-1.5">
-                    <span>🇮🇳</span>
-                    <span>Shopcart India</span>
-                  </div>
-                  <p className="text-[11px] text-slate-500">Language: English (EN)</p>
-                  <p className="text-[11px] text-slate-500">Currency: Indian Rupee (₹ INR)</p>
-                </div>
-              )}
-            </div>
+            {/* Multi-Language Switcher (English / Malayalam / Hindi) */}
+            <LanguageSwitcher variant="header" />
 
             {/* Hello, Sign in / Account & Lists */}
             <div ref={userMenuRef} className="relative">
@@ -273,10 +276,12 @@ export const Header: React.FC<HeaderProps> = ({
                 className="text-left px-2 py-1 hover:bg-slate-100 rounded-md transition-colors cursor-pointer flex flex-col justify-center leading-tight"
               >
                 <span className="text-[10px] text-slate-500 font-normal">
-                  {isAuthenticated && user ? `Hello, ${user.name.split(' ')[0]}` : 'Hello, Sign in'}
+                  {isAuthenticated && user
+                    ? `${t.nav.helloUser}, ${user.name.split(' ')[0]}`
+                    : t.nav.helloSignIn}
                 </span>
                 <span className="text-xs font-bold text-slate-900 flex items-center gap-0.5">
-                  <span>Account &amp; Lists</span>
+                  <span>{t.nav.accountLists}</span>
                   <ChevronDown className="w-3 h-3 text-slate-500" />
                 </span>
               </button>
@@ -377,15 +382,15 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={() => onNavigate(isAuthenticated ? 'account' : 'login')}
               className="hidden sm:flex flex-col text-left px-2 py-1 hover:bg-slate-100 rounded-md transition-colors cursor-pointer leading-tight"
             >
-              <span className="text-[10px] text-slate-500 font-normal">Returns</span>
-              <span className="text-xs font-bold text-slate-900">&amp; Orders</span>
+              <span className="text-[10px] text-slate-500 font-normal">{t.nav.returns}</span>
+              <span className="text-xs font-bold text-slate-900">{t.nav.andOrders}</span>
             </button>
 
             {/* Shopping Cart with Count Badge */}
             <button
               onClick={() => setIsCartDrawerOpen(true)}
               className="flex items-center gap-1 p-2 hover:bg-slate-100 rounded-md transition-colors cursor-pointer relative"
-              aria-label="Shopping Cart"
+              aria-label={t.nav.cart}
             >
               <div className="relative">
                 <ShoppingCart className="w-6 h-6 stroke-[2] text-slate-900" />
@@ -393,13 +398,13 @@ export const Header: React.FC<HeaderProps> = ({
                   {cartCount}
                 </span>
               </div>
-              <span className="text-xs font-bold text-slate-900 hidden sm:inline ml-1">Cart</span>
+              <span className="text-xs font-bold text-slate-900 hidden sm:inline ml-1">{t.nav.cart}</span>
             </button>
           </div>
         </div>
       </div>
 
-      {/* 3. SUB-NAVIGATION STRIP (MATCHING REFERENCE EXACTLY) */}
+      {/* 3. SUB-NAVIGATION STRIP */}
       <div className="bg-[#f8f9fa] border-t border-b border-slate-200/80 px-3 sm:px-6 lg:px-8 py-1.5 text-xs text-slate-700 font-medium overflow-x-auto no-scrollbar touch-pan-x">
         <div className="max-w-7xl mx-auto flex items-center gap-3 sm:gap-6 whitespace-nowrap">
           {/* All menu */}
@@ -408,36 +413,35 @@ export const Header: React.FC<HeaderProps> = ({
             className="flex items-center gap-1.5 font-bold text-slate-900 hover:text-[#0b5c37] transition-colors cursor-pointer py-1"
           >
             <Menu className="w-4 h-4" />
-            <span>All</span>
+            <span>{t.common.all}</span>
           </button>
 
           <button onClick={() => onNavigate('shop', { category: 'Home & Kitchen' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer py-1">
-            Fresh
+            {t.nav.fresh}
           </button>
-          <button onClick={() => onNavigate('shop', { category: 'Electronics' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer py-1">
-            Shop Cart TV
+          <button onClick={() => onNavigate('play')} className="hover:text-[#0b5c37] transition-colors cursor-pointer font-semibold text-[#0b5c37] py-1">
+            {t.nav.play}
           </button>
           <button onClick={() => onNavigate('shop', { query: 'trending' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer font-semibold text-[#0b5c37] py-1">
-            Trending Deals
+            {t.nav.trendingDeals}
           </button>
           <button onClick={() => onNavigate('shop', { query: 'bestseller' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer py-1">
-            Best Sellers
+            {t.nav.bestSellers}
           </button>
           <button onClick={() => onNavigate('shop', { category: 'Mobiles' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer py-1">
-            Mobiles
+            {t.nav.mobiles}
           </button>
           <button onClick={() => onNavigate('shop', { query: 'deal' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer font-semibold text-rose-600 py-1">
-            Today&apos;s Deals
+            {t.nav.todaysDeals}
           </button>
-          <button onClick={() => onNavigate('home')} className="hover:text-[#0b5c37] transition-colors cursor-pointer flex items-center gap-0.5 py-1">
-            <span>Prime</span>
-            <ChevronDown className="w-3 h-3 text-slate-400" />
+          <button onClick={() => onNavigate('categories')} className="hover:text-[#0b5c37] transition-colors cursor-pointer py-1">
+            {t.nav.categories}
           </button>
           <button onClick={() => onNavigate('shop', { query: 'new' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer py-1">
-            New Releases
+            {t.nav.newReleases}
           </button>
           <button onClick={() => onNavigate('contact')} className="hover:text-[#0b5c37] transition-colors cursor-pointer py-1">
-            Customer Service
+            {t.nav.customerService}
           </button>
         </div>
       </div>
@@ -461,8 +465,11 @@ export const Header: React.FC<HeaderProps> = ({
               <PWAInstallButton variant="compact" />
             </div>
 
+            {/* Mobile Language Switcher */}
+            <LanguageSwitcher variant="drawer" />
+
             <div className="space-y-2">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Shop by Category</h4>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">{t.nav.shopByCategory}</h4>
               {CATEGORIES.filter((c) => c.id !== 'all').map((cat) => (
                 <button
                   key={cat.id}
@@ -479,7 +486,7 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
 
             <div className="pt-4 border-t border-slate-200 space-y-2">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Account &amp; Settings</h4>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">{t.nav.accountSettings}</h4>
               {isAuthenticated ? (
                 <>
                   <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200/80 mb-2">

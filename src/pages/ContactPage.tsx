@@ -22,15 +22,12 @@ import {
   Copy,
   AlertCircle,
   X,
-  ThumbsUp,
-  Headphones,
   Zap,
-  CornerDownRight,
-  Filter
 } from 'lucide-react';
-import { PageView, Review } from '../types';
-import { FAQ_ITEMS, TESTIMONIALS } from '../data/mockData';
+import { PageView } from '../types';
+import { FAQ_ITEMS } from '../data/mockData';
 import { useToast } from '../context/ToastContext';
+import { useLanguage } from '../context/LanguageContext';
 import { ScrollReveal } from '../components/common/ScrollReveal';
 
 interface ContactPageProps {
@@ -39,6 +36,7 @@ interface ContactPageProps {
 
 export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
   const { showToast } = useToast();
+  const { t } = useLanguage();
 
   // Official Business Contact Info
   const SUPPORT_PHONE = '+91 9496660968';
@@ -78,16 +76,6 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
   const [liveChatCustomerName, setLiveChatCustomerName] = useState('');
   const [liveChatSent, setLiveChatSent] = useState(false);
   const [liveChatWaUrl, setLiveChatWaUrl] = useState('');
-
-  // Reviews State
-  const [reviewsList, setReviewsList] = useState<Review[]>(TESTIMONIALS);
-  const [reviewFilter, setReviewFilter] = useState<'all' | '5' | '4'>('all');
-  const [isWriteReviewOpen, setIsWriteReviewOpen] = useState(false);
-  const [newReviewAuthor, setNewReviewAuthor] = useState('');
-  const [newReviewRating, setNewReviewRating] = useState(5);
-  const [newReviewTitle, setNewReviewTitle] = useState('');
-  const [newReviewComment, setNewReviewComment] = useState('');
-  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
 
   // Clipboard Copy State
   const [copiedPhone, setCopiedPhone] = useState(false);
@@ -224,64 +212,28 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
     showToast('Live chat message prepared! Click Open WhatsApp Support Desk below.', 'success');
   };
 
-  const handleReviewSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newReviewAuthor.trim() || !newReviewTitle.trim() || !newReviewComment.trim()) {
-      showToast('Please fill out all review fields', 'error');
-      return;
-    }
-
-    setIsSubmittingReview(true);
-    setTimeout(() => {
-      const createdReview: Review = {
-        id: `rev-${Date.now()}`,
-        productId: 'deal-prod-1',
-        author: newReviewAuthor.trim(),
-        rating: newReviewRating,
-        date: new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
-        title: newReviewTitle.trim(),
-        comment: newReviewComment.trim(),
-        verified: true,
-      };
-
-      setReviewsList([createdReview, ...reviewsList]);
-      setIsSubmittingReview(false);
-      setIsWriteReviewOpen(false);
-      setNewReviewAuthor('');
-      setNewReviewTitle('');
-      setNewReviewComment('');
-      showToast('Thank you! Your verified customer review has been published.', 'success');
-    }, 400);
-  };
-
-  const filteredReviews = useMemo(() => {
-    if (reviewFilter === 'all') return reviewsList;
-    return reviewsList.filter((r) => r.rating === Number(reviewFilter));
-  }, [reviewsList, reviewFilter]);
-
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-12">
       {/* Breadcrumb Navigation */}
       <nav className="flex items-center gap-2 text-xs text-slate-500">
         <button onClick={() => onNavigate('home')} className="hover:text-[#0b5c37] cursor-pointer">
-          Home
+          {t.nav.home}
         </button>
         <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-        <span className="text-slate-900 font-semibold">Customer Support &amp; Concierge</span>
+        <span className="text-slate-900 font-semibold">{t.contact.title}</span>
       </nav>
 
       {/* Hero Header Banner */}
       <ScrollReveal animation="fade-up" className="text-center max-w-3xl mx-auto space-y-3">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-[#0b5c37] text-xs font-bold uppercase tracking-wider shadow-2xs">
           <Sparkles className="w-3.5 h-3.5 text-[#0b5c37]" />
-          <span>Official Customer Support Concierge</span>
+          <span>{t.nav.customerService}</span>
         </div>
         <h1 className="text-3xl sm:text-4xl md:text-5xl font-black text-slate-900 tracking-tight">
-          How Can We Help You Today?
+          {t.contact.title}
         </h1>
         <p className="text-xs sm:text-sm text-slate-600 leading-relaxed max-w-2xl mx-auto">
-          Need assistance with order tracking, cancellation, warranty verification, or logistics?
-          Our Kerala distribution centre and customer support team are available daily from <strong>{SUPPORT_HOURS}</strong>.
+          {t.contact.subtitle} <strong>{t.contact.supportHours}: {SUPPORT_HOURS}</strong>
         </p>
       </ScrollReveal>
 
@@ -302,7 +254,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
                   ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                   : 'bg-amber-50 text-amber-800 border-amber-200'
               }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${isCurrentlyOpen ? 'bg-emerald-600 animate-pulse' : 'bg-amber-600'}`} />
+                <span className={`w-1.5 h-1.5 rounded-full ${isCurrentlyOpen ? 'bg-emerald-600' : 'bg-amber-600'}`} />
                 <span>{isCurrentlyOpen ? 'Open Now' : 'Closed'}</span>
               </span>
             </div>
@@ -394,7 +346,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
                 <MessageCircle className="w-5 h-5 stroke-[2.2]" />
               </div>
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-ping" />
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
                 <span>Live Chat</span>
               </span>
             </div>
@@ -476,7 +428,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
         <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
           <div className="space-y-3 max-w-xl">
             <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
               <span className="text-xs font-bold uppercase tracking-wider text-emerald-300">
                 Instant Live Chat Support
               </span>
@@ -771,115 +723,25 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
       </div>
 
       {/* ===================================================================== */}
-      {/* 4. CUSTOMER REVIEWS FEATURE (REUSING EXISTING REVIEWS) */}
+      {/* 4. VERIFIED PRODUCT REVIEWS POLICY NOTICE */}
       {/* ===================================================================== */}
-      <ScrollReveal animation="fade-up" className="space-y-6 pt-4 border-t border-slate-200">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-          <div>
+      <ScrollReveal animation="fade-up" className="pt-4 border-t border-slate-200">
+        <div className="bg-emerald-50/70 border border-emerald-200 rounded-3xl p-6 sm:p-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="space-y-1.5 max-w-2xl">
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#0b5c37]">
-              <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-              <span>Customer Reviews &amp; Testimonials</span>
+              <ShieldCheck className="w-4 h-4 text-[#0b5c37]" />
+              <span>{t.product.verifiedPurchaseBadge}</span>
             </div>
-            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 mt-1 tracking-tight">
-              Verified Customer Experiences
-            </h2>
-            <p className="text-xs text-slate-500 mt-1">
-              Read authentic feedback from genuine Shopcart customers across India
-            </p>
+            <h2 className="text-lg sm:text-xl font-bold text-slate-900">{t.product.customerReviews}</h2>
+            <p className="text-xs text-slate-600 leading-relaxed">{t.contact.verifiedBuyersNote}</p>
           </div>
-
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 bg-emerald-50 px-4 py-2 rounded-2xl border border-emerald-200/80 shrink-0">
-              <div className="flex text-amber-400">
-                {[1, 2, 3, 4, 5].map((s) => (
-                  <Star key={s} className="w-4 h-4 fill-amber-400 text-amber-400" />
-                ))}
-              </div>
-              <span className="text-xs font-black text-slate-900">4.9 / 5.0</span>
-              <span className="text-[11px] text-slate-500 font-mono">(98.6% positive)</span>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setIsWriteReviewOpen(true)}
-              className="py-2 px-3.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
-            >
-              Write Review
-            </button>
-          </div>
-        </div>
-
-        {/* Rating Breakdown & Filter */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1">
-          <span className="text-xs font-bold text-slate-700 mr-1 flex items-center gap-1">
-            <Filter className="w-3.5 h-3.5 text-slate-400" />
-            <span>Filter Reviews:</span>
-          </span>
-          {[
-            { id: 'all', label: `All Reviews (${reviewsList.length})` },
-            { id: '5', label: '5 Stars ★★★★★' },
-            { id: '4', label: '4 Stars ★★★★☆' },
-          ].map((f) => (
-            <button
-              key={f.id}
-              onClick={() => setReviewFilter(f.id as any)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 ${
-                reviewFilter === f.id
-                  ? 'bg-[#0b5c37] text-white shadow-2xs'
-                  : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Customer Review Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          {filteredReviews.map((rev) => (
-            <div
-              key={rev.id}
-              className="bg-white p-5 rounded-3xl border border-slate-200/90 shadow-2xs flex flex-col justify-between space-y-4 hover:shadow-md transition-shadow"
-            >
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1 text-amber-400">
-                    {Array.from({ length: rev.rating }).map((_, idx) => (
-                      <Star key={idx} className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                    ))}
-                  </div>
-                  <span className="text-[10px] text-slate-400 font-mono">{rev.date}</span>
-                </div>
-
-                <h4 className="text-sm font-bold text-slate-900 leading-snug">
-                  &ldquo;{rev.title}&rdquo;
-                </h4>
-
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  {rev.comment}
-                </p>
-              </div>
-
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-700">
-                    {rev.author.split(' ').map((n) => n[0]).join('').slice(0, 2)}
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-slate-900">{rev.author}</p>
-                    <span className="text-[10px] text-slate-400">Verified Buyer</span>
-                  </div>
-                </div>
-
-                {rev.verified && (
-                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                    <UserCheck className="w-3 h-3" />
-                    <span>Verified</span>
-                  </span>
-                )}
-              </div>
-            </div>
-          ))}
+          <button
+            type="button"
+            onClick={() => onNavigate('shop')}
+            className="shrink-0 px-5 py-2.5 bg-[#0b5c37] hover:bg-[#08482b] text-white text-xs font-bold rounded-xl transition-colors cursor-pointer"
+          >
+            {t.common.exploreCatalog}
+          </button>
         </div>
       </ScrollReveal>
 
@@ -998,118 +860,6 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
                 >
                   <MessageCircle className="w-4 h-4" />
                   <span>Prepare Live Chat</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ===================================================================== */}
-      {/* MODAL 2: WRITE CUSTOMER REVIEW DIALOG */}
-      {/* ===================================================================== */}
-      {isWriteReviewOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl max-w-lg w-full border border-slate-200 shadow-2xl p-6 space-y-4 my-8 text-slate-900">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
-                  <Star className="w-5 h-5 fill-amber-500 text-amber-500" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-base text-slate-900">Write a Customer Review</h3>
-                  <p className="text-xs text-slate-500">Share your shopping &amp; support experience</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsWriteReviewOpen(false)}
-                className="text-slate-400 hover:text-slate-700 p-1 rounded-lg cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleReviewSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">Your Rating</label>
-                <div className="flex items-center gap-1.5">
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <button
-                      key={star}
-                      type="button"
-                      onClick={() => setNewReviewRating(star)}
-                      className="p-1 cursor-pointer focus:outline-none"
-                    >
-                      <Star
-                        className={`w-6 h-6 transition-colors ${
-                          star <= newReviewRating
-                            ? 'fill-amber-400 text-amber-400'
-                            : 'text-slate-200'
-                        }`}
-                      />
-                    </button>
-                  ))}
-                  <span className="text-xs font-bold text-slate-700 ml-2">
-                    {newReviewRating === 5 && '5 Stars — Excellent'}
-                    {newReviewRating === 4 && '4 Stars — Very Good'}
-                    {newReviewRating === 3 && '3 Stars — Average'}
-                    {newReviewRating === 2 && '2 Stars — Below Average'}
-                    {newReviewRating === 1 && '1 Star — Poor'}
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Your Name</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Ananya Menon"
-                  value={newReviewAuthor}
-                  onChange={(e) => setNewReviewAuthor(e.target.value)}
-                  className="w-full min-h-[42px] px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:border-[#0b5c37]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Review Headline</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Fast delivery and genuine product!"
-                  value={newReviewTitle}
-                  onChange={(e) => setNewReviewTitle(e.target.value)}
-                  className="w-full min-h-[42px] px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:border-[#0b5c37]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Detailed Feedback</label>
-                <textarea
-                  required
-                  rows={3}
-                  placeholder="Describe your delivery speed, product packaging, or support experience..."
-                  value={newReviewComment}
-                  onChange={(e) => setNewReviewComment(e.target.value)}
-                  className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:border-[#0b5c37]"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsWriteReviewOpen(false)}
-                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmittingReview}
-                  className="px-5 py-2.5 bg-[#0b5c37] hover:bg-[#08482b] text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer inline-flex items-center gap-1.5"
-                >
-                  {isSubmittingReview ? <span>Publishing...</span> : <span>Publish Review</span>}
                 </button>
               </div>
             </form>

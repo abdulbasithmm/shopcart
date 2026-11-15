@@ -389,7 +389,7 @@ NOTIFY pgrst, 'reload schema';`;
                 <h2 className="text-base font-bold text-white tracking-tight">Supabase Backend Manager</h2>
                 {isConnected ? (
                   <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-300 bg-emerald-950/90 px-2.5 py-0.5 rounded-full border border-emerald-600/60 shadow-xs">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
                     LIVE SUPABASE
                   </span>
                 ) : (

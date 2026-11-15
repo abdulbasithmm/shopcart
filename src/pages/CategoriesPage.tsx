@@ -19,6 +19,7 @@ import { CATEGORIES, PRODUCTS } from '../data/mockData';
 import { fetchCategories, fetchProducts } from '../services/productService';
 import { ProductImage } from '../components/common/ProductImage';
 import { formatPrice } from '../utils/format';
+import { useLanguage } from '../context/LanguageContext';
 
 interface CategoriesPageProps {
   onNavigate: (page: PageView, params?: { category?: string; productId?: string }) => void;
@@ -46,6 +47,7 @@ const categoryGradients: Record<string, string> = {
 };
 
 export const CategoriesPage: React.FC<CategoriesPageProps> = ({ onNavigate }) => {
+  const { t } = useLanguage();
   const [selectedCategory, setSelectedCategory] = useState<string>('Electronics');
   const [products, setProducts] = useState<Product[]>(PRODUCTS);
   const [categories, setCategories] = useState(CATEGORIES);
@@ -77,17 +79,17 @@ export const CategoriesPage: React.FC<CategoriesPageProps> = ({ onNavigate }) =>
           <div>
             <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
               <LayoutGrid className="w-6 h-6 text-[#0b5c37]" />
-              <span>Explore All Categories</span>
+              <span>{t.nav.shopByCategory}</span>
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
-              Browse top deals, trending collections, and curated products
+              {t.home.featuredBestSellers}
             </p>
           </div>
           <button
             onClick={() => onNavigate('shop', { category: 'all' })}
             className="text-xs font-bold text-[#0b5c37] hover:text-[#08482b] flex items-center gap-1 cursor-pointer bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200"
           >
-            <span>View All Products</span>
+            <span>{t.common.exploreCatalog}</span>
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>

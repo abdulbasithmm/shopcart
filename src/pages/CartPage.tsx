@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { PageView, CartItem, Product } from '../types';
 import { useCart } from '../context/CartContext';
+import { useLanguage } from '../context/LanguageContext';
 import { ProductImage } from '../components/common/ProductImage';
 import { PRODUCTS } from '../data/mockData';
 import { fetchProducts } from '../services/productService';
@@ -29,6 +30,7 @@ interface CartPageProps {
 }
 
 export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
+  const { t } = useLanguage();
   const {
     cart,
     savedForLater,
@@ -770,7 +772,7 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
                 )}
 
                 <div className="flex justify-between items-baseline pt-4 border-t border-slate-200 text-slate-900 font-extrabold text-base">
-                  <span>Grand Total</span>
+                  <span>{t.cart.orderTotal}</span>
                   <div className="text-right">
                     <span className="text-2xl text-[#0b5c37] tabular-nums font-black block">
                       {formatPrice(total)}
@@ -788,7 +790,7 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
                 disabled={hasUnconfiguredGst}
                 className="w-full py-4 bg-[#0b5c37] hover:bg-[#08482b] disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-extrabold rounded-2xl transition-all shadow-lg shadow-emerald-900/10 flex items-center justify-center gap-2 group cursor-pointer"
               >
-                <span>Proceed to Checkout</span>
+                <span>{t.cart.proceedToBuy}</span>
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </button>
 
@@ -796,7 +798,7 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
               <div className="space-y-3 pt-3 border-t border-slate-100">
                 <div className="flex items-center gap-2 text-xs text-slate-600">
                   <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>256-bit SSL encrypted & secure transactions</span>
+                  <span>{t.cart.sslEncrypted}</span>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-slate-600">
                   <RotateCcw className="w-4 h-4 text-[#0b5c37] shrink-0" />
@@ -808,12 +810,10 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
                 </div>
               </div>
 
-              {/* Supported Payment Methods (Universal UPI) */}
+              {/* Supported Payment Methods (Single ShopCart UPI) */}
               <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-center gap-1.5 text-slate-700 text-[10px] font-bold">
-                <span className="px-2 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-200">Google Pay</span>
-                <span className="px-2 py-1 rounded-lg bg-purple-50 text-purple-700 border border-purple-200">PhonePe</span>
-                <span className="px-2 py-1 rounded-lg bg-sky-50 text-sky-700 border border-sky-200">Paytm</span>
-                <span className="px-2 py-1 rounded-lg bg-emerald-50 text-[#0b5c37] border border-emerald-200">BHIM &amp; All UPI</span>
+                <span className="px-2 py-1 rounded-lg bg-emerald-50 text-[#0b5c37] border border-emerald-200">ShopCart UPI</span>
+                <span className="px-2 py-1 rounded-lg bg-slate-50 text-slate-700 border border-slate-200">GPay · PhonePe · Paytm · BHIM</span>
               </div>
             </div>
           </div>

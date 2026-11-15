@@ -539,40 +539,9 @@ export const PRODUCTS: Product[] = [
   },
 ];
 
-export const TESTIMONIALS: Review[] = [
-  {
-    id: 'rev-1',
-    productId: 'deal-prod-1',
-    author: 'Rahul Sharma',
-    rating: 5,
-    date: 'March 2026',
-    title: 'Unbelievable sound for this price!',
-    comment: 'The boAt Airdopes 141 Pro battery life is insane. I charged it once on Sunday and it lasted the entire week of office calls and workouts. ASAP charging is a lifesaver.',
-    verified: true,
-  },
-  {
-    id: 'rev-2',
-    productId: 'deal-prod-2',
-    author: 'Priya Patel',
-    rating: 5,
-    date: 'February 2026',
-    title: 'Best smartwatch under ₹15,000',
-    comment: 'The rotating crown makes navigating through messages so smooth. Display is super crisp even in bright Indian afternoon sunlight. Calling quality is 10/10.',
-    verified: true,
-  },
-  {
-    id: 'rev-3',
-    productId: 'deal-prod-3',
-    author: 'Amitabh Sen',
-    rating: 5,
-    date: 'January 2026',
-    title: 'Solid build and perfect for daily commute',
-    comment: 'Carries my 15.6" Dell laptop, charger, umbrella, and water bottle comfortably. The shoulder padding is really thick and does not strain your back.',
-    verified: true,
-  },
-];
+export const TESTIMONIALS: Review[] = [];
 
-export const MOCK_REVIEWS: Review[] = TESTIMONIALS;
+export const MOCK_REVIEWS: Review[] = [];
 
 export interface FAQItem {
   question: string;
@@ -598,7 +567,7 @@ export const FAQ_ITEMS: FAQItem[] = [
   },
   {
     question: 'Which payment methods are accepted?',
-    answer: 'We accept Universal UPI payments including Google Pay, PhonePe, Paytm, BHIM, Cred, and all UPI applications. Every payment is secured and verified with your payment screenshot and 12-digit UTR transaction reference.',
+    answer: 'We accept ShopCart UPI payments via Google Pay, PhonePe, Paytm, BHIM, Cred, and any UPI application. Every payment is reconciled against your payment screenshot and 12-digit UTR transaction reference.',
   },
 ];
 

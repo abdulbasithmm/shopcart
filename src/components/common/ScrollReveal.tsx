@@ -25,12 +25,34 @@ export const ScrollReveal: React.FC<ScrollRevealProps> = ({
   const elementRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    // If user prefers reduced motion, render immediately without animations
-    if (typeof window !== 'undefined') {
-      const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-      if (mediaQuery.matches) {
+    if (typeof window === 'undefined') {
+      setIsVisible(true);
+      return;
+    }
+
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (mediaQuery.matches) {
+      setIsVisible(true);
+      return;
+    }
+
+    const handleMotionChange = (e: MediaQueryListEvent) => {
+      if (e.matches) setIsVisible(true);
+    };
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', handleMotionChange);
+    }
+
+    const el = elementRef.current;
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      if (rect.top <= window.innerHeight * 0.96 && rect.bottom >= 0) {
         setIsVisible(true);
-        return;
+        return () => {
+          if (typeof mediaQuery.removeEventListener === 'function') {
+            mediaQuery.removeEventListener('change', handleMotionChange);
+          }
+        };
       }
     }
 
@@ -52,11 +74,10 @@ export const ScrollReveal: React.FC<ScrollRevealProps> = ({
       },
       {
         threshold,
-        rootMargin: '0px 0px -40px 0px',
+        rootMargin: '0px 0px -20px 0px',
       }
     );
 
-    const el = elementRef.current;
     if (el) {
       observer.observe(el);
     }
@@ -64,6 +85,9 @@ export const ScrollReveal: React.FC<ScrollRevealProps> = ({
     return () => {
       if (el) {
         observer.unobserve(el);
+      }
+      if (typeof mediaQuery.removeEventListener === 'function') {
+        mediaQuery.removeEventListener('change', handleMotionChange);
       }
     };
   }, [threshold]);

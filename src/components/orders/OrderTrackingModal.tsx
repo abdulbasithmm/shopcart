@@ -232,7 +232,7 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
                             isCompleted
                               ? 'bg-emerald-600 text-white font-bold'
                               : isActive
-                              ? 'bg-[#0b5c37] text-white ring-4 ring-emerald-200 animate-pulse'
+                              ? 'bg-[#0b5c37] text-white ring-4 ring-emerald-200'
                               : 'bg-white text-slate-300 border-2 border-slate-300'
                           }`}
                         >

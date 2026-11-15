@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { PageView, Product } from './types';
 import { ToastProvider } from './context/ToastContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { LanguageProvider } from './context/LanguageContext';
 import { CartProvider } from './context/CartContext';
 import { Header } from './components/common/Header';
 import { Footer } from './components/common/Footer';
@@ -62,6 +63,8 @@ function parseCurrentRoute(): { page: PageView; productId?: string; adminSection
       customers: 'customers',
       inventory: 'inventory',
       payments: 'payments',
+      videos: 'videos',
+      reviews: 'reviews',
       analytics: 'analytics',
       profile: 'settings',
       settings: 'settings',
@@ -95,6 +98,8 @@ function parseCurrentRoute(): { page: PageView; productId?: string; adminSection
     if (clean === 'admin/customers') return 'customers';
     if (clean === 'admin/inventory') return 'inventory';
     if (clean === 'admin/payments') return 'payments';
+    if (clean === 'admin/videos') return 'videos';
+    if (clean === 'admin/reviews') return 'reviews';
     if (clean === 'admin/analytics') return 'analytics';
     if (clean === 'admin/profile' || clean === 'admin/settings') return 'settings';
     return null;
@@ -435,9 +440,11 @@ export default function App() {
   return (
     <ToastProvider>
       <AuthProvider>
-        <CartProvider>
-          <AppContent />
-        </CartProvider>
+        <LanguageProvider>
+          <CartProvider>
+            <AppContent />
+          </CartProvider>
+        </LanguageProvider>
       </AuthProvider>
     </ToastProvider>
   );

@@ -24,6 +24,7 @@ import { ProductImage } from '../components/common/ProductImage';
 import { formatPrice } from '../utils/format';
 import { useCart } from '../context/CartContext';
 import { useToast } from '../context/ToastContext';
+import { useLanguage } from '../context/LanguageContext';
 import { fetchProducts, fetchCategories } from '../services/productService';
 import { isSupabaseConfigured } from '../lib/supabase';
 
@@ -42,6 +43,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
 }) => {
   const { addToCart, toggleWishlist, isInWishlist } = useCart();
   const { showToast } = useToast();
+  const { t } = useLanguage();
 
   // Filter States
   const [selectedCategory, setSelectedCategory] = useState(initialCategory);
@@ -285,21 +287,17 @@ export const ShopPage: React.FC<ShopPageProps> = ({
         <div>
           <div className="flex items-center gap-2.5 flex-wrap">
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-950 tracking-tight">
-              {selectedCategory === 'all' ? 'All Curated Products' : selectedCategory}
+              {selectedCategory === 'all' ? t.shop.allProducts : selectedCategory}
             </h1>
             <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 font-bold text-xs">
               {filteredProducts.length} items
             </span>
             {isLiveFromSupabase ? (
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-semibold">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Supabase Live
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                Live Catalog
               </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 text-[10px] font-medium">
-                Demo Catalog
-              </span>
-            )}
+            ) : null}
           </div>
           <p className="text-xs text-slate-500 mt-1">
             Browse our hand-picked inventory with free insured shipping on orders over ₹499.
@@ -333,7 +331,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
             className="lg:hidden flex items-center gap-2 px-3.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 shadow-2xs cursor-pointer hover:bg-slate-50"
           >
             <Filter className="w-4 h-4 text-[#0b5c37]" />
-            <span>Filters</span>
+            <span>{t.shop.filters}</span>
             {hasActiveFilters && (
               <span className="w-2 h-2 rounded-full bg-[#0b5c37]" />
             )}
@@ -341,18 +339,18 @@ export const ShopPage: React.FC<ShopPageProps> = ({
 
           {/* Sorting Dropdown */}
           <div className="flex items-center gap-2 text-xs">
-            <span className="text-slate-500 hidden xl:inline font-medium">Sort By:</span>
+            <span className="text-slate-500 hidden xl:inline font-medium">{t.shop.sortBy}:</span>
             <div className="relative">
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as any)}
                 className="pl-3 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#0b5c37] appearance-none cursor-pointer shadow-2xs"
               >
-                <option value="popularity">Popularity & Best Sellers</option>
-                <option value="price-low">Price: Low to High</option>
-                <option value="price-high">Price: High to Low</option>
-                <option value="rating">Highest Customer Rating</option>
-                <option value="newest">Newest Arrivals First</option>
+                <option value="popularity">{t.shop.sortFeatured}</option>
+                <option value="price-low">{t.shop.sortPriceLow}</option>
+                <option value="price-high">{t.shop.sortPriceHigh}</option>
+                <option value="rating">{t.shop.sortRating}</option>
+                <option value="newest">{t.shop.sortNewest}</option>
               </select>
               <ArrowUpDown className="w-3 h-3 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>

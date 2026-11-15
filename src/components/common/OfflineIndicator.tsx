@@ -16,7 +16,7 @@ export const OfflineIndicator: React.FC = () => {
         <p className="leading-tight">Offline Mode</p>
         <p className="text-[10px] text-slate-300 font-normal">Browsing saved catalog data</p>
       </div>
-      <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse ml-1" />
+      <span className="w-2 h-2 rounded-full bg-amber-400 ml-1" />
     </div>
   );
 };

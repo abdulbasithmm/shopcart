@@ -60,6 +60,8 @@ export interface CartItem {
   selectedSize?: string;
 }
 
+export type SupportedLanguage = 'en' | 'ml' | 'hi';
+
 export interface SavedAddress {
   id: string;
   isDefault?: boolean;
@@ -68,6 +70,8 @@ export interface SavedAddress {
   phone: string;
   email?: string;
   country: string;
+  flatHouseNumber?: string;
+  buildingApartment?: string;
   houseBuilding: string;
   streetArea: string;
   landmark?: string;
@@ -98,12 +102,14 @@ export interface User {
   };
   shippingAddress?: SavedAddress;
   savedAddresses?: SavedAddress[];
+  preferredLanguage?: SupportedLanguage;
 }
 
 export interface Review {
   id: string;
   productId: string;
   userId?: string;
+  orderId?: string | null;
   author: string;
   avatar?: string;
   rating: number;
@@ -112,6 +118,30 @@ export interface Review {
   comment: string;
   verified: boolean;
   helpful?: number;
+  moderationStatus?: 'approved' | 'hidden' | 'pending' | 'rejected';
+  updatedAt?: string;
+}
+
+export interface ReviewEligibility {
+  canReview: boolean;
+  hasPurchased: boolean;
+  reason?: string;
+  existingReview?: Review | null;
+}
+
+export interface VideoItem {
+  id: string;
+  title: string;
+  description: string;
+  videoUrl: string;
+  thumbnailUrl?: string | null;
+  productId?: string | null;
+  likesCount: number;
+  userHasLiked: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt?: string;
+  product?: Product | null;
 }
 
 export type OrderStatus =
@@ -162,6 +192,7 @@ export type PaymentStatus =
   | 'pending';
 
 export type UpiProvider =
+  | 'upi'
   | 'all_upi'
   | 'gpay_upi'
   | 'phonepe_upi'
@@ -219,6 +250,8 @@ export interface OrderShippingAddress {
   fullName: string;
   phone: string;
   email?: string;
+  flatHouseNumber?: string;
+  buildingApartment?: string;
   houseBuilding?: string;
   streetArea?: string;
   street: string;

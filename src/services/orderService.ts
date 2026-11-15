@@ -21,6 +21,8 @@ export interface CreateOrderParams {
   shippingAddress: {
     fullName: string;
     street: string;
+    flatHouseNumber?: string;
+    buildingApartment?: string;
     apartment?: string;
     houseBuilding?: string;
     streetArea?: string;
@@ -93,7 +95,9 @@ export async function createOrder(params: CreateOrderParams): Promise<OrderResul
         customerName: params.shippingAddress.fullName,
         customerEmail: params.guestEmail || params.shippingAddress.email || params.user?.email || '',
         customerPhone: params.shippingAddress.phone || params.user?.phone || '',
-        houseBuilding: params.shippingAddress.houseBuilding || params.shippingAddress.apartment || params.shippingAddress.street,
+        flatHouseNumber: params.shippingAddress.flatHouseNumber || '',
+        buildingApartment: params.shippingAddress.buildingApartment || '',
+        houseBuilding: params.shippingAddress.houseBuilding || [params.shippingAddress.flatHouseNumber, params.shippingAddress.buildingApartment].filter(Boolean).join(', ') || params.shippingAddress.apartment || params.shippingAddress.street,
         streetArea: params.shippingAddress.streetArea || params.shippingAddress.street,
         city: params.shippingAddress.city,
         state: params.shippingAddress.state,
@@ -491,10 +495,12 @@ function normalizeOrderRecord(row: any): Order {
     fullName: row.customer_name || shipAddr.fullName || shipAddr.name || row.guest_email || 'Customer',
     phone: row.customer_phone || shipAddr.phone || shipAddr.mobile || '',
     email: row.customer_email || shipAddr.email || row.guest_email || '',
-    houseBuilding: shipAddr.houseBuilding || shipAddr.apartment || '',
+    flatHouseNumber: shipAddr.flatHouseNumber || '',
+    buildingApartment: shipAddr.buildingApartment || '',
+    houseBuilding: shipAddr.houseBuilding || [shipAddr.flatHouseNumber, shipAddr.buildingApartment].filter(Boolean).join(', ') || shipAddr.apartment || '',
     streetArea: shipAddr.streetArea || shipAddr.street || '',
     street: shipAddr.street || shipAddr.streetArea || '',
-    apartment: shipAddr.apartment || shipAddr.houseBuilding || '',
+    apartment: shipAddr.buildingApartment || shipAddr.apartment || shipAddr.houseBuilding || '',
     city: shipAddr.city || '',
     state: shipAddr.state || '',
     postalCode: shipAddr.pinCode || shipAddr.postalCode || '',
@@ -537,7 +543,7 @@ function normalizeOrderRecord(row: any): Order {
     tax_amount: Number(row.tax_amount || 0),
     total_amount: Number(row.total_amount || 0),
     order_items: normalizedItems,
-    paymentMethod: row.payment_method || row.paymentMethod || payRecord.payment_method || 'all_upi',
+    paymentMethod: row.payment_method || row.paymentMethod || payRecord.payment_method || 'upi',
     paymentStatus,
     transactionReference: row.transaction_reference || row.transactionReference || payRecord.transaction_reference || null,
     screenshot_url: row.screenshot_url || payRecord.screenshot_url || null,

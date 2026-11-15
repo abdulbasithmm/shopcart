@@ -1,29 +1,19 @@
-import { Review } from '../types';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { MOCK_REVIEWS } from '../data/mockData';
+import { Review, ReviewEligibility } from '../types';
+import { getAuthHeaders } from '../lib/supabase';
 
 export interface SubmitReviewInput {
   productId: string;
   rating: number;
   title: string;
   comment: string;
-  authorName: string;
-  userId?: string;
-  userEmail?: string;
-  verifiedPurchase?: boolean;
 }
 
-const STORAGE_PREFIX = 'shopcart_reviews_';
-
-/**
- * Format a database date or ISO string into a human-readable display date
- */
 function formatReviewDate(dateStr?: string): string {
-  if (!dateStr) return 'Recently';
+  if (!dateStr) return '';
   try {
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return dateStr;
-    return d.toLocaleDateString('en-US', {
+    return d.toLocaleDateString(undefined, {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
@@ -33,229 +23,197 @@ function formatReviewDate(dateStr?: string): string {
   }
 }
 
-/**
- * Convert a Supabase database row to domain Review interface
- */
-function mapRowToReview(row: any): Review {
+function normalizeReview(raw: any): Review {
   return {
-    id: row.id || `rev-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-    productId: row.product_id,
-    userId: row.user_id,
-    author: row.author_name || 'Customer',
-    rating: Number(row.rating || 5),
-    date: formatReviewDate(row.created_at),
-    title: row.title || 'Customer Review',
-    comment: row.comment || '',
-    verified: row.verified_purchase !== undefined ? Boolean(row.verified_purchase) : true,
-    helpful: Number(row.helpful_votes || 0),
+    id: raw.id,
+    productId: raw.productId || raw.product_id,
+    userId: raw.userId || raw.user_id,
+    orderId: raw.orderId || raw.order_id || null,
+    author: raw.author || raw.author_name || 'Verified Customer',
+    rating: Number(raw.rating || 5),
+    date: formatReviewDate(raw.date || raw.created_at),
+    title: raw.title || '',
+    comment: raw.comment || '',
+    verified: raw.verified !== undefined ? Boolean(raw.verified) : raw.verified_purchase !== false,
+    helpful: Number(raw.helpful ?? raw.helpful_votes ?? 0),
+    moderationStatus: raw.moderationStatus || raw.moderation_status || 'approved',
+    updatedAt: raw.updatedAt || raw.updated_at,
   };
 }
 
 /**
- * Load initial default reviews for a product if none exist
+ * Fetch real product reviews and the current user's verified-purchase eligibility from the server.
+ * Zero mock or generated fallback reviews are ever returned.
  */
-function getDefaultReviewsForProduct(productId: string): Review[] {
-  const existingMock = MOCK_REVIEWS.filter((r) => r.productId === productId);
-  if (existingMock.length > 0) {
-    return existingMock;
+export async function fetchReviewsByProductId(productId: string): Promise<{
+  reviews: Review[];
+  eligibility: ReviewEligibility;
+}> {
+  try {
+    const headers = await getAuthHeaders();
+    const res = await fetch(`/api/products/${encodeURIComponent(productId)}/reviews`, { headers });
+    if (res.ok) {
+      const data = await res.json();
+      const reviews = Array.isArray(data.reviews) ? data.reviews.map(normalizeReview) : [];
+      const rawElig = data.eligibility || {};
+      return {
+        reviews,
+        eligibility: {
+          canReview: Boolean(rawElig.canReview),
+          hasPurchased: Boolean(rawElig.hasPurchased),
+          reason: rawElig.reason,
+          existingReview: rawElig.existingReview ? normalizeReview(rawElig.existingReview) : null,
+        },
+      };
+    }
+  } catch (err) {
+    console.warn('Error fetching product reviews:', err);
   }
 
-  // Fallback high-quality curated reviews
-  return [
-    {
-      id: `rev-${productId}-1`,
-      productId,
-      author: 'Rajesh K.',
-      rating: 5,
-      date: 'October 24, 2026',
-      title: 'Exceptional quality & lightning delivery',
-      comment: 'Super happy with this purchase. Everything matched the product description perfectly. Build quality is top-notch and delivery was within 24 hours.',
-      verified: true,
-      helpful: 14,
-    },
-    {
-      id: `rev-${productId}-2`,
-      productId,
-      author: 'Sneha Verma',
-      rating: 5,
-      date: 'October 18, 2026',
-      title: 'Value for money product',
-      comment: 'Great aesthetics, durable build, and flawless everyday functionality. I will definitely recommend this to friends and family.',
-      verified: true,
-      helpful: 8,
-    },
-  ];
+  return {
+    reviews: [],
+    eligibility: { canReview: false, hasPurchased: false, reason: 'unavailable', existingReview: null },
+  };
 }
 
 /**
- * Fetch reviews for a specific product from Supabase or local storage fallback
- */
-export async function fetchReviewsByProductId(productId: string): Promise<{ reviews: Review[]; isFromSupabase: boolean }> {
-  // If Supabase is connected, query the reviews table
-  if (isSupabaseConfigured()) {
-    try {
-      const { data, error } = await supabase
-        .from('reviews')
-        .select('*')
-        .eq('product_id', productId)
-        .order('created_at', { ascending: false });
-
-      if (!error && data && data.length > 0) {
-        const mapped = data.map(mapRowToReview);
-        // Sync local cache
-        try {
-          localStorage.setItem(`${STORAGE_PREFIX}${productId}`, JSON.stringify(mapped));
-        } catch {
-          // Ignore localStorage quota errors
-        }
-        return { reviews: mapped, isFromSupabase: true };
-      }
-    } catch (err) {
-      console.warn('Supabase reviews fetch failed, falling back to local storage:', err);
-    }
-  }
-
-  // Check localStorage cache
-  try {
-    const cached = localStorage.getItem(`${STORAGE_PREFIX}${productId}`);
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return { reviews: parsed, isFromSupabase: false };
-      }
-    }
-  } catch {
-    // Ignore parse error
-  }
-
-  // Return default reviews
-  const defaultReviews = getDefaultReviewsForProduct(productId);
-  try {
-    localStorage.setItem(`${STORAGE_PREFIX}${productId}`, JSON.stringify(defaultReviews));
-  } catch {
-    // Ignore
-  }
-  return { reviews: defaultReviews, isFromSupabase: false };
-}
-
-/**
- * Submit a customer review into Supabase 'reviews' table and update local cache
+ * Submit a verified-purchase product review through server validation.
  */
 export async function submitProductReview(
   input: SubmitReviewInput
-): Promise<{ success: boolean; review: Review; message?: string; isSupabaseSaved: boolean }> {
-  const newId = `rev-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-  const now = new Date().toISOString();
-
-  const newReview: Review = {
-    id: newId,
-    productId: input.productId,
-    userId: input.userId,
-    author: input.authorName.trim(),
-    rating: Math.min(5, Math.max(1, input.rating)),
-    date: 'Just now',
-    title: input.title.trim() || 'Verified Customer Review',
-    comment: input.comment.trim(),
-    verified: input.verifiedPurchase ?? true,
-    helpful: 0,
-  };
-
-  let isSupabaseSaved = false;
-
-  if (isSupabaseConfigured()) {
-    try {
-      const dbRow = {
-        product_id: input.productId,
-        user_id: input.userId || null,
-        author_name: input.authorName.trim(),
-        author_email: input.userEmail || null,
-        rating: Math.min(5, Math.max(1, input.rating)),
-        title: input.title.trim() || 'Verified Customer Review',
-        comment: input.comment.trim(),
-        verified_purchase: input.verifiedPurchase ?? true,
-        helpful_votes: 0,
-        created_at: now,
-      };
-
-      const { data, error } = await supabase
-        .from('reviews')
-        .insert([dbRow])
-        .select()
-        .single();
-
-      if (!error && data) {
-        isSupabaseSaved = true;
-        newReview.id = data.id;
-      } else {
-        console.warn('Supabase review insert warning (falling back to local cache):', error?.message);
-      }
-    } catch (err: any) {
-      console.warn('Supabase review insert failed, cached locally:', err?.message);
-    }
-  }
-
-  // Always update local cache
+): Promise<{
+  success: boolean;
+  review?: Review;
+  message?: string;
+  summary?: { rating: number; reviewsCount: number } | null;
+}> {
   try {
-    const cached = localStorage.getItem(`${STORAGE_PREFIX}${input.productId}`);
-    let list: Review[] = [];
-    if (cached) {
-      try {
-        list = JSON.parse(cached);
-      } catch {
-        list = [];
-      }
+    const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+    if (!headers.Authorization) {
+      return { success: false, message: 'Please sign in to submit a verified product review.' };
     }
-    if (!Array.isArray(list) || list.length === 0) {
-      list = getDefaultReviewsForProduct(input.productId);
-    }
-    const updatedList = [newReview, ...list];
-    localStorage.setItem(`${STORAGE_PREFIX}${input.productId}`, JSON.stringify(updatedList));
-  } catch {
-    // Ignore quota issues
-  }
 
-  return {
-    success: true,
-    review: newReview,
-    isSupabaseSaved,
-    message: isSupabaseSaved
-      ? 'Review saved to Supabase successfully!'
-      : 'Review published and stored locally!',
-  };
+    const res = await fetch('/api/reviews', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(input),
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      return { success: false, message: data.error || `Failed to submit review (HTTP ${res.status}).` };
+    }
+
+    return {
+      success: true,
+      review: data.review ? normalizeReview(data.review) : undefined,
+      summary: data.summary || null,
+      message: 'Verified review published successfully.',
+    };
+  } catch (err: any) {
+    return { success: false, message: err?.message || 'Failed to submit review.' };
+  }
 }
 
 /**
- * Increment helpful votes for a review
+ * Edit the customer's own existing review.
+ */
+export async function updateOwnProductReview(
+  reviewId: string,
+  updates: { rating: number; title: string; comment: string }
+): Promise<{
+  success: boolean;
+  review?: Review;
+  message?: string;
+  summary?: { rating: number; reviewsCount: number } | null;
+}> {
+  try {
+    const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+    const res = await fetch(`/api/reviews/${encodeURIComponent(reviewId)}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(updates),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { success: false, message: data.error || `Failed to update review (HTTP ${res.status}).` };
+    }
+    return {
+      success: true,
+      review: data.review ? normalizeReview(data.review) : undefined,
+      summary: data.summary || null,
+      message: 'Review updated successfully.',
+    };
+  } catch (err: any) {
+    return { success: false, message: err?.message || 'Failed to update review.' };
+  }
+}
+
+/**
+ * Record helpful vote via verified backend route.
  */
 export async function voteReviewHelpful(
-  reviewId: string,
-  productId: string,
-  currentCount: number
-): Promise<{ success: boolean; newCount: number }> {
-  const newCount = currentCount + 1;
-
-  if (isSupabaseConfigured()) {
-    try {
-      await supabase
-        .from('reviews')
-        .update({ helpful_votes: newCount })
-        .eq('id', reviewId);
-    } catch (err) {
-      console.warn('Failed to update helpful votes in Supabase:', err);
-    }
-  }
-
-  // Update local cache
+  reviewId: string
+): Promise<{ success: boolean; newCount?: number }> {
   try {
-    const cached = localStorage.getItem(`${STORAGE_PREFIX}${productId}`);
-    if (cached) {
-      const list: Review[] = JSON.parse(cached);
-      const updated = list.map((r) => (r.id === reviewId ? { ...r, helpful: newCount } : r));
-      localStorage.setItem(`${STORAGE_PREFIX}${productId}`, JSON.stringify(updated));
+    const res = await fetch(`/api/reviews/${encodeURIComponent(reviewId)}/helpful`, {
+      method: 'POST',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      return { success: true, newCount: Number(data.newCount) };
     }
-  } catch {
-    // Ignore
+  } catch (err) {
+    console.warn('Helpful vote error:', err);
   }
+  return { success: false };
+}
 
-  return { success: true, newCount };
+/**
+ * Admin review moderation endpoints
+ */
+export async function fetchAdminReviews(): Promise<{ reviews: Review[]; error?: string }> {
+  try {
+    const headers = await getAuthHeaders();
+    const res = await fetch('/api/admin/reviews', { headers });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { reviews: [], error: data.error || `HTTP ${res.status}` };
+    return { reviews: Array.isArray(data.reviews) ? data.reviews.map(normalizeReview) : [] };
+  } catch (err: any) {
+    return { reviews: [], error: err?.message || 'Failed to fetch reviews' };
+  }
+}
+
+export async function moderateAdminReview(
+  reviewId: string,
+  moderationStatus: 'approved' | 'hidden' | 'rejected'
+): Promise<{ success: boolean; review?: Review; error?: string }> {
+  try {
+    const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+    const res = await fetch(`/api/admin/reviews/${encodeURIComponent(reviewId)}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ moderationStatus }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { success: false, error: data.error || `HTTP ${res.status}` };
+    return { success: true, review: data.review ? normalizeReview(data.review) : undefined };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Moderation failed' };
+  }
+}
+
+export async function deleteAdminReview(reviewId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const headers = await getAuthHeaders();
+    const res = await fetch(`/api/admin/reviews/${encodeURIComponent(reviewId)}`, {
+      method: 'DELETE',
+      headers,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { success: false, error: data.error || `HTTP ${res.status}` };
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to delete review' };
+  }
 }

@@ -9,6 +9,7 @@ import {
 import { PageView } from '../../types';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
 
 interface MobileBottomNavProps {
   currentPage: PageView;
@@ -21,6 +22,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
 }) => {
   const { cartCount } = useCart();
   const { isAuthenticated } = useAuth();
+  const { t } = useLanguage();
 
   // Hidden on admin portal pages or desktop (md:hidden)
   const isAdminRoute =
@@ -36,35 +38,35 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   const navItems = [
     {
       id: 'play' as PageView,
-      label: 'Play',
+      label: t.nav.play,
       icon: Play,
       badge: null,
       isCenter: false,
     },
     {
       id: 'categories' as PageView,
-      label: 'Categories',
+      label: t.nav.categories,
       icon: LayoutGrid,
       badge: null,
       isCenter: false,
     },
     {
       id: 'home' as PageView,
-      label: 'Home',
+      label: t.nav.home,
       icon: Home,
       badge: null,
       isCenter: true,
     },
     {
       id: 'cart' as PageView,
-      label: 'Cart',
+      label: t.nav.cart,
       icon: ShoppingCart,
       badge: cartCount > 0 ? (cartCount > 99 ? '99+' : cartCount) : null,
       isCenter: false,
     },
     {
       id: 'account' as PageView,
-      label: 'Account',
+      label: t.nav.account,
       icon: User,
       badge: null,
       isCenter: false,
