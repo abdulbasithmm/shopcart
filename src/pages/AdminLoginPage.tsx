@@ -34,12 +34,12 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onNavigate }) =>
   const [emailError, setEmailError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
 
-  // If already authenticated with admin role, automatically transition to dashboard
+  // If already authenticated with admin role (and not mid-login submission), automatically transition to dashboard
   React.useEffect(() => {
-    if (!authLoading && user && (isAdmin || user.role === 'admin')) {
+    if (!authLoading && !isLoading && user && (isAdmin || user.role === 'admin')) {
       onNavigate('admin');
     }
-  }, [authLoading, user, isAdmin, onNavigate]);
+  }, [authLoading, isLoading, user, isAdmin, onNavigate]);
 
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,12 +98,12 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onNavigate }) =>
         }
 
         if (data.user) {
-          // 2. Strictly verify administrative authorization from public.profiles table (Requirement 5 & 6)
+          // 2. Strictly verify administrative authorization from public.profiles table
           setLoadingStep('Verifying role in public.profiles table...');
           const role = await verifyUserRole(data.user.id);
 
           if (role !== 'admin') {
-            // Strictly revoke session from admin context & redirect customer away (Requirement 6 & 7)
+            // Strictly revoke session from admin context & redirect customer away
             await supabase.auth.signOut();
             const msg = 'Unauthorized Access: Your account is registered as a customer in public.profiles. Only users with role = "admin" can access /admin/dashboard.';
             setErrorMessage(msg);
@@ -113,10 +113,81 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onNavigate }) =>
             return;
           }
 
-          // 3. User confirmed as admin -> allow access to /admin/dashboard
+          // 3. Verify server-side Bearer clearance when backend API is present
+          const accessToken = data.session?.access_token;
+          if (accessToken) {
+            setLoadingStep('Verifying server-side administrative clearance...');
+            let needsRpcFallback = false;
+            try {
+              const res = await fetch('/api/admin/verify-clearance', {
+                headers: {
+                  Authorization: `Bearer ${accessToken}`,
+                },
+              });
+              const contentType = res.headers.get('content-type') || '';
+              if (res.status === 404 || (res.ok && !contentType.includes('application/json'))) {
+                needsRpcFallback = true;
+              } else if (contentType.includes('application/json')) {
+                const json = await res.json();
+                if (!res.ok || json.authorized !== true || String(json.role || '').trim().toLowerCase() !== 'admin') {
+                  if (res.status === 403) {
+                    await supabase.auth.signOut();
+                    const msg = json?.error || 'Unauthorized Access: Server rejected administrative role.';
+                    setErrorMessage(msg);
+                    showToast(msg, 'error');
+                    setIsLoading(false);
+                    onNavigate('access-denied');
+                    return;
+                  }
+                  if (res.status === 401) {
+                    await supabase.auth.signOut();
+                    const msg = json?.error || 'Session verification failed. Please sign in again.';
+                    setErrorMessage(msg);
+                    showToast(msg, 'error');
+                    setIsLoading(false);
+                    return;
+                  }
+                }
+              }
+            } catch {
+              needsRpcFallback = true;
+            }
+
+            if (needsRpcFallback) {
+              const { data: verifiedAuth, error: verifiedAuthErr } = await supabase.auth.getUser(accessToken);
+              if (verifiedAuthErr || !verifiedAuth?.user || verifiedAuth.user.id !== data.user.id) {
+                await supabase.auth.signOut();
+                const msg = 'Session verification via Supabase Auth failed. Please sign in again.';
+                setErrorMessage(msg);
+                showToast(msg, 'error');
+                setIsLoading(false);
+                return;
+              }
+              const { data: rpcIsAdmin, error: rpcErr } = await supabase.rpc('is_admin');
+              if (!rpcErr && rpcIsAdmin === false) {
+                await supabase.auth.signOut();
+                const msg = 'Unauthorized Access: PostgreSQL public.is_admin() returned false for your profile.';
+                setErrorMessage(msg);
+                showToast(msg, 'error');
+                setIsLoading(false);
+                onNavigate('access-denied');
+                return;
+              }
+            }
+          }
+
+          // 4. Sync AuthContext user state synchronously before navigating so AdminGuard sees verified admin session
           setLoadingStep('Access Granted. Loading Admin Dashboard...');
-          await refreshProfile();
-          showToast(`Welcome back to Shop Cart Admin Console!`, 'success');
+          const syncedUser = await refreshProfile(data.user);
+          if (!syncedUser || syncedUser.role !== 'admin') {
+            const msg = 'Unable to synchronize verified administrator profile. Please try again.';
+            setErrorMessage(msg);
+            showToast(msg, 'error');
+            setIsLoading(false);
+            return;
+          }
+
+          showToast('Welcome back to Shop Cart Admin Console!', 'success');
           onNavigate('admin');
         }
       } else {

@@ -17,9 +17,10 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 interface AccessDeniedPageProps {
   onNavigate: (page: PageView) => void;
+  reason?: string | null;
 }
 
-export const AccessDeniedPage: React.FC<AccessDeniedPageProps> = ({ onNavigate }) => {
+export const AccessDeniedPage: React.FC<AccessDeniedPageProps> = ({ onNavigate, reason }) => {
   const { user, isAuthenticated, logout } = useAuth();
   const { showToast } = useToast();
 
@@ -91,9 +92,13 @@ export const AccessDeniedPage: React.FC<AccessDeniedPageProps> = ({ onNavigate }
             </div>
 
             <p className="text-[11px] text-slate-400 leading-relaxed pt-1">
-              {user?.role === 'customer'
-                ? 'This account is registered with customer privileges. Only accounts with verified role = "admin" in public.profiles can access order fulfillment, pricing, and analytics.'
-                : 'No active administrative session was found. Please authenticate with administrator credentials.'}
+              {reason
+                ? reason
+                : user?.role === 'customer'
+                  ? 'This account is registered with customer privileges. Only accounts with verified role = "admin" in public.profiles can access order fulfillment, pricing, and analytics.'
+                  : user?.role === 'admin'
+                    ? 'Your profile has administrator role, but server-side session verification could not be completed or your session expired. Please re-verify or sign in again.'
+                    : 'No active administrative session was found. Please authenticate with administrator credentials.'}
             </p>
           </div>
 
@@ -111,15 +116,27 @@ export const AccessDeniedPage: React.FC<AccessDeniedPageProps> = ({ onNavigate }
 
           {/* Action Buttons */}
           <div className="space-y-2.5 pt-2">
-            <button
-              type="button"
-              onClick={() => onNavigate('admin-login')}
-              className="w-full py-3 bg-gradient-to-r from-[#0b5c37] to-emerald-700 hover:from-[#08482b] hover:to-emerald-600 text-white font-bold text-xs rounded-xl transition-all shadow-lg shadow-emerald-900/15 flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <Lock className="w-4 h-4" />
-              <span>Sign In with Administrator Account</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+            {user?.role === 'admin' && isAuthenticated ? (
+              <button
+                type="button"
+                onClick={() => onNavigate('admin')}
+                className="w-full py-3 bg-gradient-to-r from-[#0b5c37] to-emerald-700 hover:from-[#08482b] hover:to-emerald-600 text-white font-bold text-xs rounded-xl transition-all shadow-lg shadow-emerald-900/15 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Key className="w-4 h-4" />
+                <span>Verify Session &amp; Open Admin Console</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onNavigate('admin-login')}
+                className="w-full py-3 bg-gradient-to-r from-[#0b5c37] to-emerald-700 hover:from-[#08482b] hover:to-emerald-600 text-white font-bold text-xs rounded-xl transition-all shadow-lg shadow-emerald-900/15 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Lock className="w-4 h-4" />
+                <span>Sign In with Administrator Account</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            )}
 
             {isAuthenticated && (
               <button

@@ -18,7 +18,7 @@ interface AuthContextType {
   updateProfile: (data: Partial<User>) => Promise<{ success: boolean; message?: string }>;
   quickDemoLogin: (asAdmin?: boolean) => void;
   isSupabaseBackend: boolean;
-  refreshProfile: () => Promise<void>;
+  refreshProfile: (authUserOverride?: any) => Promise<User | null>;
   clearPasswordRecovery: () => void;
 }
 
@@ -62,15 +62,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isSupabase = isSupabaseConfigured();
 
   const [user, setUser] = useState<User | null>(() => {
+    if (isSupabase) {
+      // Never hydrate auth session or role from localStorage when Supabase Auth is active
+      try {
+        localStorage.removeItem('shopcart_user');
+      } catch {
+        // Ignore storage errors
+      }
+      return null;
+    }
     try {
       const saved = localStorage.getItem('shopcart_user');
       if (!saved) return null;
-      const parsed = JSON.parse(saved);
-      if (isSupabase && parsed?.id?.startsWith('usr-demo')) {
-        localStorage.removeItem('shopcart_user');
-        return null;
-      }
-      return parsed;
+      return JSON.parse(saved);
     } catch {
       return null;
     }
@@ -86,11 +90,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   // Verify and sync user profile with Supabase
-  const syncSupabaseUser = useCallback(async (authUser: any) => {
-    if (!authUser) return null;
+  const syncSupabaseUser = useCallback(async (authUser: any): Promise<User | null> => {
+    if (!authUser) {
+      setUser(null);
+      return null;
+    }
 
     try {
-      // 1. Fetch DB profile
+      // 1. Fetch authoritative DB profile from public.profiles
       const profile = await fetchCustomerProfile(authUser.id);
       const isConfirmed = !!(authUser.email_confirmed_at || authUser.confirmed_at);
 
@@ -103,7 +110,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return enrichedUser;
       }
 
-      // 2. Profile missing (create or fallback from auth user)
+      // 2. Check whether profile row is genuinely missing vs transient query error
+      const { data: existingRow, error: checkErr } = await supabase
+        .from('profiles')
+        .select('id, role, email, full_name, avatar_url')
+        .eq('id', authUser.id)
+        .maybeSingle();
+
+      if (!checkErr && existingRow) {
+        const recoveredUser: User = {
+          id: existingRow.id,
+          name: existingRow.full_name || existingRow.email?.split('@')[0] || 'User',
+          email: existingRow.email || authUser.email || '',
+          avatar: existingRow.avatar_url || (authUser.email || 'EM').substring(0, 2).toUpperCase(),
+          role: String(existingRow.role || '').trim().toLowerCase() === 'admin' ? 'admin' : 'customer',
+          emailConfirmed: isConfirmed,
+        };
+        setUser(recoveredUser);
+        return recoveredUser;
+      }
+
       const fallbackUser: User = {
         id: authUser.id,
         name: authUser.user_metadata?.full_name || authUser.email?.split('@')[0] || 'Customer',
@@ -113,17 +139,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         emailConfirmed: isConfirmed,
       };
 
-      // Try creating in DB if trigger hasn't
-      try {
-        await supabase.from('profiles').upsert({
-          id: authUser.id,
-          email: authUser.email,
-          full_name: fallbackUser.name,
-          role: 'customer',
-          avatar_url: fallbackUser.avatar,
-        });
-      } catch {
-        // Non-fatal if upsert fails
+      // Only attempt insert if row genuinely does not exist yet (never upsert over existing role)
+      if (!checkErr && !existingRow) {
+        try {
+          await supabase.from('profiles').insert({
+            id: authUser.id,
+            email: authUser.email,
+            full_name: fallbackUser.name,
+            role: 'customer',
+            avatar_url: fallbackUser.avatar,
+          });
+        } catch {
+          // Non-fatal if insert fails
+        }
       }
 
       setUser(fallbackUser);
@@ -140,21 +168,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const initAuth = async () => {
       if (!isSupabase) {
-        setIsLoading(false);
+        if (mounted) setIsLoading(false);
         return;
       }
 
       try {
-        const { data: { session }, error } = await supabase.auth.getSession();
-        if (error) {
-          console.warn('Supabase getSession error:', error.message);
+        const { data: { session }, error: sessionErr } = await supabase.auth.getSession();
+        if (sessionErr) {
+          console.warn('Supabase getSession error:', sessionErr.message);
         }
 
-        if (session?.user && mounted) {
-          await syncSupabaseUser(session.user);
+        if (!session) {
+          if (mounted) setUser(null);
+          return;
+        }
+
+        // Validate session against Supabase Auth server (refreshing if near expiry)
+        let activeUser = session.user;
+        const nowSec = Math.floor(Date.now() / 1000);
+        const expiresAt = typeof session.expires_at === 'number' ? session.expires_at : 0;
+        if (expiresAt > 0 && expiresAt - nowSec < 60) {
+          const { data: refreshed } = await supabase.auth.refreshSession();
+          if (refreshed?.session?.user) {
+            activeUser = refreshed.session.user;
+          }
+        }
+
+        const { data: userData, error: userErr } = await supabase.auth.getUser();
+        if (userErr || !userData?.user) {
+          console.warn('Supabase getUser verification failed:', userErr?.message || 'No active user');
+          if (mounted) setUser(null);
+          return;
+        }
+
+        activeUser = userData.user;
+        if (activeUser && mounted) {
+          await syncSupabaseUser(activeUser);
         }
       } catch (err) {
-        console.warn('Exception during getSession:', err);
+        console.warn('Exception during initAuth:', err);
+        if (mounted) setUser(null);
       } finally {
         if (mounted) setIsLoading(false);
       }
@@ -168,14 +221,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (event === 'PASSWORD_RECOVERY') {
           setIsPasswordRecovery(true);
-        } else if (event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') {
+        } else if (
+          event === 'SIGNED_IN' ||
+          event === 'USER_UPDATED' ||
+          event === 'TOKEN_REFRESHED'
+        ) {
           if (session?.user) {
             await syncSupabaseUser(session.user);
           }
         } else if (event === 'SIGNED_OUT') {
-          if (user && !user.id.startsWith('usr-demo')) {
-            setUser(null);
-          }
+          setUser(null);
         }
       });
 
@@ -186,9 +241,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [isSupabase, syncSupabaseUser]);
 
-  // Persist user to localStorage
+  // Persist non-Supabase local preview state only; when Supabase is active, session lives in Supabase Auth
   useEffect(() => {
     try {
+      if (isSupabase) {
+        localStorage.removeItem('shopcart_user');
+        return;
+      }
       if (user) {
         localStorage.setItem('shopcart_user', JSON.stringify(user));
       } else {
@@ -197,7 +256,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (e) {
       console.warn('Storage error', e);
     }
-  }, [user]);
+  }, [user, isSupabase]);
 
   // Login handler
   const login = async (
@@ -412,12 +471,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(asAdmin ? DEMO_ADMIN : DEMO_CUSTOMER);
   };
 
-  const refreshProfile = async () => {
-    if (user && isSupabase && !user.id.startsWith('usr-demo')) {
-      const p = await fetchCustomerProfile(user.id);
-      if (p) setUser((prev) => ({ ...prev, ...p }));
+  const refreshProfile = useCallback(async (authUserOverride?: any): Promise<User | null> => {
+    if (!isSupabase) return user;
+
+    if (authUserOverride) {
+      return await syncSupabaseUser(authUserOverride);
     }
-  };
+
+    const { data: userData } = await supabase.auth.getUser();
+    const activeAuthUser = userData?.user;
+    if (activeAuthUser) {
+      return await syncSupabaseUser(activeAuthUser);
+    }
+
+    if (user && !user.id.startsWith('usr-demo')) {
+      const p = await fetchCustomerProfile(user.id);
+      if (p) {
+        const nextUser = { ...user, ...p };
+        setUser(nextUser);
+        return nextUser;
+      }
+    }
+    return null;
+  }, [isSupabase, syncSupabaseUser, user]);
 
   const clearPasswordRecovery = () => {
     setIsPasswordRecovery(false);

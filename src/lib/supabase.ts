@@ -97,16 +97,41 @@ export const clearRuntimeSupabaseConfig = () => {
   }
 };
 
+export const getValidAccessToken = async (): Promise<string | null> => {
+  try {
+    if (!isSupabaseConfigured()) return null;
+
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (error || !session) return null;
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    const expiresAt = typeof session.expires_at === 'number' ? session.expires_at : 0;
+
+    // Refresh proactively if expired or expiring within 60 seconds
+    if (!session.access_token || (expiresAt > 0 && expiresAt - nowSec < 60)) {
+      const { data: refreshed, error: refreshErr } = await supabase.auth.refreshSession();
+      if (!refreshErr && refreshed?.session?.access_token) {
+        return refreshed.session.access_token;
+      }
+      if (expiresAt > 0 && expiresAt <= nowSec) {
+        return null;
+      }
+    }
+
+    return session.access_token || null;
+  } catch {
+    return null;
+  }
+};
+
 export const getAuthHeaders = async (
   extraHeaders: Record<string, string> = {}
 ): Promise<Record<string, string>> => {
   const headers: Record<string, string> = { ...extraHeaders };
   try {
-    if (isSupabaseConfigured()) {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        headers.Authorization = `Bearer ${session.access_token}`;
-      }
+    const token = await getValidAccessToken();
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
     }
   } catch {
     // Non-fatal; caller will receive 401/403 from server if auth is required

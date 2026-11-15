@@ -11,7 +11,7 @@ export async function fetchCustomerProfile(userId: string): Promise<User | null>
       .eq('id', userId)
       .maybeSingle();
 
-    if (error || !data) {
+    if (error || !data || data.id !== userId) {
       return null;
     }
 
@@ -46,13 +46,16 @@ export async function fetchCustomerProfile(userId: string): Promise<User | null>
     const primaryShippingAddress: SavedAddress | undefined =
       savedAddrs.find((a) => a.isDefault) || savedAddrs[0] || undefined;
 
+    const normalizedRole =
+      String(data.role || '').trim().toLowerCase() === 'admin' ? 'admin' : 'customer';
+
     return {
       id: data.id,
       name: data.full_name || data.email.split('@')[0],
       email: data.email,
       phone: data.phone || undefined,
       avatar: data.avatar_url || data.email.substring(0, 2).toUpperCase(),
-      role: (data.role === 'admin' ? 'admin' : 'customer') as 'customer' | 'admin',
+      role: normalizedRole as 'customer' | 'admin',
       address: addr?.street
         ? {
             street: addr.street,
@@ -80,12 +83,12 @@ export async function verifyUserRole(userId: string): Promise<'customer' | 'admi
   try {
     const { data, error } = await supabase
       .from('profiles')
-      .select('role')
+      .select('id, role')
       .eq('id', userId)
       .maybeSingle();
 
-    if (error || !data) return 'customer';
-    return data.role === 'admin' ? 'admin' : 'customer';
+    if (error || !data || data.id !== userId) return 'customer';
+    return String(data.role || '').trim().toLowerCase() === 'admin' ? 'admin' : 'customer';
   } catch {
     return 'customer';
   }

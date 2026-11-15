@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { PageView, Product } from './types';
 import { ToastProvider } from './context/ToastContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -160,6 +160,7 @@ function AppContent() {
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
   const [accountTab, setAccountTab] = useState<'profile' | 'orders' | 'wishlist' | 'security'>('profile');
+  const [accessDeniedReason, setAccessDeniedReason] = useState<string | null>(null);
 
   // Synchronize with URL pathname and hash for browser back/forward and direct links
   useEffect(() => {
@@ -222,12 +223,18 @@ function AppContent() {
     }
   }, [isPasswordRecovery]);
 
-  const handleNavigate = (
+  const handleNavigate = useCallback((
     page: PageView,
-    params?: { productId?: string; category?: string; query?: string; tab?: string; adminSection?: AdminSection }
+    params?: { productId?: string; category?: string; query?: string; tab?: string; adminSection?: AdminSection; reason?: string }
   ) => {
     if (params?.tab) {
       setAccountTab(params.tab as any);
+    }
+
+    if (page === 'access-denied') {
+      setAccessDeniedReason(params?.reason || null);
+    } else {
+      setAccessDeniedReason(null);
     }
 
     const hostname = typeof window !== 'undefined' ? window.location.hostname.toLowerCase() : '';
@@ -244,7 +251,7 @@ function AppContent() {
       targetPath = isAdminSubdomain ? '/login' : '/admin/login';
       targetHash = isAdminSubdomain ? '/login' : '/admin/login';
     } else if (page === 'admin') {
-      const sec = params?.adminSection || adminSection || 'dashboard';
+      const sec = params?.adminSection || 'dashboard';
       const secPath = sec === 'settings' ? 'profile' : sec;
       targetPath = isAdminSubdomain ? `/${secPath}` : `/admin/${secPath}`;
       targetHash = isAdminSubdomain ? `/${secPath}` : `/admin/${secPath}`;
@@ -276,7 +283,7 @@ function AppContent() {
 
     setCurrentPage(page);
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  }, []);
 
   const handleSearchFromHeader = (query: string, category: string) => {
     setShopSearchQuery(query);
@@ -360,7 +367,7 @@ function AppContent() {
         )}
 
         {currentPage === 'access-denied' && (
-          <AccessDeniedPage onNavigate={handleNavigate} />
+          <AccessDeniedPage onNavigate={handleNavigate} reason={accessDeniedReason} />
         )}
 
         {currentPage === 'admin' && (

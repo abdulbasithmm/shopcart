@@ -54,8 +54,8 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 // Supabase client initialization for server-side operations:
 // - supabaseAnon uses ONLY the public anon key (safe for public queries & auth.getUser verification).
 // - supabaseAdmin uses the private server-only SUPABASE_SERVICE_ROLE_KEY (never exposed to browser/VITE_*).
-const supabaseUrl = (process.env.VITE_SUPABASE_URL || 'https://kciglyawyagwtgkwsxau.supabase.co').trim();
-const supabaseAnonKey = (process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_9KTWhKGnHHGRmtmkaYz1eg_ib2A0bUp').trim();
+const supabaseUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://kciglyawyagwtgkwsxau.supabase.co').trim();
+const supabaseAnonKey = (process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_9KTWhKGnHHGRmtmkaYz1eg_ib2A0bUp').trim();
 const supabaseServiceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 
 const supabaseAnon = (supabaseUrl && supabaseAnonKey)
@@ -148,7 +148,8 @@ async function verifySupabaseBearerToken(req: Request): Promise<{
   errorMessage?: string;
 }> {
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  const bearerMatch = typeof authHeader === 'string' ? authHeader.match(/^Bearer\s+(.+)$/i) : null;
+  if (!bearerMatch) {
     return {
       user: null,
       profile: null,
@@ -159,7 +160,7 @@ async function verifySupabaseBearerToken(req: Request): Promise<{
     };
   }
 
-  const token = authHeader.slice('Bearer '.length).trim();
+  const token = bearerMatch[1].trim();
   if (!token) {
     return {
       user: null,
@@ -215,7 +216,18 @@ async function verifySupabaseBearerToken(req: Request): Promise<{
       .eq('id', authUser.id)
       .maybeSingle();
 
-    if (profError || !profile) {
+    if (profError) {
+      return {
+        user: authUser,
+        profile: null,
+        token,
+        userClient,
+        errorStatus: 503,
+        errorMessage: `Unable to verify role in public.profiles: ${profError.message}`,
+      };
+    }
+
+    if (!profile) {
       return {
         user: authUser,
         profile: null,
@@ -257,10 +269,11 @@ async function requireAdminAuth(req: Request, res: Response, next: express.NextF
     });
   }
 
-  if (verification.profile?.role !== 'admin') {
+  const normalizedRole = String(verification.profile?.role || '').trim().toLowerCase();
+  if (normalizedRole !== 'admin') {
     return res.status(403).json({
       authorized: false,
-      role: verification.profile?.role || 'customer',
+      role: normalizedRole || 'customer',
       error: 'Forbidden: Only authenticated accounts with role = "admin" in public.profiles may access administrative endpoints.',
     });
   }
