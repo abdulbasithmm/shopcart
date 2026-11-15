@@ -954,8 +954,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           headers,
           body: JSON.stringify({
             orderId: verifyingOrder.id,
+            orderNumber: verifyingOrder.order_number,
             paymentRecordId: verifyingOrder.payment_records?.[0]?.id,
-            adminEmail: verifiedBy,
             notes: auditNotes,
           }),
         });
@@ -989,6 +989,24 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         localStorage.setItem('shopcart_orders', JSON.stringify(updated));
       }
 
+      if (
+        selectedOrderDetails &&
+        (selectedOrderDetails.id === verifyingOrder.id ||
+          (verifyingOrder.order_number && selectedOrderDetails.order_number === verifyingOrder.order_number))
+      ) {
+        setSelectedOrderDetails((prev: any) => ({
+          ...prev,
+          status:
+            prev.status === 'order_placed' || prev.status === 'pending'
+              ? 'confirmed'
+              : prev.status,
+          paymentStatus: 'verified',
+          payment_status: 'verified',
+          verified_at: verifiedAt,
+          verified_by: verifiedBy,
+        }));
+      }
+
       showToast(
         `Payment verified! Order #${verifyingOrder.order_number || verifyingOrder.id} verified & confirmed.`,
         'success'
@@ -1012,8 +1030,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({
 
     try {
       if (isSupabaseConfigured()) {
+        const targetId = orderId || orderNumber || selectedOrderDetails?.order_number;
         const statusHeaders = await getAuthHeaders({ 'Content-Type': 'application/json' });
-        const res = await fetch(`/api/admin/orders/${orderId}/status`, {
+        const res = await fetch(`/api/admin/orders/${encodeURIComponent(targetId)}/status`, {
           method: 'PATCH',
           headers: statusHeaders,
           body: JSON.stringify({
@@ -1360,8 +1379,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           headers,
           body: JSON.stringify({
             orderId: targetOrder.id,
+            orderNumber: targetOrder.order_number,
             paymentRecordId: targetOrder.payment_records?.[0]?.id,
-            adminEmail: rejectedBy,
             reason: reasonText,
           }),
         });
@@ -1392,6 +1411,20 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         localStorage.setItem('shopcart_orders', JSON.stringify(updated));
       }
 
+      if (
+        selectedOrderDetails &&
+        (selectedOrderDetails.id === targetOrder.id ||
+          (targetOrder.order_number && selectedOrderDetails.order_number === targetOrder.order_number))
+      ) {
+        setSelectedOrderDetails((prev: any) => ({
+          ...prev,
+          status: 'cancelled',
+          paymentStatus: 'rejected',
+          payment_status: 'rejected',
+          rejection_reason: reasonText,
+        }));
+      }
+
       showToast(`Payment rejected for Order #${targetOrder.order_number || targetOrder.id}. Order marked Cancelled.`, 'info');
       setVerifyingOrder(null);
       setRejectingOrder(null);
@@ -1416,13 +1449,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         headers,
         body: JSON.stringify(merchantSettingsForm),
       });
-      const data = await res.json();
-      if (data.success && data.settings) {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success && data.settings) {
         setMerchantSettings(data.settings);
         showToast('Merchant payment configuration saved successfully!', 'success');
         setIsMerchantSettingsOpen(false);
       } else {
-        showToast(data.error || 'Failed to save merchant settings', 'error');
+        showToast(data.error || `Failed to save merchant settings (HTTP ${res.status})`, 'error');
       }
     } catch (err: any) {
       showToast(err.message || 'Error saving merchant settings', 'error');
@@ -1443,17 +1476,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         body: JSON.stringify({
           orderNumber: requestingScreenshotOrder.order_number,
           orderId: requestingScreenshotOrder.id,
+          paymentRecordId: requestingScreenshotOrder.payment_records?.[0]?.id,
           message: requestMessage.trim() || 'Please upload a clearer receipt screenshot showing full 12-digit UTR and transfer amount.',
         }),
       });
-      const data = await res.json();
-      if (data.success) {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
         showToast(`Replacement receipt requested for Order #${requestingScreenshotOrder.order_number}`, 'success');
         setRequestingScreenshotOrder(null);
         setRequestMessage('');
         loadAdminData();
       } else {
-        showToast(data.error || 'Failed to send request', 'error');
+        showToast(data.error || `Failed to send request (HTTP ${res.status})`, 'error');
       }
     } catch (err: any) {
       showToast(err.message || 'Error sending request', 'error');
