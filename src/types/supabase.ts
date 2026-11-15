@@ -44,6 +44,7 @@ export interface Database {
           category_name: string;
           price: number;
           original_price: number;
+          gst_rate?: number | null;
           rating: number;
           reviews_count: number;
           is_active: boolean;
@@ -76,6 +77,7 @@ export interface Database {
           category_name: string;
           price: number;
           original_price: number;
+          gst_rate?: number | null;
           rating?: number;
           reviews_count?: number;
           is_active?: boolean;
@@ -108,6 +110,7 @@ export interface Database {
           category_name?: string;
           price?: number;
           original_price?: number;
+          gst_rate?: number | null;
           rating?: number;
           reviews_count?: number;
           is_active?: boolean;
@@ -378,6 +381,8 @@ export interface Database {
         Args: {
           p_product_id: string;
           p_quantity: number;
+          p_order_number?: string | null;
+          p_order_id?: string | null;
         };
         Returns: boolean;
       };

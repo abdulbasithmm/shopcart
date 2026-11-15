@@ -234,45 +234,56 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onQuickView }) =
                     <ellipse cx="460" cy="300" rx="90" ry="20" fill="#ffffff" stroke="#e2e8f0" strokeWidth="1" />
                   </svg>
 
-                  {/* Overlaid Products exactly matching screenshot */}
-                  {/* 1. Headphones */}
-                  <div
-                    onClick={() => onNavigate('product', { productId: 'deal-prod-1' })}
-                    className="absolute left-[8%] bottom-[26%] w-[34%] max-w-[170px] cursor-pointer hover:scale-105 transition-transform duration-300 drop-shadow-xl"
-                    title="AeroTune Studio Headphones"
-                  >
-                    <ProductImage
-                      product={allProducts.find((p) => p.visualType === 'headphones') || allProducts[0]}
-                      size="sm"
-                      showBadge={false}
-                    />
-                  </div>
+                  {/* Overlaid Products bound to live catalog */}
+                  {(() => {
+                    const heroHeadphones =
+                      allProducts.find((p) => p.visualType === 'headphones' || p.id === 'deal-prod-1') ||
+                      allProducts[0];
+                    const heroWatch =
+                      allProducts.find((p) => p.visualType === 'watch' || p.id === 'deal-prod-2') ||
+                      allProducts[1] ||
+                      allProducts[0];
+                    const heroBlender =
+                      allProducts.find((p) => p.visualType === 'blender' || p.id === 'hero-prod-blender') ||
+                      allProducts[7] ||
+                      allProducts[0];
+                    return (
+                      <>
+                        {/* 1. Headphones */}
+                        {heroHeadphones && (
+                          <div
+                            onClick={() => onNavigate('product', { productId: heroHeadphones.id })}
+                            className="absolute left-[8%] bottom-[26%] w-[34%] max-w-[170px] cursor-pointer hover:scale-105 transition-transform duration-300 drop-shadow-xl"
+                            title={heroHeadphones.name}
+                          >
+                            <ProductImage product={heroHeadphones} size="sm" showBadge={false} />
+                          </div>
+                        )}
 
-                  {/* 2. Smartwatch */}
-                  <div
-                    onClick={() => onNavigate('product', { productId: 'deal-prod-2' })}
-                    className="absolute left-[36%] bottom-[32%] w-[28%] max-w-[140px] cursor-pointer hover:scale-105 transition-transform duration-300 drop-shadow-xl z-10"
-                    title="Noise ColorFit Pro 4 Smartwatch"
-                  >
-                    <ProductImage
-                      product={allProducts.find((p) => p.id === 'deal-prod-2') || allProducts[1]}
-                      size="sm"
-                      showBadge={false}
-                    />
-                  </div>
+                        {/* 2. Smartwatch */}
+                        {heroWatch && (
+                          <div
+                            onClick={() => onNavigate('product', { productId: heroWatch.id })}
+                            className="absolute left-[36%] bottom-[32%] w-[28%] max-w-[140px] cursor-pointer hover:scale-105 transition-transform duration-300 drop-shadow-xl z-10"
+                            title={heroWatch.name}
+                          >
+                            <ProductImage product={heroWatch} size="sm" showBadge={false} />
+                          </div>
+                        )}
 
-                  {/* 3. Blender */}
-                  <div
-                    onClick={() => onNavigate('product', { productId: 'hero-prod-blender' })}
-                    className="absolute right-[8%] bottom-[24%] w-[32%] max-w-[160px] cursor-pointer hover:scale-105 transition-transform duration-300 drop-shadow-xl"
-                    title="Philips Kitchen Blender"
-                  >
-                    <ProductImage
-                      product={allProducts.find((p) => p.visualType === 'blender') || allProducts[7]}
-                      size="sm"
-                      showBadge={false}
-                    />
-                  </div>
+                        {/* 3. Blender */}
+                        {heroBlender && (
+                          <div
+                            onClick={() => onNavigate('product', { productId: heroBlender.id })}
+                            className="absolute right-[8%] bottom-[24%] w-[32%] max-w-[160px] cursor-pointer hover:scale-105 transition-transform duration-300 drop-shadow-xl"
+                            title={heroBlender.name}
+                          >
+                            <ProductImage product={heroBlender} size="sm" showBadge={false} />
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
 
                   {/* Small succulent */}
                   <div className="absolute right-[3%] bottom-[22%] w-10 sm:w-12 h-14 pointer-events-none drop-shadow-md">
@@ -345,29 +356,52 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onQuickView }) =
 
               {/* Showcase visuals for Slide 1 */}
               <div className="lg:col-span-7 relative flex items-center justify-center">
-                <div className="grid grid-cols-2 gap-4 w-full max-w-md">
-                  <div
-                    onClick={() => onNavigate('product', { productId: 'deal-prod-1' })}
-                    className="p-5 bg-white rounded-2xl border border-slate-200 shadow-md hover:shadow-lg transition-all cursor-pointer group flex flex-col items-center text-center space-y-2"
-                  >
-                    <div className="w-28 h-28 flex items-center justify-center group-hover:scale-105 transition-transform">
-                      <ProductImage product={PRODUCTS.find((p) => p.visualType === 'earbuds') || PRODUCTS[0]} size="sm" showBadge={false} />
-                    </div>
-                    <span className="text-xs font-bold text-slate-900 group-hover:text-[#0b5c37]">boAt Airdopes 141</span>
-                    <span className="text-xs font-black text-[#0b5c37]">₹5,999</span>
-                  </div>
+                {(() => {
+                  const slide1Left =
+                    allProducts.find((p) => p.visualType === 'earbuds' || p.id === 'deal-prod-1') ||
+                    allProducts[0];
+                  const slide1Right =
+                    allProducts.find((p) => p.visualType === 'watch' || p.id === 'deal-prod-2') ||
+                    allProducts[1] ||
+                    allProducts[0];
+                  return (
+                    <div className="grid grid-cols-2 gap-4 w-full max-w-md">
+                      {slide1Left && (
+                        <div
+                          onClick={() => onNavigate('product', { productId: slide1Left.id })}
+                          className="p-5 bg-white rounded-2xl border border-slate-200 shadow-md hover:shadow-lg transition-all cursor-pointer group flex flex-col items-center text-center space-y-2"
+                        >
+                          <div className="w-28 h-28 flex items-center justify-center group-hover:scale-105 transition-transform">
+                            <ProductImage product={slide1Left} size="sm" showBadge={false} />
+                          </div>
+                          <span className="text-xs font-bold text-slate-900 group-hover:text-[#0b5c37] line-clamp-1">
+                            {slide1Left.name}
+                          </span>
+                          <span className="text-xs font-black text-[#0b5c37]">
+                            {formatPrice(slide1Left.price)}
+                          </span>
+                        </div>
+                      )}
 
-                  <div
-                    onClick={() => onNavigate('product', { productId: 'deal-prod-2' })}
-                    className="p-5 bg-white rounded-2xl border border-slate-200 shadow-md hover:shadow-lg transition-all cursor-pointer group flex flex-col items-center text-center space-y-2"
-                  >
-                    <div className="w-28 h-28 flex items-center justify-center group-hover:scale-105 transition-transform">
-                      <ProductImage product={PRODUCTS.find((p) => p.id === 'deal-prod-2') || PRODUCTS[1]} size="sm" showBadge={false} />
+                      {slide1Right && (
+                        <div
+                          onClick={() => onNavigate('product', { productId: slide1Right.id })}
+                          className="p-5 bg-white rounded-2xl border border-slate-200 shadow-md hover:shadow-lg transition-all cursor-pointer group flex flex-col items-center text-center space-y-2"
+                        >
+                          <div className="w-28 h-28 flex items-center justify-center group-hover:scale-105 transition-transform">
+                            <ProductImage product={slide1Right} size="sm" showBadge={false} />
+                          </div>
+                          <span className="text-xs font-bold text-slate-900 group-hover:text-[#0b5c37] line-clamp-1">
+                            {slide1Right.name}
+                          </span>
+                          <span className="text-xs font-black text-[#0b5c37]">
+                            {formatPrice(slide1Right.price)}
+                          </span>
+                        </div>
+                      )}
                     </div>
-                    <span className="text-xs font-bold text-slate-900 group-hover:text-[#0b5c37]">Noise ColorFit Pro</span>
-                    <span className="text-xs font-black text-[#0b5c37]">₹12,999</span>
-                  </div>
-                </div>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -428,29 +462,53 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onQuickView }) =
 
               {/* Visuals for Slide 2 */}
               <div className="lg:col-span-7 relative flex items-center justify-center">
-                <div className="grid grid-cols-2 gap-4 w-full max-w-md">
-                  <div
-                    onClick={() => onNavigate('product', { productId: 'deal-prod-5' })}
-                    className="p-5 bg-white rounded-2xl border border-slate-200 shadow-md hover:shadow-lg transition-all cursor-pointer group flex flex-col items-center text-center space-y-2"
-                  >
-                    <div className="w-28 h-28 flex items-center justify-center group-hover:scale-105 transition-transform">
-                      <ProductImage product={PRODUCTS.find((p) => p.id === 'deal-prod-5') || PRODUCTS[4]} size="sm" showBadge={false} />
-                    </div>
-                    <span className="text-xs font-bold text-slate-900 group-hover:text-[#0b5c37]">Prestige Cooker</span>
-                    <span className="text-xs font-black text-[#0b5c37]">₹2,399</span>
-                  </div>
+                {(() => {
+                  const slide2Left =
+                    allProducts.find((p) => p.id === 'deal-prod-5' || p.category === 'Home & Kitchen') ||
+                    allProducts[4] ||
+                    allProducts[0];
+                  const slide2Right =
+                    allProducts.find((p) => p.id === 'deal-prod-3' || p.visualType === 'backpack' || p.category === 'Fashion') ||
+                    allProducts[2] ||
+                    allProducts[0];
+                  return (
+                    <div className="grid grid-cols-2 gap-4 w-full max-w-md">
+                      {slide2Left && (
+                        <div
+                          onClick={() => onNavigate('product', { productId: slide2Left.id })}
+                          className="p-5 bg-white rounded-2xl border border-slate-200 shadow-md hover:shadow-lg transition-all cursor-pointer group flex flex-col items-center text-center space-y-2"
+                        >
+                          <div className="w-28 h-28 flex items-center justify-center group-hover:scale-105 transition-transform">
+                            <ProductImage product={slide2Left} size="sm" showBadge={false} />
+                          </div>
+                          <span className="text-xs font-bold text-slate-900 group-hover:text-[#0b5c37] line-clamp-1">
+                            {slide2Left.name}
+                          </span>
+                          <span className="text-xs font-black text-[#0b5c37]">
+                            {formatPrice(slide2Left.price)}
+                          </span>
+                        </div>
+                      )}
 
-                  <div
-                    onClick={() => onNavigate('product', { productId: 'deal-prod-3' })}
-                    className="p-5 bg-white rounded-2xl border border-slate-200 shadow-md hover:shadow-lg transition-all cursor-pointer group flex flex-col items-center text-center space-y-2"
-                  >
-                    <div className="w-28 h-28 flex items-center justify-center group-hover:scale-105 transition-transform">
-                      <ProductImage product={PRODUCTS.find((p) => p.id === 'deal-prod-3') || PRODUCTS[2]} size="sm" showBadge={false} />
+                      {slide2Right && (
+                        <div
+                          onClick={() => onNavigate('product', { productId: slide2Right.id })}
+                          className="p-5 bg-white rounded-2xl border border-slate-200 shadow-md hover:shadow-lg transition-all cursor-pointer group flex flex-col items-center text-center space-y-2"
+                        >
+                          <div className="w-28 h-28 flex items-center justify-center group-hover:scale-105 transition-transform">
+                            <ProductImage product={slide2Right} size="sm" showBadge={false} />
+                          </div>
+                          <span className="text-xs font-bold text-slate-900 group-hover:text-[#0b5c37] line-clamp-1">
+                            {slide2Right.name}
+                          </span>
+                          <span className="text-xs font-black text-[#0b5c37]">
+                            {formatPrice(slide2Right.price)}
+                          </span>
+                        </div>
+                      )}
                     </div>
-                    <span className="text-xs font-bold text-slate-900 group-hover:text-[#0b5c37]">Safari Travel Backpack</span>
-                    <span className="text-xs font-black text-[#0b5c37]">₹999</span>
-                  </div>
-                </div>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -489,14 +547,14 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onQuickView }) =
             </div>
           </div>
 
-          {/* Pillar 2: Pay on Delivery */}
+          {/* Pillar 2: Universal UPI Checkout */}
           <div className="flex items-center gap-3.5 pt-2 sm:pt-0 sm:pl-6">
             <div className="text-[#0b5c37] shrink-0">
               <ShieldCheck className="w-7 h-7 stroke-[1.8]" />
             </div>
             <div>
-              <h4 className="text-xs sm:text-sm font-bold text-slate-900">Pay on Delivery</h4>
-              <p className="text-[11px] text-slate-500 mt-0.5">Cash on delivery available</p>
+              <h4 className="text-xs sm:text-sm font-bold text-slate-900">Universal UPI Accepted</h4>
+              <p className="text-[11px] text-slate-500 mt-0.5">GPay, PhonePe, Paytm, BHIM</p>
             </div>
           </div>
 
@@ -678,7 +736,14 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onQuickView }) =
                     <div className="flex items-center gap-1 pt-1 text-xs text-slate-500">
                       <div className="flex items-center text-[#f59e0b]">
                         {[...Array(5)].map((_, i) => (
-                          <Star key={i} className="w-3 h-3 fill-current stroke-none" />
+                          <Star
+                            key={i}
+                            className={`w-3 h-3 ${
+                              i < Math.round(deal.rating || 5)
+                                ? 'fill-amber-400 text-amber-400'
+                                : 'fill-slate-200 text-slate-200'
+                            }`}
+                          />
                         ))}
                       </div>
                       <span className="text-[11px] font-mono tabular-nums text-slate-400">
@@ -772,9 +837,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onQuickView }) =
 
                 {/* Tablet Display */}
                 <div
-                  onClick={() => {
-                    showToast('Opening Shop Cart Prime Video Player...', 'info');
-                  }}
+                  onClick={() => onNavigate('play')}
                   className="w-40 sm:w-52 aspect-[16/10] bg-slate-950 rounded-lg p-1.5 border-2 border-slate-700 shadow-xl flex flex-col justify-between overflow-hidden relative cursor-pointer group"
                 >
                   <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 flex flex-col justify-between p-2 group-hover:scale-105 transition-transform">
@@ -864,7 +927,14 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onQuickView }) =
                   <div className="flex items-center gap-1 text-xs text-slate-500 pt-0.5">
                     <div className="flex items-center text-[#f59e0b]">
                       {[...Array(5)].map((_, i) => (
-                        <Star key={i} className="w-3 h-3 fill-current stroke-none" />
+                        <Star
+                          key={i}
+                          className={`w-3 h-3 ${
+                            i < Math.round(prod.rating || 5)
+                              ? 'fill-amber-400 text-amber-400'
+                              : 'fill-slate-200 text-slate-200'
+                          }`}
+                        />
                       ))}
                     </div>
                     <span className="text-[11px] font-mono text-slate-400">

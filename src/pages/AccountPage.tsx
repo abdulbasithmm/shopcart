@@ -34,8 +34,9 @@ import {
   Home,
   Briefcase,
 } from 'lucide-react';
-import { PageView, Order, OrderItem, SavedAddress } from '../types';
+import { PageView, Order, OrderItem, Product, SavedAddress } from '../types';
 import { PRODUCTS } from '../data/mockData';
+import { fetchProducts } from '../services/productService';
 import { formatPrice } from '../utils/format';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -96,8 +97,23 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
   const [city, setCity] = useState(user?.address?.city || '');
   const [state, setState] = useState(user?.address?.state || '');
   const [zipCode, setZipCode] = useState(user?.address?.zipCode || '');
-  const [country, setCountry] = useState(user?.address?.country || 'United States');
+  const [country, setCountry] = useState(user?.address?.country || 'India');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [catalogProducts, setCatalogProducts] = useState<Product[]>(PRODUCTS);
+
+  useEffect(() => {
+    let mounted = true;
+    fetchProducts()
+      .then((res) => {
+        if (mounted && res.products && res.products.length > 0) {
+          setCatalogProducts(res.products);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // Security Form state
   const [newPassword, setNewPassword] = useState('');
@@ -150,13 +166,36 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
   };
 
   const handleReorderItem = (item: OrderItem) => {
-    const prod = item.product || PRODUCTS.find((p) => p.id === item.product_id || p.name === item.product_name);
-    if (prod) {
-      addToCart(prod, item.quantity, item.selected_color || undefined, item.selected_size || undefined);
-      showToast(`Added ${item.product_name} to cart!`, 'success');
-    } else {
-      showToast(`Added ${item.product_name} to cart!`, 'success');
-    }
+    const matched =
+      (item.product && (item.product as any).id ? item.product : null) ||
+      catalogProducts.find((p) => p.id === item.product_id || p.name === item.product_name);
+
+    const productToAdd: Product = matched || {
+      id: item.product_id || `reorder-${Date.now()}`,
+      name: item.product_name || 'Shopcart Product',
+      brand: 'Shop Cart',
+      category: 'Electronics',
+      price: Number(item.unit_price || 0),
+      originalPrice: Number(item.unit_price || 0),
+      rating: 4.5,
+      reviewsCount: 1,
+      image: item.product_image || undefined,
+      images: item.product_image ? [item.product_image] : undefined,
+      shortDescription: item.product_name || 'Shopcart product',
+      fullDescription: item.product_name || 'Shopcart product',
+      features: [],
+      specs: {},
+      visualType: 'headphones',
+      accentColor: '#0b5c37',
+      colors: [{ name: item.selected_color || 'Standard', hex: '#0b5c37' }],
+      sizes: item.selected_size ? [item.selected_size] : undefined,
+      inStock: true,
+      stockCount: 10,
+      tags: [],
+    };
+
+    addToCart(productToAdd, item.quantity || 1, item.selected_color || undefined, item.selected_size || undefined);
+    showToast(`Added ${productToAdd.name} to cart!`, 'success');
   };
 
   const handleOpenAddAddress = () => {
@@ -348,7 +387,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
       setCity(user.address?.city || '');
       setState(user.address?.state || '');
       setZipCode(user.address?.zipCode || '');
-      setCountry(user.address?.country || 'United States');
+      setCountry(user.address?.country || 'India');
     }
   }, [user]);
 
@@ -653,7 +692,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
                 <div className="relative">
                   <input
                     type="tel"
-                    placeholder="+1 (555) 000-0000"
+                    placeholder="+91 98765 43210"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     className="w-full py-2.5 pl-9 pr-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
@@ -687,7 +726,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
                   <div className="relative">
                     <input
                       type="text"
-                      placeholder="e.g. 742 Evergreen Terrace"
+                      placeholder="e.g. 42 Indiranagar 100 Feet Road"
                       value={street}
                       onChange={(e) => setStreet(e.target.value)}
                       className="w-full py-2.5 pl-9 pr-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
@@ -703,7 +742,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
                     </label>
                     <input
                       type="text"
-                      placeholder="Seattle"
+                      placeholder="Bengaluru"
                       value={city}
                       onChange={(e) => setCity(e.target.value)}
                       className="w-full py-2.5 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
@@ -716,7 +755,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
                     </label>
                     <input
                       type="text"
-                      placeholder="WA"
+                      placeholder="Karnataka"
                       value={state}
                       onChange={(e) => setState(e.target.value)}
                       className="w-full py-2.5 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
@@ -725,11 +764,11 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
 
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1.5">
-                      Postal / ZIP Code
+                      PIN / Postal Code
                     </label>
                     <input
                       type="text"
-                      placeholder="98101"
+                      placeholder="560038"
                       value={zipCode}
                       onChange={(e) => setZipCode(e.target.value)}
                       className="w-full py-2.5 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0b5c37]"
@@ -1035,7 +1074,25 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
                                 : 'bg-amber-100 text-amber-800 border border-amber-200'
                             }`}
                           >
-                            {(ord.paymentMethod?.includes('phonepe') ? 'PhonePe' : 'Google Pay')}: {ord.paymentStatus === 'verified' ? 'Verified & Paid' : ord.paymentStatus === 'rejected' ? 'Rejected' : 'Waiting for Verification'}
+                            {(() => {
+                              const pm = (ord.paymentMethod || '').toLowerCase();
+                              const pmLabel = pm.includes('phonepe')
+                                ? 'PhonePe'
+                                : pm.includes('paytm')
+                                ? 'Paytm'
+                                : pm.includes('bhim')
+                                ? 'BHIM UPI'
+                                : pm.includes('gpay') || pm.includes('google')
+                                ? 'Google Pay'
+                                : 'Universal UPI';
+                              const statusLabel =
+                                ord.paymentStatus === 'verified'
+                                  ? 'Verified & Paid'
+                                  : ord.paymentStatus === 'rejected'
+                                  ? 'Rejected'
+                                  : 'Waiting for Verification';
+                              return `${pmLabel}: ${statusLabel}`;
+                            })()}
                           </span>
                         </div>
                       </div>
@@ -1191,14 +1248,44 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
                         {/* Ordered Items List */}
                         <div className="divide-y divide-slate-100 border-t border-slate-100 pt-3">
                           {items.map((it: any, idx: number) => {
-                            const prod = it.product || PRODUCTS.find((p) => p.id === it.product_id || p.name === it.product_name);
+                            const matchedProd =
+                              (it.product && (it.product as any).id ? it.product : null) ||
+                              catalogProducts.find((p) => p.id === it.product_id || p.name === it.product_name);
+                            const validImage =
+                              it.product_image && it.product_image !== '/placeholder-product.png'
+                                ? it.product_image
+                                : undefined;
+                            const thumbProd = matchedProd || (validImage
+                              ? ({
+                                  id: it.product_id || `item-${idx}`,
+                                  name: it.product_name || 'Shopcart Product',
+                                  brand: 'Shop Cart',
+                                  category: 'Electronics',
+                                  price: Number(it.unit_price || 0),
+                                  originalPrice: Number(it.unit_price || 0),
+                                  rating: 4.5,
+                                  reviewsCount: 0,
+                                  image: validImage,
+                                  images: [validImage],
+                                  shortDescription: '',
+                                  fullDescription: '',
+                                  features: [],
+                                  specs: {},
+                                  visualType: 'headphones',
+                                  accentColor: '#0b5c37',
+                                  colors: [],
+                                  inStock: true,
+                                  stockCount: 1,
+                                  tags: [],
+                                } as Product)
+                              : null);
                             return (
                               <div key={idx} className="py-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
                                 <div className="flex items-center gap-3">
                                   <div className="w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0">
-                                    {prod ? (
+                                    {thumbProd ? (
                                       <ProductImage
-                                        product={prod}
+                                        product={thumbProd}
                                         size="sm"
                                         showBadge={false}
                                         className="w-full h-full object-cover"
@@ -1290,7 +1377,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ onNavigate, initialTab
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {wishlist.map((productId) => {
-                const prod = PRODUCTS.find((p) => p.id === productId);
+                const prod = catalogProducts.find((p) => p.id === productId);
                 if (!prod) return null;
                 return (
                   <div

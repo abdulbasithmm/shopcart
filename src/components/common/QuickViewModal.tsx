@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Star, ShoppingBag, Check, ShieldCheck, ArrowRight } from 'lucide-react';
 import { Product } from '../../types';
 import { useCart } from '../../context/CartContext';
@@ -18,13 +18,21 @@ export const QuickViewModal: React.FC<QuickViewModalProps> = ({
 }) => {
   const { addToCart, isInWishlist, toggleWishlist } = useCart();
 
-  if (!product) return null;
-
-  const [selectedColor, setSelectedColor] = useState(product.colors[0]?.name || '');
-  const [selectedSize, setSelectedSize] = useState(product.sizes ? product.sizes[0] : '');
+  const [selectedColor, setSelectedColor] = useState(product?.colors?.[0]?.name || '');
+  const [selectedSize, setSelectedSize] = useState(product?.sizes?.[0] || '');
   const [quantity, setQuantity] = useState(1);
 
-  const activeColorObj = product.colors.find((c) => c.name === selectedColor) || product.colors[0];
+  useEffect(() => {
+    if (product) {
+      setSelectedColor(product.colors?.[0]?.name || '');
+      setSelectedSize(product.sizes?.[0] || '');
+      setQuantity(1);
+    }
+  }, [product?.id]);
+
+  if (!product) return null;
+
+  const activeColorObj = product.colors?.find((c) => c.name === selectedColor) || product.colors?.[0];
 
   const handleAddToCart = () => {
     addToCart(product, quantity, selectedColor, selectedSize);

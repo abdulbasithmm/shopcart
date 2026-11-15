@@ -40,6 +40,8 @@ export interface CartContextType {
   discountAmount: number;
   shippingFee: number;
   taxAmount: number;
+  hasUnconfiguredGst: boolean;
+  unconfiguredGstProducts: string[];
   total: number;
   cartCount: number;
   isCartDrawerOpen: boolean;
@@ -386,24 +388,50 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     showToast('Coupon removed', 'info');
   };
 
+  const roundCurrency = (val: number) =>
+    Number((Math.round((Number(val) + Number.EPSILON) * 100) / 100).toFixed(2));
+
   // Cost Computations
-  const subtotal = Number(
-    cart.reduce((acc, item) => acc + item.product.price * item.quantity, 0).toFixed(2)
+  const subtotal = roundCurrency(
+    cart.reduce((acc, item) => acc + roundCurrency(item.product.price * item.quantity), 0)
   );
 
   let discountAmount = 0;
   if (coupon) {
     if (coupon.percentOff) {
-      discountAmount = Number(((subtotal * coupon.percentOff) / 100).toFixed(2));
+      discountAmount = roundCurrency((subtotal * coupon.percentOff) / 100);
     } else if (coupon.fixedOff) {
       discountAmount = Math.min(coupon.fixedOff, subtotal);
     }
   }
 
-  const shippingFee = subtotal === 0 ? 0 : subtotal >= 75 ? 0 : 12;
-  const taxableSubtotal = Math.max(0, subtotal - discountAmount);
-  const taxAmount = Number((taxableSubtotal * 0.08).toFixed(2));
-  const total = Number((taxableSubtotal + shippingFee + taxAmount).toFixed(2));
+  const shippingFee = subtotal === 0 ? 0 : subtotal >= 499 ? 0 : 49;
+  const taxableSubtotal = Math.max(0, roundCurrency(subtotal - discountAmount));
+  const hasValidGstRate = (rate: number | null | undefined): rate is number =>
+    typeof rate === 'number' && Number.isFinite(rate) && rate >= 0 && rate <= 100;
+
+  const unconfiguredGstProducts = Array.from(
+    new Set(
+      cart
+        .filter((item) => !hasValidGstRate(item.product.gstRate))
+        .map((item) => item.product.name)
+    )
+  );
+  const hasUnconfiguredGst = unconfiguredGstProducts.length > 0;
+
+  const taxAmount =
+    subtotal > 0 && taxableSubtotal > 0 && !hasUnconfiguredGst
+      ? roundCurrency(
+          cart.reduce((acc, item) => {
+            const lineTotal = roundCurrency(item.product.price * item.quantity);
+            const taxableShare = roundCurrency((lineTotal * taxableSubtotal) / subtotal);
+            const gstRate = item.product.gstRate as number;
+            const lineTax = roundCurrency((taxableShare * gstRate) / 100);
+            return acc + lineTax;
+          }, 0)
+        )
+      : 0;
+  const total = roundCurrency(taxableSubtotal + shippingFee + taxAmount);
   const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0);
 
   return (
@@ -430,6 +458,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         discountAmount,
         shippingFee,
         taxAmount,
+        hasUnconfiguredGst,
+        unconfiguredGstProducts,
         total,
         cartCount,
         isCartDrawerOpen,

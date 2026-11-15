@@ -96,3 +96,21 @@ export const clearRuntimeSupabaseConfig = () => {
     console.error('Failed to clear Supabase configuration', err);
   }
 };
+
+export const getAuthHeaders = async (
+  extraHeaders: Record<string, string> = {}
+): Promise<Record<string, string>> => {
+  const headers: Record<string, string> = { ...extraHeaders };
+  try {
+    if (isSupabaseConfigured()) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        headers.Authorization = `Bearer ${session.access_token}`;
+      }
+    }
+  } catch {
+    // Non-fatal; caller will receive 401/403 from server if auth is required
+  }
+  return headers;
+};
+

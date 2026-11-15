@@ -16,6 +16,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ onNavigate }) => {
     removeFromCart,
     updateQuantity,
     subtotal,
+    shippingFee,
     cartCount,
   } = useCart();
 
@@ -198,7 +199,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ onNavigate }) => {
               </div>
               <div className="flex justify-between text-slate-500 text-[11px]">
                 <span>Delivery Charges</span>
-                <span className="text-[#0b5c37] font-semibold">FREE</span>
+                <span className={shippingFee === 0 ? 'text-[#0b5c37] font-semibold' : 'text-slate-700 font-semibold tabular-nums'}>
+                  {shippingFee === 0 ? 'FREE' : formatPrice(shippingFee)}
+                </span>
               </div>
             </div>
 

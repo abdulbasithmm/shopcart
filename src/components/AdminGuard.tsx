@@ -47,30 +47,29 @@ export const AdminGuard: React.FC<AdminGuardProps> = ({ children, onNavigate }) 
         return;
       }
 
-      // 3. Demo admin account in local development
-      if (user.id === 'usr-demo-admin') {
-        if (isMounted) {
-          setHasAdminPrivilege(true);
-          setIsVerifying(false);
-        }
-        return;
-      }
-
-      // 4. Server-Authoritative & Database Role Verification (Never trust browser-supplied role)
+      // 3. Server-Authoritative & Database Role Verification (Never trust browser-supplied role or localStorage)
       if (isSupabaseBackend) {
         try {
-          // A. Check active JWT with server-side endpoint
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session?.access_token) {
+            if (isMounted) {
+              setHasAdminPrivilege(false);
+              setIsVerifying(false);
+              onNavigate('admin-login');
+            }
+            return;
+          }
+
           let isServerVerifiedAdmin = false;
           try {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (session?.access_token) {
-              const res = await fetch('/api/admin/verify-clearance', {
-                headers: {
-                  Authorization: `Bearer ${session.access_token}`,
-                },
-              });
+            const res = await fetch('/api/admin/verify-clearance', {
+              headers: {
+                Authorization: `Bearer ${session.access_token}`,
+              },
+            });
+            if (res.ok) {
               const json = await res.json();
-              if (json.authorized && json.role === 'admin') {
+              if (json.authorized === true && json.role === 'admin') {
                 isServerVerifiedAdmin = true;
               }
             }
@@ -78,11 +77,11 @@ export const AdminGuard: React.FC<AdminGuardProps> = ({ children, onNavigate }) 
             console.warn('Server clearance check error:', apiErr);
           }
 
-          // B. Query public.profiles directly in PostgreSQL via RLS
+          // Query public.profiles directly in PostgreSQL via RLS as secondary verification
           const verifiedDbRole = await verifyUserRole(user.id);
 
           if (isMounted) {
-            if (isServerVerifiedAdmin || verifiedDbRole === 'admin') {
+            if (isServerVerifiedAdmin && verifiedDbRole === 'admin') {
               setHasAdminPrivilege(true);
             } else {
               setHasAdminPrivilege(false);

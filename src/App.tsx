@@ -154,7 +154,7 @@ function AppContent() {
   const initialRoute = parseCurrentRoute();
   const [currentPage, setCurrentPage] = useState<PageView>(initialRoute.page);
   const [adminSection, setAdminSection] = useState<AdminSection>(initialRoute.adminSection || 'dashboard');
-  const [selectedProductId, setSelectedProductId] = useState<string>(initialRoute.productId || 'eko-prod-1');
+  const [selectedProductId, setSelectedProductId] = useState<string>(initialRoute.productId || 'deal-prod-1');
   const [shopCategory, setShopCategory] = useState<string>('all');
   const [shopSearchQuery, setShopSearchQuery] = useState<string>('');
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);

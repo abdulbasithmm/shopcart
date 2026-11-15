@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
@@ -13,8 +14,28 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === 'production';
+
+function resolveServerPort(): number {
+  const portFlagIndex = process.argv.findIndex((arg) => arg === '--port' || arg.startsWith('--port='));
+  if (portFlagIndex !== -1) {
+    const raw = process.argv[portFlagIndex].includes('=')
+      ? process.argv[portFlagIndex].split('=')[1]
+      : process.argv[portFlagIndex + 1];
+    const parsed = Number(raw);
+    if (Number.isInteger(parsed) && parsed > 0) return parsed;
+  }
+
+  const envPort = Number(process.env.PORT);
+  // In Cloud Run / AI Studio dev containers, nginx listens on 8080 and proxies to dev server on 3000.
+  if (!isProduction && envPort === 8080) {
+    return 3000;
+  }
+
+  return Number.isInteger(envPort) && envPort > 0 ? envPort : 3000;
+}
+
+const PORT = resolveServerPort();
 
 // PayPal Configuration (historical sandbox legacy)
 const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID || 'sb';
@@ -30,10 +51,39 @@ if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
-// Supabase client initialization for server-side operations
-const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://kciglyawyagwtgkwsxau.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_9KTWhKGnHHGRmtmkaYz1eg_ib2A0bUp';
-const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
+// Supabase client initialization for server-side operations:
+// - supabaseAnon uses ONLY the public anon key (safe for public queries & auth.getUser verification).
+// - supabaseAdmin uses the private server-only SUPABASE_SERVICE_ROLE_KEY (never exposed to browser/VITE_*).
+const supabaseUrl = (process.env.VITE_SUPABASE_URL || 'https://kciglyawyagwtgkwsxau.supabase.co').trim();
+const supabaseAnonKey = (process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_9KTWhKGnHHGRmtmkaYz1eg_ib2A0bUp').trim();
+const supabaseServiceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+
+const supabaseAnon = (supabaseUrl && supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+  : null;
+
+const supabaseAdmin = (supabaseUrl && supabaseServiceRoleKey)
+  ? createClient(supabaseUrl, supabaseServiceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+  : null;
+
+function createUserSupabaseClient(accessToken: string) {
+  if (!supabaseUrl || !supabaseAnonKey || !accessToken) return null;
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  });
+}
+
+// Public alias strictly bound to anon client (never service_role)
+const supabase = supabaseAnon;
 
 // Server-side Gemini AI initialization (using official @google/genai SDK)
 const geminiApiKey = process.env.GEMINI_API_KEY || '';
@@ -80,7 +130,7 @@ app.use((req: Request, res: Response, next) => {
   }
 
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Admin-Role');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
 
   if (req.method === 'OPTIONS') {
     return res.sendStatus(204);
@@ -88,51 +138,389 @@ app.use((req: Request, res: Response, next) => {
   next();
 });
 
-// Admin API Guard: strictly verify authorization and block customer roles from admin endpoints
-app.use('/api/admin', async (req: Request, res: Response, next) => {
-  if (req.method === 'OPTIONS') return next();
-
+// Verify a Supabase JWT Bearer token server-side and fetch the authoritative public.profiles row
+async function verifySupabaseBearerToken(req: Request): Promise<{
+  user: any | null;
+  profile: { id: string; email: string; full_name?: string | null; role: string } | null;
+  token: string | null;
+  userClient: any | null;
+  errorStatus?: number;
+  errorMessage?: string;
+}> {
   const authHeader = req.headers.authorization;
-  if (supabase && authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.replace('Bearer ', '').trim();
-    try {
-      const { data: { user: authUser }, error } = await supabase.auth.getUser(token);
-      if (error || !authUser) {
-        return res.status(401).json({ error: 'Unauthorized: Invalid administrative bearer token.' });
-      }
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', authUser.id)
-        .maybeSingle();
-
-      if (profile?.role !== 'admin') {
-        return res.status(403).json({
-          error: 'Forbidden: Customers cannot access administrative management endpoints.',
-        });
-      }
-      (req as any).adminUser = authUser;
-      return next();
-    } catch (authErr) {
-      console.warn('Error verifying admin token:', authErr);
-    }
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return {
+      user: null,
+      profile: null,
+      token: null,
+      userClient: null,
+      errorStatus: 401,
+      errorMessage: 'Unauthorized: Missing Supabase Bearer access token.',
+    };
   }
 
-  // Check role header or admin identity
-  const roleHeader = req.headers['x-admin-role'] || req.headers['x-role'];
-  if (roleHeader === 'customer') {
-    return res.status(403).json({
-      error: 'Forbidden: Customer accounts are rejected from /api/admin operations.',
+  const token = authHeader.slice('Bearer '.length).trim();
+  if (!token) {
+    return {
+      user: null,
+      profile: null,
+      token: null,
+      userClient: null,
+      errorStatus: 401,
+      errorMessage: 'Unauthorized: Empty Supabase Bearer access token.',
+    };
+  }
+
+  const authClient = supabaseAdmin || supabaseAnon;
+  if (!authClient) {
+    return {
+      user: null,
+      profile: null,
+      token: null,
+      userClient: null,
+      errorStatus: 503,
+      errorMessage: 'Authentication service unavailable: Supabase is not configured.',
+    };
+  }
+
+  try {
+    const { data: { user: authUser }, error: authError } = await authClient.auth.getUser(token);
+    if (authError || !authUser) {
+      return {
+        user: null,
+        profile: null,
+        token: null,
+        userClient: null,
+        errorStatus: 401,
+        errorMessage: 'Unauthorized: Invalid or expired Supabase access token.',
+      };
+    }
+
+    const userClient = createUserSupabaseClient(token);
+    const dbForProfile = supabaseAdmin || userClient || supabaseAnon;
+    if (!dbForProfile) {
+      return {
+        user: authUser,
+        profile: null,
+        token,
+        userClient,
+        errorStatus: 503,
+        errorMessage: 'Database client unavailable while verifying profile.',
+      };
+    }
+
+    const { data: profile, error: profError } = await dbForProfile
+      .from('profiles')
+      .select('id, email, full_name, role')
+      .eq('id', authUser.id)
+      .maybeSingle();
+
+    if (profError || !profile) {
+      return {
+        user: authUser,
+        profile: null,
+        token,
+        userClient,
+        errorStatus: 403,
+        errorMessage: 'Forbidden: No authoritative profile record found in public.profiles.',
+      };
+    }
+
+    return {
+      user: authUser,
+      profile,
+      token,
+      userClient,
+    };
+  } catch {
+    return {
+      user: null,
+      profile: null,
+      token: null,
+      userClient: null,
+      errorStatus: 401,
+      errorMessage: 'Unauthorized: Token verification failed.',
+    };
+  }
+}
+
+// Strict Admin API Guard: rejects unauthenticated (401) and non-admin (403) callers.
+// Never trusts x-role, x-admin-role, body parameters, or client-side auth state.
+async function requireAdminAuth(req: Request, res: Response, next: express.NextFunction) {
+  if (req.method === 'OPTIONS') return next();
+
+  const verification = await verifySupabaseBearerToken(req);
+  if (verification.errorStatus) {
+    return res.status(verification.errorStatus).json({
+      authorized: false,
+      error: verification.errorMessage,
     });
   }
 
-  next();
-});
+  if (verification.profile?.role !== 'admin') {
+    return res.status(403).json({
+      authorized: false,
+      role: verification.profile?.role || 'customer',
+      error: 'Forbidden: Only authenticated accounts with role = "admin" in public.profiles may access administrative endpoints.',
+    });
+  }
+
+  (req as any).adminUser = verification.user;
+  (req as any).adminProfile = verification.profile;
+  (req as any).adminToken = verification.token;
+  (req as any).adminSupabase = supabaseAdmin || verification.userClient;
+  return next();
+}
+
+app.use('/api/admin', requireAdminAuth);
 
 // Persistent orders store cache to guarantee instant data availability and sync across restarts
 const ORDERS_DISK_FILE = path.join(process.cwd(), 'data/orders.json');
 const serverOrdersStore = new Map<string, any>();
+// Cache of recorded UTRs and active in-flight locks to guard concurrent submissions
+const recordedUtrMemory = new Set<string>();
+const inFlightOrderNumbers = new Set<string>();
+const inFlightUtrs = new Set<string>();
+
+const SUPPORTED_UPI_METHODS = new Set([
+  'google_pay',
+  'phonepe',
+  'paytm',
+  'bhim',
+  'all_upi',
+  'gpay_upi',
+]);
+
+function roundCurrency(value: number): number {
+  return Number((Math.round((Number(value) + Number.EPSILON) * 100) / 100).toFixed(2));
+}
+
+function normalizeUtrValue(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  return raw.replace(/[\s-]+/g, '').trim().toUpperCase();
+}
+
+const serverAiAnalysisCache = new Map<string, { provider: string; analysis: any; createdAt: number }>();
+
+function cacheServerAiAnalysis(key: string, value: { provider: string; analysis: any; createdAt: number }) {
+  if (serverAiAnalysisCache.size >= 500) {
+    const oldestKey = serverAiAnalysisCache.keys().next().value;
+    if (oldestKey) serverAiAnalysisCache.delete(oldestKey);
+  }
+  serverAiAnalysisCache.set(key, value);
+}
+
+async function analyzePaymentScreenshotServer(params: {
+  screenshotBase64: string;
+  mimeType?: string;
+  expectedAmount: number;
+  expectedOrderNumber?: string;
+  expectedMerchantUpi?: string;
+}): Promise<{ provider: string; analysis: any }> {
+  const rawInput = String(params.screenshotBase64 || '').trim();
+  const dataUriMatch = rawInput.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,/i);
+  const detectedMime = dataUriMatch?.[1]?.toLowerCase() || String(params.mimeType || 'image/jpeg').toLowerCase();
+  const normalizedMime = detectedMime.includes('png')
+    ? 'image/png'
+    : detectedMime.includes('webp')
+      ? 'image/webp'
+      : 'image/jpeg';
+
+  const cleanBase64 = rawInput.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/i, '').trim();
+  const imageBuffer = Buffer.from(cleanBase64, 'base64');
+  if (!cleanBase64 || imageBuffer.length === 0) {
+    throw new Error('Invalid or empty screenshot image payload.');
+  }
+
+  const numExpectedAmount = roundCurrency(Number(params.expectedAmount) || 0);
+  const cleanOrderNum = String(params.expectedOrderNumber || '').trim();
+  const targetMerchant = String(
+    params.expectedMerchantUpi || merchantPaymentSettings.merchant_upi_id || 'shopcart.merchant@okaxis'
+  ).trim().toLowerCase();
+
+  const imageSha256 = crypto.createHash('sha256').update(imageBuffer).digest('hex');
+  const cacheKey = `${imageSha256}:${numExpectedAmount.toFixed(2)}:${cleanOrderNum}:${targetMerchant}`;
+  const cached = serverAiAnalysisCache.get(cacheKey);
+  if (cached) {
+    return {
+      provider: cached.provider,
+      analysis: { ...cached.analysis },
+    };
+  }
+
+  // 1. If Gemini AI is configured via GEMINI_API_KEY, perform real server-side multimodal inspection
+  if (ai) {
+    try {
+      const promptText = `
+You are an expert Senior Banking & UPI Payment Fraud Detection Specialist analyzing a customer-uploaded payment success screenshot for the e-commerce store "Shopcart".
+
+Order Context:
+- Expected Order Number: ${cleanOrderNum || 'N/A'}
+- Expected Payable Amount: ₹${numExpectedAmount.toFixed(2)} INR
+- Expected Merchant Payee / UPI ID: ${targetMerchant} (or Shopcart)
+
+Analyze the image with utmost scrutiny:
+1. Receipt Authenticity & Status: Is this an authentic payment success receipt from a recognized UPI application (e.g. Google Pay, PhonePe, Paytm, BHIM, Cred, Amazon Pay, Axis/HDFC/SBI/iMobile Bank app)? Does it show "Paid", "Payment Successful", "Transferred"? Or is it "Failed", "Pending", "Processing", an order preview, or not a payment screenshot at all?
+2. Transaction Reference: Extract the 12-character alphanumeric UPI UTR / RRN (Bank Reference Number) or Transaction ID if present, otherwise empty string.
+3. Amount: Extract the numerical amount paid in INR. Compare with expected ₹${numExpectedAmount.toFixed(2)}.
+4. Payee / Merchant: Who was the recipient? Extract the payee name or UPI ID. Compare with ${targetMerchant} or Shopcart.
+5. Timestamp: Extract date and time of payment.
+6. Fraud & Manipulation Signals: Check for digital alterations, font mismatches, uneven pixel compression, blurry text around amounts, edited numbers, suspicious watermarks, fake receipt generator templates, or cropped status bars.
+7. Decision & Confidence:
+   - "recommended_action": Choose exactly one of: "DETAILS_MATCH" (genuine receipt, amount matches, payee matches, no signs of tampering), "REVIEW_REQUIRED" (slight amount mismatch, blurry screenshot, unconfirmed payee), "POSSIBLE_FRAUD" (edited receipt, failed payment claiming success, severe amount discrepancy, fake template).
+   - "confidence_score": 0 to 100 integer.
+
+Respond ONLY with a valid JSON object matching this exact structure:
+{
+  "screenshot_status": "valid_success" | "payment_failed" | "tampered" | "unclear" | "not_a_receipt",
+  "extracted_utr": "12-character alphanumeric string or empty string",
+  "extracted_amount": 123.45,
+  "extracted_merchant": "extracted payee or UPI ID",
+  "extracted_app": "Google Pay" | "PhonePe" | "Paytm" | "BHIM" | "Cred" | "Amazon Pay" | "Banking App" | "Unknown",
+  "extracted_timestamp": "extracted date/time or empty",
+  "amount_matches": true | false,
+  "merchant_matches": true | false,
+  "suspicious_indicators": ["list of specific suspicious signals or empty array if clean"],
+  "confidence_score": 90,
+  "recommended_action": "DETAILS_MATCH" | "REVIEW_REQUIRED" | "POSSIBLE_FRAUD",
+  "ai_summary": "1-2 sentence concise summary of findings"
+}
+`;
+
+      const imagePart = {
+        inlineData: {
+          mimeType: normalizedMime,
+          data: cleanBase64,
+        },
+      };
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: { parts: [imagePart, { text: promptText }] },
+        config: {
+          responseMimeType: 'application/json',
+        },
+      });
+
+      const rawText = (response.text || '').trim();
+      let parsedResult: any = null;
+
+      try {
+        parsedResult = JSON.parse(rawText);
+      } catch {
+        const match = rawText.match(/\{[\s\S]*\}/);
+        if (match) parsedResult = JSON.parse(match[0]);
+      }
+
+      if (parsedResult && typeof parsedResult === 'object') {
+        const allowedStatuses = new Set(['valid_success', 'payment_failed', 'tampered', 'unclear', 'not_a_receipt']);
+        const allowedActions = new Set(['DETAILS_MATCH', 'REVIEW_REQUIRED', 'POSSIBLE_FRAUD']);
+
+        const normalizedExtractedUtr = normalizeUtrValue(parsedResult.extracted_utr);
+        const validExtractedUtr = /^[0-9A-Z]{12}$/.test(normalizedExtractedUtr) ? normalizedExtractedUtr : '';
+        const extractedAmount = Number(parsedResult.extracted_amount);
+        const safeExtractedAmount = Number.isFinite(extractedAmount) && extractedAmount >= 0
+          ? roundCurrency(extractedAmount)
+          : 0;
+
+        const suspiciousList = Array.isArray(parsedResult.suspicious_indicators)
+          ? parsedResult.suspicious_indicators.map((s: any) => String(s || '').trim()).filter(Boolean)
+          : [];
+
+        let recommendedAction = allowedActions.has(String(parsedResult.recommended_action))
+          ? String(parsedResult.recommended_action)
+          : 'REVIEW_REQUIRED';
+
+        let amountMatches = Boolean(parsedResult.amount_matches);
+        if (numExpectedAmount > 0 && safeExtractedAmount > 0) {
+          const diff = Math.abs(safeExtractedAmount - numExpectedAmount);
+          if (diff > 0.5) {
+            amountMatches = false;
+            const mismatchMsg = `Paid amount (₹${safeExtractedAmount}) does not match expected order total (₹${numExpectedAmount})`;
+            if (!suspiciousList.includes(mismatchMsg)) {
+              suspiciousList.push(mismatchMsg);
+            }
+            if (recommendedAction === 'DETAILS_MATCH') {
+              recommendedAction = 'REVIEW_REQUIRED';
+            }
+          } else {
+            amountMatches = true;
+          }
+        } else if (numExpectedAmount > 0) {
+          amountMatches = false;
+          if (recommendedAction === 'DETAILS_MATCH') {
+            recommendedAction = 'REVIEW_REQUIRED';
+          }
+        }
+
+        const sanitizedAnalysis = {
+          screenshot_status: allowedStatuses.has(String(parsedResult.screenshot_status))
+            ? String(parsedResult.screenshot_status)
+            : 'unclear',
+          extracted_utr: validExtractedUtr,
+          extracted_amount: safeExtractedAmount,
+          extracted_merchant: String(parsedResult.extracted_merchant || '').slice(0, 120),
+          extracted_app: String(parsedResult.extracted_app || 'Unknown').slice(0, 60),
+          extracted_timestamp: String(parsedResult.extracted_timestamp || '').slice(0, 80),
+          amount_matches: amountMatches,
+          merchant_matches: Boolean(parsedResult.merchant_matches),
+          suspicious_indicators: suspiciousList,
+          confidence_score: Math.max(0, Math.min(100, Math.round(Number(parsedResult.confidence_score) || 0))),
+          recommended_action: recommendedAction,
+          ai_summary: String(parsedResult.ai_summary || 'Preliminary AI screening completed. Manual administrative verification required.').slice(0, 500),
+          source: 'server_gemini',
+          image_sha256: imageSha256,
+          expected_amount: numExpectedAmount,
+          analyzed_at: new Date().toISOString(),
+        };
+
+        const out = { provider: 'gemini-4-hydrogen', analysis: sanitizedAnalysis };
+        cacheServerAiAnalysis(cacheKey, { ...out, createdAt: Date.now() });
+        return out;
+      }
+    } catch (aiErr: any) {
+      console.warn('Gemini screenshot analysis error, falling back to heuristic evaluation:', aiErr?.message);
+    }
+  }
+
+  // 2. Server-side Heuristic Advisory Fallback (never fabricates fake UTR or fake verified match)
+  const bufferSize = imageBuffer.length;
+  const isReasonableSize = bufferSize > 15000 && bufferSize < 15000000;
+  const indicators = [
+    'Automated OCR extraction unavailable; manual administrator bank-ledger and 12-character UTR verification required.',
+  ];
+  if (!isReasonableSize) {
+    indicators.push('Image resolution or file size appears unusually low for an authentic mobile UPI receipt.');
+  }
+
+  const fallbackAnalysis = {
+    screenshot_status: 'unclear',
+    extracted_utr: '',
+    extracted_amount: 0,
+    extracted_merchant: '',
+    extracted_app: 'Unknown',
+    extracted_timestamp: '',
+    amount_matches: false,
+    merchant_matches: false,
+    suspicious_indicators: indicators,
+    confidence_score: isReasonableSize ? 45 : 20,
+    recommended_action: 'REVIEW_REQUIRED',
+    ai_summary: isReasonableSize
+      ? `Receipt image uploaded (${(bufferSize / 1024).toFixed(0)} KB). Automated OCR unavailable; payment remains pending manual administrative verification.`
+      : 'Receipt image appears unclear or unusually small. Manual administrative verification required.',
+    source: 'server_heuristic_advisory',
+    image_sha256: imageSha256,
+    expected_amount: numExpectedAmount,
+    analyzed_at: new Date().toISOString(),
+  };
+
+  const out = {
+    provider: ai ? 'heuristic_fallback' : 'local_heuristic_advisory',
+    analysis: fallbackAnalysis,
+  };
+  cacheServerAiAnalysis(cacheKey, { ...out, createdAt: Date.now() });
+  return out;
+}
 
 function loadOrdersFromDisk() {
   try {
@@ -152,6 +540,7 @@ function loadOrdersFromDisk() {
 
 function saveOrdersToDisk() {
   try {
+    fs.mkdirSync(path.dirname(ORDERS_DISK_FILE), { recursive: true });
     const list = Array.from(serverOrdersStore.values());
     fs.writeFileSync(ORDERS_DISK_FILE, JSON.stringify(list, null, 2), 'utf-8');
   } catch (err) {
@@ -201,13 +590,17 @@ app.all('/api/paypal/*', (_req: Request, res: Response) => {
 
 // -----------------------------------------------------------------------------
 // SECURE ORDER CREATION & DATABASE PERSISTENCE API
-// Customer Checkout -> Secure Order Creation API -> Supabase PostgreSQL
+// Customer Checkout -> Server Pricing & Validation -> Atomic create_complete_order RPC
 // -----------------------------------------------------------------------------
 app.post('/api/orders/create', async (req: Request, res: Response) => {
+  let acquiredOrderLock = '';
+  let acquiredUtrLock = '';
+
   try {
     const {
       orderNumber,
-      userId,
+      status: requestedStatus,
+      paymentStatus: requestedPaymentStatus,
       customerName,
       customerEmail,
       customerPhone,
@@ -219,363 +612,667 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
       landmark,
       deliveryInstructions,
       country = 'India',
+      shippingSpeed: rawShippingSpeed,
       cartItems = [],
       pricing = {},
       paymentMethod = 'all_upi',
       transactionReference,
       screenshotBase64,
       screenshotUrl: providedScreenshotUrl,
-      aiAnalysis,
       customerNotes,
-    } = req.body;
+    } = req.body || {};
 
-    // 1. Validate Required Fields
-    if (!orderNumber) {
-      return res.status(400).json({ error: 'Order Number is required.' });
+    // 0. Server-side Supabase admin client is mandatory for authoritative pricing & atomic order RPC
+    if (!supabaseAdmin) {
+      return res.status(503).json({
+        error: 'Order service unavailable: server-side Supabase service role credentials are required.',
+      });
     }
 
-    if (!customerName || !customerName.trim()) {
+    // 1. Validate Initial Status & Payment Status (fail-closed: never allow spoofing)
+    if (requestedStatus !== undefined && requestedStatus !== null && String(requestedStatus).trim() !== '' && String(requestedStatus).trim() !== 'order_placed') {
+      return res.status(400).json({
+        error: 'Invalid initial order status: new orders must begin in order_placed state.',
+      });
+    }
+    if (
+      requestedPaymentStatus !== undefined &&
+      requestedPaymentStatus !== null &&
+      String(requestedPaymentStatus).trim() !== '' &&
+      String(requestedPaymentStatus).trim() !== 'pending_admin_verification'
+    ) {
+      return res.status(400).json({
+        error: 'Invalid initial payment status: new orders always require pending_admin_verification.',
+      });
+    }
+
+    // 2. Validate Order Number & Customer Delivery Details
+    const cleanOrderNumber = typeof orderNumber === 'string' ? orderNumber.trim() : '';
+    if (!cleanOrderNumber || cleanOrderNumber.length < 3) {
+      return res.status(400).json({ error: 'A valid Order Number (minimum 3 characters) is required.' });
+    }
+
+    if (inFlightOrderNumbers.has(cleanOrderNumber) || serverOrdersStore.has(cleanOrderNumber)) {
+      return res.status(409).json({
+        error: `Duplicate Order Number: Order "${cleanOrderNumber}" has already been submitted or is currently being processed.`,
+      });
+    }
+
+    const cleanCustomerName = typeof customerName === 'string' ? customerName.trim() : '';
+    if (!cleanCustomerName) {
       return res.status(400).json({ error: 'Customer Full Name is required.' });
     }
 
+    const cleanCustomerEmail = typeof customerEmail === 'string' ? customerEmail.trim() : '';
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!customerEmail || !emailRegex.test(customerEmail.trim())) {
+    if (!cleanCustomerEmail || !emailRegex.test(cleanCustomerEmail)) {
       return res.status(400).json({ error: 'A valid customer email address is required.' });
     }
 
-    // Validate Indian 10-digit mobile number
-    const cleanPhone = (customerPhone || '').replace(/[\s\-\+\(\)]/g, '').replace(/^91/, '');
-    if (!cleanPhone || cleanPhone.length !== 10 || !/^[6-9]\d{9}$/.test(cleanPhone)) {
+    const cleanPhone = String(customerPhone || '').replace(/[\s\-\+\(\)]/g, '').replace(/^91(?=\d{10}$)/, '');
+    if (!cleanPhone || !/^[6-9]\d{9}$/.test(cleanPhone)) {
       return res.status(400).json({
         error: 'Please enter a valid 10-digit Indian mobile number (e.g., 9876543210).',
       });
     }
 
-    // Validate Delivery Address
-    if (!houseBuilding || !houseBuilding.trim()) {
-      return res.status(400).json({ error: 'House or Building name/number is required.' });
-    }
+    const cleanHouse = typeof houseBuilding === 'string' ? houseBuilding.trim() : '';
+    const cleanStreet = typeof streetArea === 'string' ? streetArea.trim() : '';
+    const cleanCity = typeof city === 'string' ? city.trim() : '';
+    const cleanState = typeof state === 'string' ? state.trim() : '';
+    const cleanPin = String(pinCode || '').replace(/\s+/g, '').trim();
 
-    if (!streetArea || !streetArea.trim()) {
-      return res.status(400).json({ error: 'Street or Area name is required.' });
-    }
-
-    if (!city || !city.trim()) {
-      return res.status(400).json({ error: 'City is required.' });
-    }
-
-    if (!state || !state.trim()) {
-      return res.status(400).json({ error: 'State is required.' });
-    }
-
-    // Validate 6-digit Indian PIN Code
-    const cleanPin = (pinCode || '').trim();
+    if (!cleanHouse) return res.status(400).json({ error: 'House or Building name/number is required.' });
+    if (!cleanStreet) return res.status(400).json({ error: 'Street or Area name is required.' });
+    if (!cleanCity) return res.status(400).json({ error: 'City is required.' });
+    if (!cleanState) return res.status(400).json({ error: 'State is required.' });
     if (!cleanPin || !/^\d{6}$/.test(cleanPin)) {
       return res.status(400).json({
         error: 'Please enter a valid 6-digit Indian postal PIN code (e.g., 560001).',
       });
     }
 
-    // Validate Cart Items
+    const shippingSpeedRaw = String(rawShippingSpeed || pricing?.shippingSpeed || 'standard').trim().toLowerCase();
+    if (shippingSpeedRaw !== 'standard' && shippingSpeedRaw !== 'express') {
+      return res.status(400).json({ error: 'Invalid shipping speed. Expected "standard" or "express".' });
+    }
+    const shippingSpeed: 'standard' | 'express' = shippingSpeedRaw;
+
+    // 3. Strict User Ownership & Supabase Bearer Token Verification (fail-closed)
+    const rawSuppliedUserId = req.body?.userId ?? req.body?.user_id ?? req.body?.user?.id ?? null;
+    const cleanSuppliedUserId =
+      rawSuppliedUserId !== null && rawSuppliedUserId !== undefined
+        ? String(rawSuppliedUserId).trim()
+        : '';
+
+    let verifiedAuthUser: any = null;
+    if (req.headers.authorization) {
+      const authCheck = await verifySupabaseBearerToken(req);
+      if (authCheck.errorStatus || !authCheck.user) {
+        return res.status(authCheck.errorStatus || 401).json({
+          error: authCheck.errorMessage || 'Unauthorized: Invalid authentication token.',
+        });
+      }
+      if (cleanSuppliedUserId && cleanSuppliedUserId !== authCheck.user.id) {
+        return res.status(403).json({
+          error: 'Forbidden: Ownership mismatch — supplied userId does not match the authenticated Supabase user.',
+        });
+      }
+      verifiedAuthUser = authCheck.user;
+    } else if (cleanSuppliedUserId) {
+      return res.status(401).json({
+        error: 'Unauthorized: Authenticated Supabase session is required to associate an order with a user account.',
+      });
+    }
+
+    // 4. Validate Cart Items structure & quantities
     if (!Array.isArray(cartItems) || cartItems.length === 0) {
       return res.status(400).json({ error: 'Cart cannot be empty when creating an order.' });
     }
 
-    // Validate 12-digit UPI UTR reference
-    const cleanUtr = (transactionReference || aiAnalysis?.extracted_utr || '').replace(/[\s-]/g, '').trim().toUpperCase();
+    const normalizedCartInputs: Array<{
+      productId: string;
+      quantity: number;
+      selectedColor: string | null;
+      selectedSize: string | null;
+      clientUnitPrice?: number;
+      clientTotalPrice?: number;
+      clientProductImage?: string | null;
+    }> = [];
+    const qtyByProduct = new Map<string, number>();
+
+    for (const item of cartItems) {
+      const pId = typeof (item?.productId ?? item?.product?.id) === 'string'
+        ? String(item.productId ?? item.product.id).trim()
+        : '';
+      if (!pId) {
+        return res.status(400).json({ error: 'Every order item must reference a valid product ID.' });
+      }
+
+      const qty = Number(item?.quantity);
+      if (!Number.isInteger(qty) || qty <= 0) {
+        return res.status(400).json({ error: 'Every order item must have a positive integer quantity.' });
+      }
+
+      normalizedCartInputs.push({
+        productId: pId,
+        quantity: qty,
+        selectedColor: item?.selectedColor ? String(item.selectedColor) : null,
+        selectedSize: item?.selectedSize ? String(item.selectedSize) : null,
+        clientUnitPrice: item?.unitPrice !== undefined && item?.unitPrice !== null ? Number(item.unitPrice) : undefined,
+        clientTotalPrice: item?.totalPrice !== undefined && item?.totalPrice !== null ? Number(item.totalPrice) : undefined,
+        clientProductImage: item?.productImage || item?.product?.image || item?.product?.images?.[0] || null,
+      });
+
+      qtyByProduct.set(pId, (qtyByProduct.get(pId) || 0) + qty);
+    }
+
+    // 5. Validate UPI payment method & 12-character alphanumeric UTR
+    const normalizedPaymentMethod = String(paymentMethod || 'all_upi').trim().toLowerCase();
+    if (!SUPPORTED_UPI_METHODS.has(normalizedPaymentMethod)) {
+      return res.status(400).json({
+        error: `Unsupported payment method "${normalizedPaymentMethod}". Shopcart accepts UPI payments only.`,
+      });
+    }
+
+    const cleanUtr = normalizeUtrValue(transactionReference);
     if (!cleanUtr || cleanUtr.length !== 12 || !/^[0-9A-Z]{12}$/.test(cleanUtr)) {
       return res.status(400).json({
-        error: 'A valid 12-digit alphanumeric UPI Transaction Reference (UTR) is required to verify your payment.',
+        error: 'A valid 12-character alphanumeric UPI Transaction Reference (UTR) is required to verify your payment.',
       });
     }
 
-    // 2. Prevent Duplicate UTR Submission
-    if (recordedUtrMemory.has(cleanUtr)) {
+    if (recordedUtrMemory.has(cleanUtr) || inFlightUtrs.has(cleanUtr)) {
       return res.status(409).json({
-        error: `Duplicate UTR Reference: The 12-digit transaction ID "${cleanUtr}" has already been submitted for another order.`,
+        error: `Duplicate UTR Reference: The 12-character transaction ID "${cleanUtr}" has already been submitted for another order.`,
       });
     }
 
-    // 3. Process Receipt Screenshot
-    let finalScreenshotUrl = providedScreenshotUrl || '';
-    if (screenshotBase64 && !finalScreenshotUrl.startsWith('/uploads/')) {
-      try {
-        const cleanData = screenshotBase64.replace(/^data:image\/[a-zA-Z+]+;base64,/, '');
-        const filename = `receipt_${orderNumber}_${Date.now()}.png`;
-        const filePath = path.join(UPLOADS_DIR, filename);
-        fs.writeFileSync(filePath, Buffer.from(cleanData, 'base64'));
-        finalScreenshotUrl = `/uploads/screenshots/${filename}`;
-      } catch (saveErr) {
-        console.warn('Could not save screenshot image to disk:', saveErr);
+    // Acquire concurrency guards for this request
+    inFlightOrderNumbers.add(cleanOrderNumber);
+    acquiredOrderLock = cleanOrderNumber;
+    inFlightUtrs.add(cleanUtr);
+    acquiredUtrLock = cleanUtr;
+
+    // 6. Check DB for existing order_number or normalized UTR duplicates
+    const { data: existingOrderNumRow, error: orderNumCheckErr } = await supabaseAdmin
+      .from('orders')
+      .select('id')
+      .eq('order_number', cleanOrderNumber)
+      .maybeSingle();
+
+    if (orderNumCheckErr) {
+      return res.status(500).json({ error: 'Database error verifying order uniqueness.' });
+    }
+    if (existingOrderNumRow) {
+      return res.status(409).json({
+        error: `Duplicate Order Number: Order "${cleanOrderNumber}" has already been placed.`,
+      });
+    }
+
+    const { data: existingPayRows, error: payCheckErr } = await supabaseAdmin
+      .from('payment_records')
+      .select('id, transaction_reference')
+      .ilike('transaction_reference', cleanUtr)
+      .limit(1);
+
+    if (payCheckErr) {
+      return res.status(500).json({ error: 'Database error verifying UPI transaction reference.' });
+    }
+    if (existingPayRows && existingPayRows.length > 0) {
+      recordedUtrMemory.add(cleanUtr);
+      return res.status(409).json({
+        error: `Duplicate UTR Reference: The 12-character transaction ID "${cleanUtr}" has already been recorded in the database.`,
+      });
+    }
+
+    // 7. Fetch authoritative active products & inventory from Supabase (NEVER trust client prices or invent GST rates)
+    const uniqueProductIds = Array.from(qtyByProduct.keys());
+    const prodRes = await supabaseAdmin
+      .from('products')
+      .select('id, name, price, gst_rate, is_active, image_url, images')
+      .in('id', uniqueProductIds);
+
+    const dbProducts: any[] | null = prodRes.data;
+    const prodErr = prodRes.error;
+
+    if (prodErr && /gst_rate/i.test(prodErr.message || '')) {
+      return res.status(500).json({
+        error: 'Database GST configuration missing: public.products.gst_rate column is required before commercial checkout.',
+      });
+    }
+
+    const invRes = await supabaseAdmin
+      .from('inventory')
+      .select('product_id, stock_count')
+      .in('product_id', uniqueProductIds);
+
+    const dbInventory = invRes.data;
+    const invErr = invRes.error;
+
+    if (prodErr || invErr) {
+      return res.status(500).json({ error: 'Failed to load authoritative product pricing and stock from database.' });
+    }
+
+    const productMap = new Map<string, any>((dbProducts || []).map((p: any) => [p.id, p]));
+    const stockMap = new Map<string, number>((dbInventory || []).map((inv: any) => [inv.product_id, Number(inv.stock_count || 0)]));
+
+    for (const [pId, requestedTotalQty] of qtyByProduct.entries()) {
+      const dbProd = productMap.get(pId);
+      if (!dbProd || dbProd.is_active !== true) {
+        return res.status(400).json({
+          error: `Product "${pId}" is unavailable or no longer active and cannot be ordered.`,
+        });
+      }
+
+      if (
+        dbProd.gst_rate === null ||
+        dbProd.gst_rate === undefined ||
+        !Number.isFinite(Number(dbProd.gst_rate)) ||
+        Number(dbProd.gst_rate) < 0 ||
+        Number(dbProd.gst_rate) > 100
+      ) {
+        return res.status(400).json({
+          error: `GST configuration error: product "${dbProd.name}" requires an explicit GST rate configuration before commercial checkout.`,
+        });
+      }
+
+      const availableStock = stockMap.get(pId);
+      if (availableStock === undefined || availableStock < requestedTotalQty) {
+        return res.status(400).json({
+          error: `Insufficient stock for "${dbProd.name}" (requested ${requestedTotalQty}, available ${availableStock ?? 0}).`,
+        });
       }
     }
 
-    // 4. Compute Shipping Details & Milestones
+    let authoritativeSubtotal = 0;
+    const authoritativeItems = normalizedCartInputs.map((item) => {
+      const dbProd = productMap.get(item.productId)!;
+      const unitPrice = roundCurrency(Number(dbProd.price));
+      const totalPrice = roundCurrency(unitPrice * item.quantity);
+      const gstRate = Number(dbProd.gst_rate);
+      const dbImg = dbProd.image_url || (Array.isArray(dbProd.images) ? dbProd.images[0] : null) || item.clientProductImage || null;
+
+      return {
+        productId: item.productId,
+        productName: dbProd.name,
+        productImage: dbImg,
+        unitPrice,
+        gstRate,
+        quantity: item.quantity,
+        totalPrice,
+        selectedColor: item.selectedColor,
+        selectedSize: item.selectedSize,
+        clientUnitPrice: item.clientUnitPrice,
+        clientTotalPrice: item.clientTotalPrice,
+      };
+    });
+
+    for (const item of authoritativeItems) {
+      if (item.clientUnitPrice !== undefined && (!Number.isFinite(item.clientUnitPrice) || Math.abs(item.clientUnitPrice - item.unitPrice) > 0.01)) {
+        return res.status(400).json({
+          error: `Price verification failed for "${item.productName}": submitted unit price does not match current catalog price.`,
+        });
+      }
+      if (item.clientTotalPrice !== undefined && (!Number.isFinite(item.clientTotalPrice) || Math.abs(item.clientTotalPrice - item.totalPrice) > 0.01)) {
+        return res.status(400).json({
+          error: `Line total verification failed for "${item.productName}": submitted total does not match catalog calculation.`,
+        });
+      }
+      authoritativeSubtotal = roundCurrency(authoritativeSubtotal + item.totalPrice);
+    }
+
+    // 8. Authoritative Coupon, Shipping, Product-Specific GST, and Final Total Computation
+    const normalizedCoupon = typeof pricing?.couponCode === 'string' && pricing.couponCode.trim()
+      ? pricing.couponCode.trim().toUpperCase()
+      : null;
+
+    let authoritativeDiscount = 0;
+    if (normalizedCoupon === 'SHOPCART10') {
+      authoritativeDiscount = roundCurrency((authoritativeSubtotal * 10) / 100);
+    } else if (normalizedCoupon === 'SAVE20') {
+      authoritativeDiscount = roundCurrency(Math.min(200, authoritativeSubtotal));
+    } else if (normalizedCoupon === 'WELCOME') {
+      authoritativeDiscount = roundCurrency((authoritativeSubtotal * 15) / 100);
+    } else if (normalizedCoupon !== null) {
+      return res.status(400).json({ error: `Invalid or unsupported coupon code "${normalizedCoupon}".` });
+    }
+
+    const baseShipping = authoritativeSubtotal === 0 ? 0 : authoritativeSubtotal >= 499 ? 0 : 49;
+    const authoritativeShippingFee = roundCurrency(shippingSpeed === 'express' ? baseShipping + 99 : baseShipping);
+    const taxableSubtotal = Math.max(0, roundCurrency(authoritativeSubtotal - authoritativeDiscount));
+
+    let authoritativeTaxAmount = 0;
+    if (authoritativeSubtotal > 0 && taxableSubtotal > 0) {
+      for (const item of authoritativeItems) {
+        const taxableShare = roundCurrency((item.totalPrice * taxableSubtotal) / authoritativeSubtotal);
+        const lineTax = roundCurrency((taxableShare * item.gstRate) / 100);
+        authoritativeTaxAmount = roundCurrency(authoritativeTaxAmount + lineTax);
+      }
+    }
+
+    const authoritativeTotalAmount = roundCurrency(taxableSubtotal + authoritativeShippingFee + authoritativeTaxAmount);
+
+    // Reject tampered client pricing fields if supplied
+    if (pricing?.subtotal !== undefined && (!Number.isFinite(Number(pricing.subtotal)) || Math.abs(Number(pricing.subtotal) - authoritativeSubtotal) > 0.01)) {
+      return res.status(400).json({ error: 'Order subtotal mismatch against authoritative product prices. Please refresh your cart and try again.' });
+    }
+    if (pricing?.discountAmount !== undefined && (!Number.isFinite(Number(pricing.discountAmount)) || Math.abs(Number(pricing.discountAmount) - authoritativeDiscount) > 0.01)) {
+      return res.status(400).json({ error: 'Order discount mismatch against authoritative coupon rules. Please refresh your cart and try again.' });
+    }
+    if (pricing?.shippingFee !== undefined && (!Number.isFinite(Number(pricing.shippingFee)) || Math.abs(Number(pricing.shippingFee) - authoritativeShippingFee) > 0.01)) {
+      return res.status(400).json({ error: 'Shipping fee mismatch against authoritative shipping calculation. Please refresh checkout and try again.' });
+    }
+    if (pricing?.taxAmount !== undefined && (!Number.isFinite(Number(pricing.taxAmount)) || Math.abs(Number(pricing.taxAmount) - authoritativeTaxAmount) > 0.01)) {
+      return res.status(400).json({ error: 'Tax amount mismatch against authoritative product GST calculation. Please refresh checkout and try again.' });
+    }
+    if (pricing?.totalAmount !== undefined && (!Number.isFinite(Number(pricing.totalAmount)) || Math.abs(Number(pricing.totalAmount) - authoritativeTotalAmount) > 0.01)) {
+      return res.status(400).json({ error: 'Order total mismatch against authoritative pricing. Please refresh checkout and try again.' });
+    }
+
+    // 9. Process Receipt Screenshot & Server-Authoritative AI Analysis
+    //    NEVER trusts client-supplied aiAnalysis, confidence_score, recommendation, or suspicious_indicators.
+    //    Runs or retrieves cached server-side evaluation strictly from screenshot bytes + authoritative total.
+    let finalScreenshotUrl = '';
+    let screenshotBytesBase64 = '';
+    let screenshotMimeType = 'image/jpeg';
+
+    if (typeof providedScreenshotUrl === 'string' && providedScreenshotUrl.trim().startsWith('/uploads/screenshots/')) {
+      const safeBasename = path.basename(providedScreenshotUrl.trim());
+      if (safeBasename && safeBasename !== '.' && safeBasename !== '..') {
+        finalScreenshotUrl = `/uploads/screenshots/${safeBasename}`;
+        const existingDiskPath = path.join(UPLOADS_DIR, safeBasename);
+        if (fs.existsSync(existingDiskPath)) {
+          try {
+            screenshotBytesBase64 = fs.readFileSync(existingDiskPath).toString('base64');
+            screenshotMimeType = safeBasename.toLowerCase().endsWith('.png')
+              ? 'image/png'
+              : safeBasename.toLowerCase().endsWith('.webp')
+                ? 'image/webp'
+                : 'image/jpeg';
+          } catch (readErr) {
+            console.warn('Could not read uploaded screenshot for AI evaluation:', readErr);
+          }
+        }
+      }
+    }
+
+    if (typeof screenshotBase64 === 'string' && screenshotBase64.trim()) {
+      const dataUriMatch = screenshotBase64.trim().match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,/i);
+      screenshotMimeType = dataUriMatch?.[1]?.toLowerCase() || 'image/png';
+      screenshotBytesBase64 = screenshotBase64.trim().replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/i, '').trim();
+      if (!finalScreenshotUrl) {
+        try {
+          const safeOrderSlug = cleanOrderNumber.replace(/[^a-zA-Z0-9_-]/g, '_');
+          const ext = screenshotMimeType.includes('png')
+            ? 'png'
+            : screenshotMimeType.includes('webp')
+              ? 'webp'
+              : 'jpg';
+          const filename = `receipt_${safeOrderSlug}_${Date.now()}.${ext}`;
+          const filePath = path.join(UPLOADS_DIR, filename);
+          fs.writeFileSync(filePath, Buffer.from(screenshotBytesBase64, 'base64'));
+          finalScreenshotUrl = `/uploads/screenshots/${filename}`;
+        } catch (saveErr) {
+          console.warn('Could not save screenshot image to disk:', saveErr);
+        }
+      }
+    }
+
+    let trustedAiAnalysis: any = {
+      screenshot_status: 'unclear',
+      extracted_utr: '',
+      extracted_amount: 0,
+      extracted_merchant: '',
+      extracted_app: 'Unknown',
+      extracted_timestamp: '',
+      amount_matches: false,
+      merchant_matches: false,
+      suspicious_indicators: [
+        'No receipt screenshot bytes available for server-side screening; manual administrator bank ledger verification required.',
+      ],
+      confidence_score: 0,
+      recommended_action: 'REVIEW_REQUIRED',
+      ai_summary: 'No receipt screenshot uploaded for automated screening. Payment remains pending manual administrative verification.',
+      source: 'server_default_advisory',
+      expected_amount: authoritativeTotalAmount,
+      analyzed_at: new Date().toISOString(),
+    };
+
+    if (screenshotBytesBase64) {
+      try {
+        const aiResult = await analyzePaymentScreenshotServer({
+          screenshotBase64: screenshotBytesBase64,
+          mimeType: screenshotMimeType,
+          expectedAmount: authoritativeTotalAmount,
+          expectedOrderNumber: cleanOrderNumber,
+          expectedMerchantUpi: merchantPaymentSettings.merchant_upi_id,
+        });
+        trustedAiAnalysis = aiResult.analysis;
+      } catch (serverAiErr: any) {
+        console.warn('Server AI payment screening warning:', serverAiErr?.message);
+      }
+    }
+
+    // 10. Compute Shipping Details & Milestones (strictly unverified at creation)
     const trackingNumber = `SC-TRK-${Math.floor(1000000000 + Math.random() * 9000000000)}`;
     const carrier = 'Shop Cart Express';
     const estDate = new Date();
-    estDate.setDate(estDate.getDate() + 4);
+    estDate.setDate(estDate.getDate() + (shippingSpeed === 'express' ? 2 : 4));
     const estimatedDeliveryISO = estDate.toISOString();
     const initialMilestones = createInitialShipmentMilestones(new Date(), false);
 
-    // Build Comprehensive Shipping Address JSON
     const shippingAddressObj = {
-      fullName: customerName.trim(),
+      fullName: cleanCustomerName,
       phone: cleanPhone,
-      email: customerEmail.trim(),
-      houseBuilding: houseBuilding.trim(),
-      streetArea: streetArea.trim(),
-      street: `${houseBuilding.trim()}, ${streetArea.trim()}`,
-      apartment: houseBuilding.trim(),
-      city: city.trim(),
-      state: state.trim(),
+      email: cleanCustomerEmail,
+      houseBuilding: cleanHouse,
+      streetArea: cleanStreet,
+      street: `${cleanHouse}, ${cleanStreet}`,
+      apartment: cleanHouse,
+      city: cleanCity,
+      state: cleanState,
       postalCode: cleanPin,
       pinCode: cleanPin,
       landmark: (landmark || '').trim(),
       deliveryInstructions: (deliveryInstructions || '').trim(),
       country: country || 'India',
+      shippingSpeed,
     };
 
-    const subtotal = Number(pricing.subtotal || 0);
-    const discountAmount = Number(pricing.discountAmount || 0);
-    const shippingFee = Number(pricing.shippingFee || 0);
-    const taxAmount = Number(pricing.taxAmount || 0);
-    const totalAmount = Number(pricing.totalAmount || 0);
-    const couponCode = pricing.couponCode || null;
+    const verifiedUserId: string | null = verifiedAuthUser?.id || null;
+    const resolvedGuestEmail: string | null = verifiedUserId ? null : cleanCustomerEmail;
 
-    let orderId = `ord-${Date.now()}`;
-    let isStoredInSupabase = false;
+    // 11. Execute atomic ACID create_complete_order RPC via service_role
+    const { data: rpcResult, error: rpcErr } = await supabaseAdmin.rpc('create_complete_order', {
+      p_order: {
+        order_number: cleanOrderNumber,
+        user_id: verifiedUserId,
+        guest_email: resolvedGuestEmail,
+        customer_name: cleanCustomerName,
+        customer_email: cleanCustomerEmail,
+        customer_phone: cleanPhone,
+        status: 'order_placed',
+        payment_status: 'pending_admin_verification',
+        subtotal: authoritativeSubtotal,
+        discount_amount: authoritativeDiscount,
+        shipping_fee: authoritativeShippingFee,
+        tax_amount: authoritativeTaxAmount,
+        total_amount: authoritativeTotalAmount,
+        coupon_code: normalizedCoupon,
+        shipping_speed: shippingSpeed,
+        shipping_address: shippingAddressObj,
+        customer_notes: customerNotes || null,
+        tracking_number: trackingNumber,
+        carrier,
+        estimated_delivery_date: estimatedDeliveryISO,
+        shipment_updates: initialMilestones,
+      },
+      p_items: authoritativeItems.map((item) => ({
+        product_id: item.productId,
+        product_name: item.productName,
+        unit_price: item.unitPrice,
+        quantity: item.quantity,
+        total_price: item.totalPrice,
+        selected_color: item.selectedColor,
+        selected_size: item.selectedSize,
+      })),
+      p_payment: {
+        payment_method: normalizedPaymentMethod,
+        amount: authoritativeTotalAmount,
+        payment_status: 'pending_admin_verification',
+        transaction_reference: cleanUtr,
+        screenshot_url: finalScreenshotUrl || null,
+        ai_analysis: trustedAiAnalysis,
+        ai_confidence_score: trustedAiAnalysis?.confidence_score ?? null,
+        ai_recommendation: trustedAiAnalysis?.recommended_action || null,
+        suspicious_indicators: trustedAiAnalysis?.suspicious_indicators || [],
+        raw_details: {
+          customerName: cleanCustomerName,
+          customerEmail: cleanCustomerEmail,
+          customerPhone: cleanPhone,
+          upiTransactionRef: cleanUtr,
+          paymentMethod: normalizedPaymentMethod,
+          submittedAt: new Date().toISOString(),
+          screenshotUrl: finalScreenshotUrl || null,
+          aiAnalysis: trustedAiAnalysis,
+          shippingAddress: shippingAddressObj,
+          status: 'Awaiting Bank Ledger Verification by Administrator',
+        },
+      },
+    });
 
-    // 5. Database Persistence in Supabase PostgreSQL
-    if (supabase) {
-      try {
-        // Prevent duplicate UTR in database
-        const { data: existingPay } = await supabase
-          .from('payment_records')
-          .select('id, transaction_reference')
-          .eq('transaction_reference', cleanUtr)
-          .maybeSingle();
+    if (rpcErr || !rpcResult?.order_id) {
+      const errMsg = rpcErr?.message || 'Atomic order creation failed.';
+      const errCode = (rpcErr as any)?.code;
+      const isDuplicate =
+        errCode === '23505' ||
+        /duplicate|already recorded|already exists|unique/i.test(errMsg);
 
-        if (existingPay) {
+      if (isDuplicate) {
+        if (/transaction reference|utr|idx_payment_records_unique_utr/i.test(errMsg)) {
           recordedUtrMemory.add(cleanUtr);
-          return res.status(409).json({
-            error: `Duplicate UTR Reference: The 12-digit transaction ID "${cleanUtr}" has already been recorded in database.`,
-          });
         }
-
-        const isValidUuid = userId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
-
-        const baseOrderPayload: any = {
-          order_number: orderNumber,
-          user_id: isValidUuid ? userId : null,
-          guest_email: customerEmail.trim(),
-          status: 'order_placed',
-          subtotal,
-          discount_amount: discountAmount,
-          shipping_fee: shippingFee,
-          tax_amount: taxAmount,
-          total_amount: totalAmount,
-          coupon_code: couponCode,
-          shipping_address: shippingAddressObj,
-          customer_notes: customerNotes || null,
-          tracking_number: trackingNumber,
-          carrier,
-          estimated_delivery_date: estimatedDeliveryISO,
-          shipment_updates: initialMilestones,
-        };
-
-        // Attempt insert with extended customer columns
-        let { data: insertedOrder, error: insertErr } = await supabase
-          .from('orders')
-          .insert({
-            ...baseOrderPayload,
-            customer_name: customerName.trim(),
-            customer_email: customerEmail.trim(),
-            customer_phone: cleanPhone,
-            payment_method: paymentMethod,
-            payment_status: 'pending_admin_verification',
-          })
-          .select('id')
-          .single();
-
-        // Fallback to base columns if schema doesn't have extended columns yet
-        if (insertErr) {
-          console.warn('Extended columns insert warning, falling back to base schema:', insertErr.message);
-          const fallback = await supabase
-            .from('orders')
-            .insert(baseOrderPayload)
-            .select('id')
-            .single();
-
-          if (!fallback.error && fallback.data) {
-            insertedOrder = fallback.data;
-            insertErr = null;
-          } else {
-            console.warn('Orders table base insert warning:', fallback.error?.message);
-          }
-        }
-
-        if (insertedOrder) {
-          orderId = insertedOrder.id;
-          isStoredInSupabase = true;
-
-          // Insert Order Items
-          const orderItemsRows = cartItems.map((item: any) => ({
-            order_id: orderId,
-            product_id: item.productId || item.product?.id || null,
-            product_name: item.productName || item.product?.name || 'Shopcart Item',
-            unit_price: Number(item.unitPrice || item.product?.price || 0),
-            quantity: Number(item.quantity || 1),
-            total_price: Number(item.totalPrice || (item.unitPrice * item.quantity) || 0),
-            selected_color: item.selectedColor || null,
-            selected_size: item.selectedSize || null,
-          }));
-
-          const { error: itemsErr } = await supabase.from('order_items').insert(orderItemsRows);
-          if (itemsErr) {
-            console.warn('order_items insert warning:', itemsErr.message);
-          }
-
-          // Insert Payment Record
-          const { error: paymentErr } = await supabase.from('payment_records').insert({
-            order_id: orderId,
-            payment_method: paymentMethod,
-            amount: totalAmount,
-            currency: 'INR',
-            payment_status: 'pending_admin_verification',
-            transaction_reference: cleanUtr,
-            screenshot_url: finalScreenshotUrl || null,
-            ai_analysis: aiAnalysis || null,
-            ai_confidence_score: aiAnalysis?.confidence_score || null,
-            ai_recommendation: aiAnalysis?.recommended_action || null,
-            suspicious_indicators: aiAnalysis?.suspicious_indicators || [],
-            raw_details: {
-              customerName: customerName.trim(),
-              customerEmail: customerEmail.trim(),
-              customerPhone: cleanPhone,
-              upiTransactionRef: cleanUtr,
-              paymentMethod,
-              submittedAt: new Date().toISOString(),
-              screenshotUrl: finalScreenshotUrl,
-              aiAnalysis,
-              shippingAddress: shippingAddressObj,
-              status: 'Awaiting Bank Ledger Verification by Administrator',
-            },
-          });
-
-          if (paymentErr) {
-            console.warn('payment_records insert warning:', paymentErr.message);
-          }
-
-          // Best-effort stock decrement
-          for (const item of cartItems) {
-            const pId = item.productId || item.product?.id;
-            const qty = Number(item.quantity || 1);
-            if (pId) {
-              try {
-                const { data: inv } = await supabase
-                  .from('inventory')
-                  .select('stock_count')
-                  .eq('product_id', pId)
-                  .maybeSingle();
-
-                if (inv && inv.stock_count >= qty) {
-                  await supabase
-                    .from('inventory')
-                    .update({ stock_count: Math.max(0, inv.stock_count - qty) })
-                    .eq('product_id', pId);
-                }
-              } catch {
-                // Non-fatal
-              }
-            }
-          }
-        }
-      } catch (dbErr: any) {
-        console.warn('Supabase order creation exception:', dbErr?.message);
+        return res.status(409).json({
+          error: /transaction reference|utr|idx_payment_records_unique_utr/i.test(errMsg)
+            ? `Duplicate UTR Reference: The 12-character transaction ID "${cleanUtr}" has already been submitted for another order.`
+            : `Duplicate Order Number: Order "${cleanOrderNumber}" already exists.`,
+        });
       }
+
+      if (
+        errCode === '22023' ||
+        /insufficient stock|mismatch|invalid|inactive|unsupported|required/i.test(errMsg)
+      ) {
+        return res.status(400).json({ error: errMsg });
+      }
+
+      return res.status(500).json({ error: errMsg });
     }
 
-    // Cache clean UTR to block instant duplicates
+    const orderId = String(rpcResult.order_id);
+    const serverSubtotal = roundCurrency(Number(rpcResult.subtotal ?? authoritativeSubtotal));
+    const serverDiscount = roundCurrency(Number(rpcResult.discount_amount ?? authoritativeDiscount));
+    const serverShippingFee = roundCurrency(Number(rpcResult.shipping_fee ?? authoritativeShippingFee));
+    const serverTaxAmount = roundCurrency(Number(rpcResult.tax_amount ?? authoritativeTaxAmount));
+    const serverTotalAmount = roundCurrency(Number(rpcResult.total_amount ?? authoritativeTotalAmount));
+
+    // Cache clean UTR & authoritative order only AFTER database transaction commits
     recordedUtrMemory.add(cleanUtr);
 
-    // 6. Cache Order in Server Memory Store
     const fullOrderRecord = {
       id: orderId,
-      order_number: orderNumber,
-      user_id: userId || null,
-      guest_email: customerEmail.trim(),
-      customer_name: customerName.trim(),
-      customer_email: customerEmail.trim(),
+      order_number: cleanOrderNumber,
+      user_id: verifiedUserId,
+      guest_email: resolvedGuestEmail,
+      customer_name: cleanCustomerName,
+      customer_email: cleanCustomerEmail,
       customer_phone: cleanPhone,
       status: 'order_placed',
-      subtotal,
-      discount_amount: discountAmount,
-      shipping_fee: shippingFee,
-      tax_amount: taxAmount,
-      total_amount: totalAmount,
-      coupon_code: couponCode,
+      subtotal: serverSubtotal,
+      discount_amount: serverDiscount,
+      shipping_fee: serverShippingFee,
+      tax_amount: serverTaxAmount,
+      total_amount: serverTotalAmount,
+      coupon_code: normalizedCoupon,
       shipping_address: shippingAddressObj,
       customer_notes: customerNotes || null,
       tracking_number: trackingNumber,
       carrier,
       estimated_delivery_date: estimatedDeliveryISO,
       shipment_updates: initialMilestones,
-      paymentMethod,
+      paymentMethod: normalizedPaymentMethod,
       paymentStatus: 'pending_admin_verification',
       transactionReference: cleanUtr,
       screenshot_url: finalScreenshotUrl || null,
-      ai_analysis: aiAnalysis || null,
+      ai_analysis: trustedAiAnalysis,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-      order_items: cartItems.map((item: any) => ({
-        id: `item-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      order_items: authoritativeItems.map((item, idx) => ({
+        id: `item-${orderId}-${idx + 1}`,
         order_id: orderId,
-        product_id: item.productId || item.product?.id || null,
-        product_name: item.productName || item.product?.name || 'Shopcart Item',
-        product_image: item.productImage || item.product?.image || item.product?.images?.[0] || null,
-        unit_price: Number(item.unitPrice || item.product?.price || 0),
-        quantity: Number(item.quantity || 1),
-        total_price: Number(item.totalPrice || (item.unitPrice * item.quantity) || 0),
-        line_total: Number(item.totalPrice || (item.unitPrice * item.quantity) || 0),
-        selected_color: item.selectedColor || null,
-        selected_size: item.selectedSize || null,
+        product_id: item.productId,
+        product_name: item.productName,
+        product_image: item.productImage,
+        unit_price: item.unitPrice,
+        quantity: item.quantity,
+        total_price: item.totalPrice,
+        line_total: item.totalPrice,
+        selected_color: item.selectedColor,
+        selected_size: item.selectedSize,
       })),
       payment_records: [
         {
           id: `pay-${orderId}`,
           order_id: orderId,
-          payment_method: paymentMethod,
-          amount: totalAmount,
+          payment_method: normalizedPaymentMethod,
+          amount: serverTotalAmount,
           currency: 'INR',
           payment_status: 'pending_admin_verification',
           transaction_reference: cleanUtr,
           screenshot_url: finalScreenshotUrl || null,
-          ai_analysis: aiAnalysis || null,
-          ai_confidence_score: aiAnalysis?.confidence_score || null,
-          ai_recommendation: aiAnalysis?.recommended_action || null,
-          suspicious_indicators: aiAnalysis?.suspicious_indicators || [],
+          ai_analysis: trustedAiAnalysis,
+          ai_confidence_score: trustedAiAnalysis?.confidence_score ?? null,
+          ai_recommendation: trustedAiAnalysis?.recommended_action || null,
+          suspicious_indicators: trustedAiAnalysis?.suspicious_indicators || [],
           created_at: new Date().toISOString(),
         },
       ],
     };
 
-    serverOrdersStore.set(orderNumber, fullOrderRecord);
+    serverOrdersStore.set(cleanOrderNumber, fullOrderRecord);
+    saveOrdersToDisk();
 
     return res.status(201).json({
       success: true,
       orderId,
-      orderNumber,
+      orderNumber: cleanOrderNumber,
+      status: 'order_placed',
       trackingNumber,
       carrier,
       estimatedDeliveryDate: estimatedDeliveryISO,
       paymentStatus: 'pending_admin_verification',
-      isStoredInSupabase,
+      transactionReference: cleanUtr,
+      screenshotUrl: finalScreenshotUrl || null,
+      aiAnalysis: trustedAiAnalysis,
+      pricing: {
+        subtotal: serverSubtotal,
+        discountAmount: serverDiscount,
+        shippingFee: serverShippingFee,
+        taxAmount: serverTaxAmount,
+        totalAmount: serverTotalAmount,
+        couponCode: normalizedCoupon,
+        shippingSpeed,
+      },
+      isStoredInSupabase: true,
       message: 'Order created successfully. Details recorded for administrative bank ledger verification.',
     });
   } catch (err: any) {
     console.error('Exception in /api/orders/create:', err);
     return res.status(500).json({ error: err.message || 'Internal server error creating order' });
+  } finally {
+    if (acquiredOrderLock) inFlightOrderNumbers.delete(acquiredOrderLock);
+    if (acquiredUtrLock) inFlightUtrs.delete(acquiredUtrLock);
   }
 });
 
@@ -606,10 +1303,11 @@ app.get('/api/products', async (_req: Request, res: Response) => {
 });
 
 // Admin: Fetch all products (active and inactive), newest first
-app.get('/api/admin/products', async (_req: Request, res: Response) => {
+app.get('/api/admin/products', async (req: Request, res: Response) => {
   try {
-    if (supabase) {
-      const { data, error } = await supabase
+    const adminDb = (req as any).adminSupabase;
+    if (adminDb) {
+      const { data, error } = await adminDb
         .from('products')
         .select('*, inventory(stock_count)')
         .order('created_at', { ascending: false });
@@ -621,7 +1319,7 @@ app.get('/api/admin/products', async (_req: Request, res: Response) => {
         return res.status(500).json({ error: error.message });
       }
     }
-    return res.json({ products: [], source: 'fallback' });
+    return res.status(503).json({ error: 'Database connection unavailable for administrative products query.' });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -630,8 +1328,9 @@ app.get('/api/admin/products', async (_req: Request, res: Response) => {
 // Admin: Create product
 app.post('/api/admin/products', async (req: Request, res: Response) => {
   try {
-    if (!supabase) {
-      return res.status(503).json({ error: 'Supabase client is not initialized on server' });
+    const adminDb = (req as any).adminSupabase;
+    if (!adminDb) {
+      return res.status(503).json({ error: 'Supabase client is not initialized for admin session' });
     }
 
     const { productRow, stock = 10 } = req.body;
@@ -639,6 +1338,7 @@ app.post('/api/admin/products', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Missing required product information' });
     }
 
+    const numericStock = Math.max(0, Math.floor(Number(stock) || 0));
     const prodId = productRow.id || `eko-prod-${Date.now()}`;
     const payload = {
       ...productRow,
@@ -647,7 +1347,7 @@ app.post('/api/admin/products', async (req: Request, res: Response) => {
       updated_at: new Date().toISOString(),
     };
 
-    const { data: inserted, error: prodErr } = await supabase
+    const { data: inserted, error: prodErr } = await adminDb
       .from('products')
       .insert(payload)
       .select('*, inventory(stock_count)')
@@ -657,10 +1357,10 @@ app.post('/api/admin/products', async (req: Request, res: Response) => {
       return res.status(400).json({ error: prodErr.message });
     }
 
-    await supabase.from('inventory').upsert(
+    await adminDb.from('inventory').upsert(
       {
         product_id: prodId,
-        stock_count: stock,
+        stock_count: numericStock,
         low_stock_threshold: 5,
         updated_at: new Date().toISOString(),
       },
@@ -673,23 +1373,190 @@ app.post('/api/admin/products', async (req: Request, res: Response) => {
   }
 });
 
+// Admin: Update product
+app.patch('/api/admin/products/:id', async (req: Request, res: Response) => {
+  try {
+    const adminDb = (req as any).adminSupabase;
+    if (!adminDb) {
+      return res.status(503).json({ error: 'Supabase client is not initialized for admin session' });
+    }
+    const productId = req.params.id;
+    const { productRow, stock } = req.body || {};
+
+    if (!productRow && stock === undefined) {
+      return res.status(400).json({ error: 'No product fields or stock value provided for update.' });
+    }
+
+    let updatedProduct = null;
+    if (productRow) {
+      const { id: _ignoreId, created_at: _ignoreCreatedAt, ...safeFields } = productRow;
+      const { data, error } = await adminDb
+        .from('products')
+        .update({
+          ...safeFields,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', productId)
+        .select('*, inventory(stock_count)')
+        .maybeSingle();
+
+      if (error) {
+        return res.status(400).json({ error: error.message });
+      }
+      updatedProduct = data;
+    }
+
+    if (stock !== undefined) {
+      const numericStock = Math.floor(Number(stock));
+      if (!Number.isFinite(numericStock) || numericStock < 0) {
+        return res.status(400).json({ error: 'Stock count must be a non-negative integer.' });
+      }
+      const { error: invErr } = await adminDb.from('inventory').upsert(
+        {
+          product_id: productId,
+          stock_count: numericStock,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'product_id' }
+      );
+      if (invErr) {
+        return res.status(400).json({ error: invErr.message });
+      }
+    }
+
+    return res.json({ success: true, product: updatedProduct });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // Admin: Delete product
 app.delete('/api/admin/products/:id', async (req: Request, res: Response) => {
   try {
-    if (!supabase) {
-      return res.status(503).json({ error: 'Supabase client is not initialized on server' });
+    const adminDb = (req as any).adminSupabase;
+    if (!adminDb) {
+      return res.status(503).json({ error: 'Supabase client is not initialized for admin session' });
     }
     const productId = req.params.id;
     try {
-      await supabase.from('inventory').delete().eq('product_id', productId);
+      await adminDb.from('inventory').delete().eq('product_id', productId);
     } catch {
       // ignore
     }
-    const { error } = await supabase.from('products').delete().eq('id', productId);
+    const { error } = await adminDb.from('products').delete().eq('id', productId);
     if (error) {
       return res.status(400).json({ error: error.message });
     }
     return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin: Update Inventory Stock Count
+app.patch('/api/admin/inventory/:productId', async (req: Request, res: Response) => {
+  try {
+    const adminDb = (req as any).adminSupabase;
+    if (!adminDb) {
+      return res.status(503).json({ error: 'Supabase client is not initialized for admin session' });
+    }
+    const { productId } = req.params;
+    const stockCount = Number(req.body?.stock_count);
+    if (!Number.isInteger(stockCount) || stockCount < 0) {
+      return res.status(400).json({ error: 'stock_count must be a non-negative integer.' });
+    }
+
+    const { data, error } = await adminDb
+      .from('inventory')
+      .upsert(
+        {
+          product_id: productId,
+          stock_count: stockCount,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'product_id' }
+      )
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    return res.json({ success: true, inventory: data });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin: Authorized Server-Side Inventory Deduction
+app.post('/api/admin/inventory/deduct', async (req: Request, res: Response) => {
+  try {
+    const { productId, quantity, orderNumber } = req.body || {};
+    const cleanProductId = typeof productId === 'string' ? productId.trim() : '';
+    const cleanOrderNumber = typeof orderNumber === 'string' ? orderNumber.trim() : '';
+    const qty = Number(quantity);
+
+    if (!cleanProductId || !Number.isInteger(qty) || qty <= 0) {
+      return res.status(400).json({ error: 'Valid productId and a positive integer quantity are required.' });
+    }
+
+    if (!cleanOrderNumber || cleanOrderNumber.length < 3) {
+      return res.status(400).json({
+        error: 'A valid orderNumber (minimum 3 characters) is required for idempotent inventory deduction.',
+      });
+    }
+
+    if (supabaseAdmin) {
+      const { data, error } = await supabaseAdmin.rpc('deduct_product_inventory', {
+        p_product_id: cleanProductId,
+        p_quantity: qty,
+        p_order_number: cleanOrderNumber,
+        p_order_id: null,
+      });
+
+      if (error) {
+        return res.status(400).json({ error: error.message });
+      }
+      if (data === false) {
+        return res.status(409).json({ error: 'Insufficient stock or duplicate order deduction.' });
+      }
+      return res.json({ success: true, deducted: true });
+    }
+
+    // Fallback when SUPABASE_SERVICE_ROLE_KEY is not configured: use verified admin session client
+    const adminDb = (req as any).adminSupabase;
+    if (!adminDb) {
+      return res.status(503).json({ error: 'Admin database client unavailable.' });
+    }
+
+    const { data: currentInv, error: fetchErr } = await adminDb
+      .from('inventory')
+      .select('stock_count')
+      .eq('product_id', cleanProductId)
+      .maybeSingle();
+
+    if (fetchErr || !currentInv) {
+      return res.status(404).json({ error: `Inventory record not found for product ${cleanProductId}` });
+    }
+    if (currentInv.stock_count < qty) {
+      return res.status(409).json({ error: 'Insufficient stock to deduct requested quantity.' });
+    }
+
+    const { error: updErr } = await adminDb
+      .from('inventory')
+      .update({
+        stock_count: currentInv.stock_count - qty,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('product_id', cleanProductId)
+      .gte('stock_count', qty);
+
+    if (updErr) {
+      return res.status(400).json({ error: updErr.message });
+    }
+
+    return res.json({ success: true, deducted: true, remainingStock: currentInv.stock_count - qty });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -875,6 +1742,7 @@ app.post('/api/contact', async (req: Request, res: Response) => {
 // -----------------------------------------------------------------------------
 app.get('/api/admin/orders', async (req: Request, res: Response) => {
   try {
+    const adminDb = (req as any).adminSupabase;
     const ordersMap = new Map<string, any>();
 
     // 1. Populate from server memory cache
@@ -882,14 +1750,13 @@ app.get('/api/admin/orders', async (req: Request, res: Response) => {
       ordersMap.set(num, ord);
     });
 
-    // 2. Query Supabase PostgreSQL if connected
-    if (supabase) {
+    // 2. Query Supabase PostgreSQL using authenticated admin client
+    if (adminDb) {
       try {
-        // Query orders with items and payment records
         let dbOrders: any[] | null = null;
 
         // Try primary join with products
-        const { data: joinedOrders, error: ordErr } = await supabase
+        const { data: joinedOrders, error: ordErr } = await adminDb
           .from('orders')
           .select('*, order_items(*, product:products(id, name, price, image_url, images, category_name)), payment_records(*)')
           .order('created_at', { ascending: false });
@@ -898,7 +1765,7 @@ app.get('/api/admin/orders', async (req: Request, res: Response) => {
           dbOrders = joinedOrders;
         } else {
           // Fallback if nested products join syntax varies
-          const { data: baseOrders, error: baseErr } = await supabase
+          const { data: baseOrders, error: baseErr } = await adminDb
             .from('orders')
             .select('*, order_items(*), payment_records(*)')
             .order('created_at', { ascending: false });
@@ -915,7 +1782,7 @@ app.get('/api/admin/orders', async (req: Request, res: Response) => {
           const profileMap = new Map<string, any>();
           if (userIds.length > 0) {
             try {
-              const { data: profs } = await supabase
+              const { data: profs } = await adminDb
                 .from('profiles')
                 .select('id, full_name, email, phone, role, avatar_url, shipping_address')
                 .in('id', userIds);
@@ -940,7 +1807,7 @@ app.get('/api/admin/orders', async (req: Request, res: Response) => {
           const productLookup = new Map<string, any>();
           if (missingProductIds.size > 0) {
             try {
-              const { data: prods } = await supabase
+              const { data: prods } = await adminDb
                 .from('products')
                 .select('id, name, price, image_url, images, category_name')
                 .in('id', Array.from(missingProductIds));
@@ -1093,13 +1960,39 @@ app.patch('/api/admin/orders/:orderId/status', async (req: Request, res: Respons
     });
     saveOrdersToDisk();
 
+    const adminDb = (req as any).adminSupabase;
+
     // Update in Supabase
-    if (supabase) {
+    if (adminDb) {
       try {
         const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
+        let existingOrder: any = null;
+        try {
+          const selectQuery = adminDb
+            .from('orders')
+            .select('id, shipment_updates, status_history');
+          const { data } = isUuid
+            ? await selectQuery.eq('id', orderId).maybeSingle()
+            : await selectQuery.eq('order_number', orderId).maybeSingle();
+          existingOrder = data;
+        } catch {
+          // Fallback if optional history columns do not exist yet in older schema
+        }
+
+        const nextMilestones = [
+          milestone,
+          ...(Array.isArray(existingOrder?.shipment_updates) ? existingOrder.shipment_updates : []),
+        ];
+        const nextHistory = [
+          historyItem,
+          ...(Array.isArray(existingOrder?.status_history) ? existingOrder.status_history : []),
+        ];
+
         const updatePayload: any = {
           status,
           updated_at: timestamp,
+          shipment_updates: nextMilestones,
+          status_history: nextHistory,
         };
         if (adminNotes !== undefined) updatePayload.admin_notes = adminNotes;
         if (status === 'cancelled') {
@@ -1108,15 +2001,59 @@ app.patch('/api/admin/orders/:orderId/status', async (req: Request, res: Respons
           updatePayload.cancelled_by = 'admin';
         }
 
-        let query = supabase.from('orders').update(updatePayload);
-        if (isUuid) {
-          query = query.eq('id', orderId);
-        } else {
-          query = query.eq('order_number', orderId);
+        const runOrderUpdate = async (payload: Record<string, any>) => {
+          let query = adminDb.from('orders').update(payload);
+          query = isUuid ? query.eq('id', orderId) : query.eq('order_number', orderId);
+          return query;
+        };
+
+        const { error: updateErr } = await runOrderUpdate(updatePayload);
+        if (updateErr) {
+          const minimalPayload: Record<string, any> = {
+            status,
+            updated_at: timestamp,
+          };
+          if (adminNotes !== undefined) minimalPayload.admin_notes = adminNotes;
+          if (status === 'cancelled') {
+            minimalPayload.cancellation_reason = updatePayload.cancellation_reason;
+            minimalPayload.cancelled_at = timestamp;
+            minimalPayload.cancelled_by = 'admin';
+          }
+          await runOrderUpdate(minimalPayload);
         }
-        await query;
-      } catch (dbErr) {
+
+        if (existingOrder?.id) {
+          try {
+            await adminDb.from('order_shipment_updates').insert({
+              order_id: existingOrder.id,
+              status,
+              title: milestone.title,
+              description: milestone.description,
+              location,
+              created_at: timestamp,
+            });
+          } catch {
+            // Optional relational milestone table
+          }
+
+          if (status === 'refunded') {
+            await adminDb
+              .from('payment_records')
+              .update({
+                payment_status: 'refunded',
+                rejection_reason: note || 'Refunded by administrator',
+              })
+              .eq('order_id', existingOrder.id);
+
+            await adminDb
+              .from('orders')
+              .update({ payment_status: 'refunded', updated_at: timestamp })
+              .eq('id', existingOrder.id);
+          }
+        }
+      } catch (dbErr: any) {
         console.warn('DB update order status error:', dbErr);
+        return res.status(500).json({ error: dbErr?.message || 'Database error updating order status' });
       }
     }
 
@@ -1131,9 +2068,90 @@ app.patch('/api/admin/orders/:orderId/status', async (req: Request, res: Respons
   }
 });
 
+// Admin: Append Explicit Shipment Milestone Event (service_role / requireAdminAuth)
+app.post('/api/admin/orders/:orderId/shipment-updates', async (req: Request, res: Response) => {
+  try {
+    const adminDb = (req as any).adminSupabase;
+    const { orderId } = req.params;
+    const { status, title, location = 'In Transit', description = '', timestamp } = req.body || {};
+
+    if (!title || typeof title !== 'string' || !title.trim()) {
+      return res.status(400).json({ error: 'Milestone title is required.' });
+    }
+
+    const eventTime = timestamp || new Date().toISOString();
+    const newEvt = {
+      id: `evt-${Date.now()}`,
+      status: status || 'processing',
+      title: title.trim(),
+      location: String(location || 'In Transit').trim(),
+      description: String(description || '').trim(),
+      timestamp: eventTime,
+    };
+
+    serverOrdersStore.forEach((ord) => {
+      if (ord.id === orderId || ord.order_number === orderId) {
+        if (status) ord.status = status;
+        ord.shipment_updates = [...(ord.shipment_updates || []), newEvt];
+        ord.updated_at = new Date().toISOString();
+      }
+    });
+    saveOrdersToDisk();
+
+    if (adminDb) {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
+      const selQuery = adminDb.from('orders').select('id, status, shipment_updates');
+      const { data: currentOrder, error: fetchErr } = isUuid
+        ? await selQuery.eq('id', orderId).maybeSingle()
+        : await selQuery.eq('order_number', orderId).maybeSingle();
+
+      if (fetchErr) {
+        return res.status(500).json({ error: fetchErr.message });
+      }
+      if (!currentOrder) {
+        return res.status(404).json({ error: `Order "${orderId}" not found.` });
+      }
+
+      const existingUpdates = Array.isArray(currentOrder.shipment_updates) ? currentOrder.shipment_updates : [];
+      const merged = [...existingUpdates, newEvt];
+
+      const { error: updErr } = await adminDb
+        .from('orders')
+        .update({
+          status: status || currentOrder.status,
+          shipment_updates: merged,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', currentOrder.id);
+
+      if (updErr) {
+        return res.status(400).json({ error: updErr.message });
+      }
+
+      await adminDb.from('order_shipment_updates').insert({
+        order_id: currentOrder.id,
+        status: newEvt.status,
+        title: newEvt.title,
+        description: newEvt.description,
+        location: newEvt.location,
+        created_at: newEvt.timestamp,
+      });
+    }
+
+    return res.json({
+      success: true,
+      update: newEvt,
+      message: 'Shipment update published.',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to publish shipment update' });
+  }
+});
+
 // Admin: Archive or Unarchive a Cancelled Order
 app.patch('/api/admin/orders/:orderId/archive', async (req: Request, res: Response) => {
   try {
+    const adminDb = (req as any).adminSupabase;
     const { orderId } = req.params;
     const { archive = true } = req.body;
     const timestamp = new Date().toISOString();
@@ -1148,21 +2166,20 @@ app.patch('/api/admin/orders/:orderId/archive', async (req: Request, res: Respon
     });
     saveOrdersToDisk();
 
-    if (supabase) {
-      try {
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
-        let query = supabase.from('orders').update({
-          is_archived_by_admin: Boolean(archive),
-          updated_at: timestamp,
-        });
-        if (isUuid) {
-          query = query.eq('id', orderId);
-        } else {
-          query = query.eq('order_number', orderId);
-        }
-        await query;
-      } catch (dbErr) {
-        console.warn('DB archive order error:', dbErr);
+    if (adminDb) {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
+      let query = adminDb.from('orders').update({
+        is_archived_by_admin: Boolean(archive),
+        updated_at: timestamp,
+      });
+      if (isUuid) {
+        query = query.eq('id', orderId);
+      } else {
+        query = query.eq('order_number', orderId);
+      }
+      const { error: dbErr } = await query;
+      if (dbErr) {
+        return res.status(400).json({ error: dbErr.message || 'Failed to update archive flag' });
       }
     }
 
@@ -1176,42 +2193,50 @@ app.patch('/api/admin/orders/:orderId/archive', async (req: Request, res: Respon
   }
 });
 
-// Customer: Request Cancellation for Eligible Order
+// Customer: Request Cancellation for Eligible Order (requires verified token & ownership)
 app.post('/api/orders/:orderId/cancel', async (req: Request, res: Response) => {
   try {
+    const verification = await verifySupabaseBearerToken(req);
+    if (verification.errorStatus || !verification.user) {
+      return res.status(verification.errorStatus || 401).json({
+        error: verification.errorMessage || 'Unauthorized: Sign in required to cancel an order.',
+      });
+    }
+
     const { orderId } = req.params;
-    const { cancellationReason, userId } = req.body;
+    const { cancellationReason } = req.body;
+    const callerId = verification.user.id;
+    const isAdmin = verification.profile?.role === 'admin';
 
     if (!cancellationReason || !cancellationReason.trim()) {
       return res.status(400).json({ error: 'Please provide a reason for cancelling your order.' });
     }
 
     const timestamp = new Date().toISOString();
-    let orderFound = false;
 
-    serverOrdersStore.forEach((ord) => {
+    for (const ord of serverOrdersStore.values()) {
       if (ord.id === orderId || ord.order_number === orderId) {
-        orderFound = true;
-        // Verify user ownership if userId provided
-        if (userId && ord.user_id && ord.user_id !== userId) {
-          throw new Error('Access denied: You can only cancel your own orders.');
+        if (!isAdmin && ord.user_id !== callerId) {
+          return res.status(403).json({ error: 'Forbidden: You can only cancel your own orders.' });
         }
 
         const eligibleStatuses = ['order_placed', 'confirmed', 'processing'];
         if (!eligibleStatuses.includes(ord.status)) {
-          throw new Error(`Order cannot be cancelled in status "${ord.status}". Contact support if shipped.`);
+          return res.status(400).json({
+            error: `Order cannot be cancelled in status "${ord.status}". Contact support if shipped.`,
+          });
         }
 
         ord.status = 'cancelled';
         ord.cancellation_reason = cancellationReason.trim();
         ord.cancelled_at = timestamp;
-        ord.cancelled_by = 'customer';
+        ord.cancelled_by = isAdmin ? 'admin' : 'customer';
         ord.updated_at = timestamp;
 
         const milestone = {
           id: `milestone-${Date.now()}`,
           status: 'cancelled',
-          title: 'Order Cancelled by Customer',
+          title: isAdmin ? 'Order Cancelled by Administrator' : 'Order Cancelled by Customer',
           description: `Cancellation requested: "${cancellationReason.trim()}"`,
           location: 'Shopcart Customer Care',
           timestamp,
@@ -1222,35 +2247,43 @@ app.post('/api/orders/:orderId/cancel', async (req: Request, res: Response) => {
         const historyItem = {
           status: 'cancelled',
           changedAt: timestamp,
-          changedBy: 'Customer',
+          changedBy: isAdmin ? (verification.profile?.email || 'Administrator') : 'Customer',
           note: cancellationReason.trim(),
         };
         if (!Array.isArray(ord.status_history)) ord.status_history = [];
         ord.status_history.unshift(historyItem);
       }
-    });
+    }
     saveOrdersToDisk();
 
-    if (supabase) {
-      try {
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
+    const dbClient = supabaseAdmin || verification.userClient;
+    if (dbClient) {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
+      let existingQuery = dbClient.from('orders').select('id, user_id, status');
+      existingQuery = isUuid ? existingQuery.eq('id', orderId) : existingQuery.eq('order_number', orderId);
+      const { data: existingDbOrder } = await existingQuery.maybeSingle();
+
+      if (existingDbOrder) {
+        if (!isAdmin && existingDbOrder.user_id !== callerId) {
+          return res.status(403).json({ error: 'Forbidden: You can only cancel your own orders.' });
+        }
+        const eligibleStatuses = ['order_placed', 'confirmed', 'processing'];
+        if (!eligibleStatuses.includes(existingDbOrder.status)) {
+          return res.status(400).json({
+            error: `Order cannot be cancelled in status "${existingDbOrder.status}". Contact support if shipped.`,
+          });
+        }
+
         const updatePayload: any = {
           status: 'cancelled',
           cancellation_reason: cancellationReason.trim(),
           cancelled_at: timestamp,
-          cancelled_by: 'customer',
+          cancelled_by: isAdmin ? 'admin' : 'customer',
           updated_at: timestamp,
         };
-        let query = supabase.from('orders').update(updatePayload);
-        if (isUuid) {
-          query = query.eq('id', orderId);
-        } else {
-          query = query.eq('order_number', orderId);
-        }
-        if (userId) query = query.eq('user_id', userId);
-        await query;
-      } catch (dbErr) {
-        console.warn('DB customer cancel order error:', dbErr);
+        let updQuery = dbClient.from('orders').update(updatePayload).eq('id', existingDbOrder.id);
+        if (!isAdmin) updQuery = updQuery.eq('user_id', callerId);
+        await updQuery;
       }
     }
 
@@ -1265,40 +2298,49 @@ app.post('/api/orders/:orderId/cancel', async (req: Request, res: Response) => {
   }
 });
 
-// Customer: Hide / Archive Cancelled Order from Order History
+// Customer: Hide / Archive Cancelled Order from Order History (requires verified token & ownership)
 app.post('/api/orders/:orderId/hide', async (req: Request, res: Response) => {
   try {
+    const verification = await verifySupabaseBearerToken(req);
+    if (verification.errorStatus || !verification.user) {
+      return res.status(verification.errorStatus || 401).json({
+        error: verification.errorMessage || 'Unauthorized: Sign in required to manage order history.',
+      });
+    }
+
     const { orderId } = req.params;
-    const { userId } = req.body;
+    const callerId = verification.user.id;
+    const isAdmin = verification.profile?.role === 'admin';
     const timestamp = new Date().toISOString();
 
-    serverOrdersStore.forEach((ord) => {
+    for (const ord of serverOrdersStore.values()) {
       if (ord.id === orderId || ord.order_number === orderId) {
-        if (userId && ord.user_id && ord.user_id !== userId) {
-          throw new Error('Access denied: You can only hide your own orders.');
+        if (!isAdmin && ord.user_id !== callerId) {
+          return res.status(403).json({ error: 'Forbidden: You can only hide your own orders.' });
         }
         ord.is_hidden_by_customer = true;
         ord.updated_at = timestamp;
       }
-    });
+    }
     saveOrdersToDisk();
 
-    if (supabase) {
-      try {
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
-        let query = supabase.from('orders').update({
-          is_hidden_by_customer: true,
-          updated_at: timestamp,
-        });
-        if (isUuid) {
-          query = query.eq('id', orderId);
-        } else {
-          query = query.eq('order_number', orderId);
+    const dbClient = supabaseAdmin || verification.userClient;
+    if (dbClient) {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
+      let existingQuery = dbClient.from('orders').select('id, user_id');
+      existingQuery = isUuid ? existingQuery.eq('id', orderId) : existingQuery.eq('order_number', orderId);
+      const { data: existingDbOrder } = await existingQuery.maybeSingle();
+
+      if (existingDbOrder) {
+        if (!isAdmin && existingDbOrder.user_id !== callerId) {
+          return res.status(403).json({ error: 'Forbidden: You can only hide your own orders.' });
         }
-        if (userId) query = query.eq('user_id', userId);
-        await query;
-      } catch (dbErr) {
-        console.warn('DB hide order error:', dbErr);
+        let updQuery = dbClient
+          .from('orders')
+          .update({ is_hidden_by_customer: true, updated_at: timestamp })
+          .eq('id', existingDbOrder.id);
+        if (!isAdmin) updQuery = updQuery.eq('user_id', callerId);
+        await updQuery;
       }
     }
 
@@ -1311,24 +2353,41 @@ app.post('/api/orders/:orderId/hide', async (req: Request, res: Response) => {
   }
 });
 
-// Customer: Get Orders for Specific Customer
+// Customer: Get Orders for Specific Customer (requires verified token matching userId or admin)
 app.get('/api/orders/customer/:userId', async (req: Request, res: Response) => {
   try {
+    const verification = await verifySupabaseBearerToken(req);
+    if (verification.errorStatus || !verification.user) {
+      return res.status(verification.errorStatus || 401).json({
+        error: verification.errorMessage || 'Unauthorized: Sign in required to view customer orders.',
+      });
+    }
+
     const { userId } = req.params;
+    const callerId = verification.user.id;
+    const isAdmin = verification.profile?.role === 'admin';
+
+    if (!isAdmin && callerId !== userId) {
+      return res.status(403).json({
+        error: 'Forbidden: Customers may only access their own order history.',
+      });
+    }
+
     const includeHidden = req.query.includeHidden === 'true';
 
     const customerOrders: any[] = [];
     serverOrdersStore.forEach((ord) => {
-      if (ord.user_id === userId || (userId.startsWith('usr-demo') && !ord.user_id)) {
+      if (ord.user_id === userId) {
         if (includeHidden || !ord.is_hidden_by_customer) {
           customerOrders.push(ord);
         }
       }
     });
 
-    if (supabase && userId && !userId.startsWith('usr-demo')) {
+    const dbClient = supabaseAdmin || verification.userClient;
+    if (dbClient && userId) {
       try {
-        let query = supabase
+        let query = dbClient
           .from('orders')
           .select('*, order_items(*), payment_records(*)')
           .eq('user_id', userId);
@@ -1341,7 +2400,7 @@ app.get('/api/orders/customer/:userId', async (req: Request, res: Response) => {
         if (!error && data) {
           const map = new Map<string, any>();
           customerOrders.forEach((o) => map.set(o.order_number, o));
-          data.forEach((o) => map.set(o.order_number, o));
+          data.forEach((o: any) => map.set(o.order_number, o));
           const merged = Array.from(map.values()).sort(
             (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
           );
@@ -1361,16 +2420,15 @@ app.get('/api/orders/customer/:userId', async (req: Request, res: Response) => {
   }
 });
 
-
-// Update Order Shipment & Tracking
+// Update Order Shipment & Tracking (Admin Protected via requireAdminAuth)
 app.patch('/api/admin/orders/:orderId/shipping', async (req: Request, res: Response) => {
   try {
+    const adminDb = (req as any).adminSupabase;
     const { orderId } = req.params;
     const { carrier, trackingNumber, estimatedDeliveryDate } = req.body;
 
     const timestamp = new Date().toISOString();
 
-    // Update memory cache
     serverOrdersStore.forEach((ord) => {
       if (ord.id === orderId || ord.order_number === orderId) {
         if (carrier) ord.carrier = carrier;
@@ -1380,23 +2438,22 @@ app.patch('/api/admin/orders/:orderId/shipping', async (req: Request, res: Respo
       }
     });
 
-    if (supabase) {
-      try {
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
-        const updatePayload: any = { updated_at: timestamp };
-        if (carrier) updatePayload.carrier = carrier;
-        if (trackingNumber) updatePayload.tracking_number = trackingNumber;
-        if (estimatedDeliveryDate) updatePayload.estimated_delivery_date = estimatedDeliveryDate;
+    if (adminDb) {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
+      const updatePayload: any = { updated_at: timestamp };
+      if (carrier) updatePayload.carrier = carrier;
+      if (trackingNumber) updatePayload.tracking_number = trackingNumber;
+      if (estimatedDeliveryDate) updatePayload.estimated_delivery_date = estimatedDeliveryDate;
 
-        let query = supabase.from('orders').update(updatePayload);
-        if (isUuid) {
-          query = query.eq('id', orderId);
-        } else {
-          query = query.eq('order_number', orderId);
-        }
-        await query;
-      } catch (dbErr) {
-        console.warn('DB update shipping error:', dbErr);
+      let query = adminDb.from('orders').update(updatePayload);
+      if (isUuid) {
+        query = query.eq('id', orderId);
+      } else {
+        query = query.eq('order_number', orderId);
+      }
+      const { error: dbErr } = await query;
+      if (dbErr) {
+        return res.status(400).json({ error: dbErr.message || 'Failed to update shipping details' });
       }
     }
 
@@ -1412,28 +2469,52 @@ app.patch('/api/admin/orders/:orderId/shipping', async (req: Request, res: Respo
   }
 });
 
-// Customer Public Tracking Route
+// Order Tracking Route: Full details only for authenticated owner or admin; sanitized tracking status otherwise
 app.get('/api/orders/:orderNumber', async (req: Request, res: Response) => {
   try {
     const { orderNumber } = req.params;
-
-    if (serverOrdersStore.has(orderNumber)) {
-      return res.json({ success: true, order: serverOrdersStore.get(orderNumber) });
+    const authVerification = req.headers.authorization ? await verifySupabaseBearerToken(req) : null;
+    if (authVerification && authVerification.errorStatus) {
+      return res.status(authVerification.errorStatus).json({ error: authVerification.errorMessage });
     }
 
-    if (supabase) {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('*, order_items(*), payment_records(*)')
-        .eq('order_number', orderNumber)
-        .maybeSingle();
+    const callerId = authVerification?.user?.id || null;
+    const isAdmin = authVerification?.profile?.role === 'admin';
 
-      if (!error && data) {
-        return res.json({ success: true, order: data });
+    let foundOrder: any = serverOrdersStore.get(orderNumber) || null;
+    if (!foundOrder) {
+      const dbClient = supabaseAdmin || authVerification?.userClient || null;
+      if (dbClient) {
+        const { data, error } = await dbClient
+          .from('orders')
+          .select('*, order_items(*), payment_records(*)')
+          .eq('order_number', orderNumber)
+          .maybeSingle();
+        if (!error && data) foundOrder = data;
       }
     }
 
-    return res.status(404).json({ error: 'Order not found' });
+    if (!foundOrder) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    if (isAdmin || (callerId && foundOrder.user_id === callerId)) {
+      return res.json({ success: true, order: foundOrder });
+    }
+
+    // Unauthenticated or non-owner requests only receive non-PII shipment status
+    return res.json({
+      success: true,
+      order: {
+        order_number: foundOrder.order_number,
+        status: foundOrder.status,
+        tracking_number: foundOrder.tracking_number,
+        carrier: foundOrder.carrier,
+        estimated_delivery_date: foundOrder.estimated_delivery_date,
+        shipment_updates: foundOrder.shipment_updates || [],
+        created_at: foundOrder.created_at,
+      },
+    });
   } catch (err: any) {
     return res.status(500).json({ error: err.message || 'Failed to track order' });
   }
@@ -1465,67 +2546,23 @@ app.get('/api/payments/merchant-settings', async (_req: Request, res: Response) 
   }
 });
 
-// Server-Authoritative Admin Verification Endpoint (directly validates Supabase Auth session & PostgreSQL role)
+// Server-Authoritative Admin Verification Endpoint (requireAdminAuth already verified Supabase JWT & public.profiles.role === 'admin')
 app.get('/api/admin/verify-clearance', async (req: Request, res: Response) => {
-  const authHeader = req.headers.authorization;
-
-  if (supabase && authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.replace('Bearer ', '').trim();
-    try {
-      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser(token);
-      if (authError || !authUser) {
-        return res.status(401).json({
-          authorized: false,
-          error: 'Session expired or invalid authentication token.',
-        });
-      }
-
-      const { data: profile, error: profError } = await supabase
-        .from('profiles')
-        .select('id, email, full_name, role')
-        .eq('id', authUser.id)
-        .maybeSingle();
-
-      if (profError || !profile) {
-        return res.status(403).json({
-          authorized: false,
-          error: 'No user profile record found in public.profiles.',
-        });
-      }
-
-      if (profile.role !== 'admin') {
-        return res.status(403).json({
-          authorized: false,
-          role: profile.role || 'customer',
-          error: 'Access Denied: Only accounts with verified role = "admin" in public.profiles may access /admin.',
-        });
-      }
-
-      return res.json({
-        authorized: true,
-        role: 'admin',
-        userId: authUser.id,
-        email: authUser.email,
-        name: profile.full_name,
-        verifiedAt: new Date().toISOString(),
-      });
-    } catch (err: any) {
-      return res.status(500).json({ authorized: false, error: err.message || 'Server error verifying role' });
-    }
-  }
-
-  // Local development / fallback check
-  const roleHeader = req.headers['x-admin-role'] || req.headers['x-role'];
-  const isDemoAdmin = roleHeader === 'admin';
+  const adminUser = (req as any).adminUser;
+  const adminProfile = (req as any).adminProfile;
   return res.json({
-    authorized: isDemoAdmin,
-    role: isDemoAdmin ? 'admin' : 'customer',
-    source: 'local_environment',
+    authorized: true,
+    role: 'admin',
+    userId: adminUser.id,
+    email: adminUser.email,
+    name: adminProfile?.full_name || null,
+    verifiedAt: new Date().toISOString(),
   });
 });
 
 app.post('/api/admin/merchant-settings', async (req: Request, res: Response) => {
   try {
+    const adminDb = (req as any).adminSupabase;
     const {
       merchant_upi_id,
       merchant_name,
@@ -1545,9 +2582,9 @@ app.post('/api/admin/merchant-settings', async (req: Request, res: Response) => 
       updated_at: new Date().toISOString(),
     };
 
-    if (supabase) {
+    if (adminDb) {
       try {
-        await supabase.from('merchant_payment_settings').upsert({
+        await adminDb.from('merchant_payment_settings').upsert({
           id: 'default',
           ...merchantPaymentSettings,
         });
@@ -1575,142 +2612,24 @@ app.post('/api/payments/analyze-screenshot', async (req: Request, res: Response)
       expectedAmount,
       expectedOrderNumber,
       expectedMerchantUpi,
-    } = req.body;
+    } = req.body || {};
 
-    if (!screenshotBase64) {
+    if (!screenshotBase64 || typeof screenshotBase64 !== 'string') {
       return res.status(400).json({ error: 'Missing screenshotBase64 image payload.' });
     }
 
-    // Clean base64 header if included
-    const cleanBase64 = screenshotBase64.replace(/^data:image\/[a-zA-Z+]+;base64,/, '');
-
-    const numExpectedAmount = Number(expectedAmount) || 0;
-    const targetMerchant = (expectedMerchantUpi || merchantPaymentSettings.merchant_upi_id || 'shopcart.merchant@okaxis').toLowerCase();
-
-    // 1. If Gemini AI is configured via GEMINI_API_KEY, perform real server-side multimodal inspection
-    if (ai) {
-      try {
-        const promptText = `
-You are an expert Senior Banking & UPI Payment Fraud Detection Specialist analyzing a customer-uploaded payment success screenshot for the e-commerce store "Shopcart".
-
-Order Context:
-- Expected Order Number: ${expectedOrderNumber || 'N/A'}
-- Expected Payable Amount: ₹${numExpectedAmount.toFixed(2)} INR
-- Expected Merchant Payee / UPI ID: ${targetMerchant} (or Shopcart)
-
-Analyze the image with utmost scrutiny:
-1. Receipt Authenticity & Status: Is this an authentic payment success receipt from a recognized UPI application (e.g. Google Pay, PhonePe, Paytm, BHIM, Cred, Amazon Pay, Axis/HDFC/SBI/iMobile Bank app)? Does it show "Paid", "Payment Successful", "Transferred"? Or is it "Failed", "Pending", "Processing", an order preview, or not a payment screenshot at all?
-2. Transaction Reference: Extract the 12-digit UPI UTR / RRN (Bank Reference Number) or Transaction ID.
-3. Amount: Extract the numerical amount paid in INR. Compare with expected ₹${numExpectedAmount.toFixed(2)}.
-4. Payee / Merchant: Who was the recipient? Extract the payee name or UPI ID. Compare with ${targetMerchant} or Shopcart.
-5. Timestamp: Extract date and time of payment.
-6. Fraud & Manipulation Signals: Check for digital alterations, font mismatches, uneven pixel compression, blurry text around amounts, edited numbers, suspicious watermarks, fake receipt generator templates, or cropped status bars.
-7. Decision & Confidence:
-   - "recommended_action": Choose exactly one of: "DETAILS_MATCH" (genuine receipt, amount matches, payee matches, no signs of tampering), "REVIEW_REQUIRED" (slight amount mismatch, blurry screenshot, unconfirmed payee), "POSSIBLE_FRAUD" (edited receipt, failed payment claiming success, severe amount discrepancy, fake template).
-   - "confidence_score": 0 to 100 integer.
-
-Respond ONLY with a valid JSON object matching this exact structure:
-{
-  "screenshot_status": "valid_success" | "payment_failed" | "tampered" | "unclear" | "not_a_receipt",
-  "extracted_utr": "12-digit string or empty string",
-  "extracted_amount": 123.45,
-  "extracted_merchant": "extracted payee or UPI ID",
-  "extracted_app": "Google Pay" | "PhonePe" | "Paytm" | "BHIM" | "Cred" | "Amazon Pay" | "Banking App" | "Unknown",
-  "extracted_timestamp": "extracted date/time or empty",
-  "amount_matches": true | false,
-  "merchant_matches": true | false,
-  "suspicious_indicators": ["list of specific suspicious signals or empty array if clean"],
-  "confidence_score": 90,
-  "recommended_action": "DETAILS_MATCH" | "REVIEW_REQUIRED" | "POSSIBLE_FRAUD",
-  "ai_summary": "1-2 sentence concise summary of findings"
-}
-`;
-
-        const imagePart = {
-          inlineData: {
-            mimeType: mimeType.includes('png') ? 'image/png' : mimeType.includes('webp') ? 'image/webp' : 'image/jpeg',
-            data: cleanBase64,
-          },
-        };
-
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: { parts: [imagePart, { text: promptText }] },
-          config: {
-            responseMimeType: 'application/json',
-          },
-        });
-
-        const rawText = (response.text || '').trim();
-        let parsedResult: any = null;
-
-        try {
-          parsedResult = JSON.parse(rawText);
-        } catch {
-          const match = rawText.match(/\{[\s\S]*\}/);
-          if (match) parsedResult = JSON.parse(match[0]);
-        }
-
-        if (parsedResult) {
-          // Double-check numerical amount match on server
-          if (parsedResult.extracted_amount && numExpectedAmount > 0) {
-            const diff = Math.abs(Number(parsedResult.extracted_amount) - numExpectedAmount);
-            if (diff > 0.5) {
-              parsedResult.amount_matches = false;
-              if (!parsedResult.suspicious_indicators.includes(`Paid amount (₹${parsedResult.extracted_amount}) does not match order total (₹${numExpectedAmount})`)) {
-                parsedResult.suspicious_indicators.push(`Paid amount (₹${parsedResult.extracted_amount}) does not match expected order total (₹${numExpectedAmount})`);
-              }
-              if (parsedResult.recommended_action === 'DETAILS_MATCH') {
-                parsedResult.recommended_action = 'REVIEW_REQUIRED';
-              }
-            } else {
-              parsedResult.amount_matches = true;
-            }
-          }
-
-          parsedResult.analyzed_at = new Date().toISOString();
-          return res.json({
-            success: true,
-            provider: 'gemini-3.8-flash',
-            analysis: parsedResult,
-            disclaimer: 'Preliminary AI fraud risk assessment only. Actual bank ledger reconciliation by an administrator is required before order dispatch.',
-          });
-        }
-      } catch (aiErr: any) {
-        console.warn('Gemini screenshot analysis error, falling back to heuristic evaluation:', aiErr?.message);
-      }
-    }
-
-    // 2. High-Fidelity Heuristic Fallback Analysis (used when GEMINI_API_KEY is not set or network fails)
-    // Inspects image presence, byte length, and provided metadata
-    const bufferSize = Buffer.from(cleanBase64, 'base64').length;
-    const isReasonableSize = bufferSize > 15000 && bufferSize < 15000000;
-    const mockUtr = `4${Date.now().toString().slice(-11)}`;
-
-    const fallbackAnalysis = {
-      screenshot_status: isReasonableSize ? 'valid_success' : 'unclear',
-      extracted_utr: mockUtr,
-      extracted_amount: numExpectedAmount > 0 ? numExpectedAmount : 150.0,
-      extracted_merchant: merchantPaymentSettings.merchant_upi_id,
-      extracted_app: 'UPI App',
-      extracted_timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      amount_matches: true,
-      merchant_matches: true,
-      suspicious_indicators: isReasonableSize
-        ? []
-        : ['Image resolution or file size appears unusually low for an authentic mobile UPI receipt.'],
-      confidence_score: isReasonableSize ? 88 : 45,
-      recommended_action: isReasonableSize ? 'DETAILS_MATCH' : 'REVIEW_REQUIRED',
-      ai_summary: isReasonableSize
-        ? `Screenshot detected with authentic resolution (${(bufferSize / 1024).toFixed(0)} KB). Paid amount matches expected total ₹${numExpectedAmount.toFixed(2)}.`
-        : 'Screenshot is unclear or unusually small. Manual administrative check required.',
-      analyzed_at: new Date().toISOString(),
-    };
+    const { provider, analysis } = await analyzePaymentScreenshotServer({
+      screenshotBase64,
+      mimeType,
+      expectedAmount: Number(expectedAmount) || 0,
+      expectedOrderNumber: typeof expectedOrderNumber === 'string' ? expectedOrderNumber : '',
+      expectedMerchantUpi: typeof expectedMerchantUpi === 'string' ? expectedMerchantUpi : '',
+    });
 
     return res.json({
       success: true,
-      provider: ai ? 'heuristic_fallback' : 'local_ai_simulator',
-      analysis: fallbackAnalysis,
+      provider,
+      analysis,
       disclaimer: 'Preliminary AI fraud risk assessment only. Actual bank ledger reconciliation by an administrator is required before order dispatch.',
     });
   } catch (err: any) {
@@ -1719,212 +2638,87 @@ Respond ONLY with a valid JSON object matching this exact structure:
   }
 });
 
-// Cache of recorded UTRs to guarantee instant duplicate rejection in all execution modes
-const recordedUtrMemory = new Set<string>();
+// 5. Consolidated Single Payment-Recording Workflow Notice
+// All UPI payments & payment_records are recorded strictly in a single ACID transaction
+// alongside order creation via POST /api/orders/create -> public.create_complete_order().
+// Legacy standalone payment-recording routes are retired (HTTP 410) to prevent duplicate payment rows per order.
+function handleRetiredStandalonePaymentRoute(_req: Request, res: Response) {
+  return res.status(410).json({
+    error: 'Standalone payment recording endpoints have been retired. Orders and UPI payment records are created atomically in one transaction via POST /api/orders/create.',
+    authoritativeEndpoint: '/api/orders/create',
+  });
+}
 
-// 5. Record Universal UPI Submission (Google Pay, PhonePe, Paytm, BHIM, etc.) with Screenshot & AI Audit
-app.post('/api/payments/record-upi', async (req: Request, res: Response) => {
-  try {
-    const {
-      orderNumber,
-      upiTransactionRef,
-      amount,
-      paymentMethod = 'all_upi',
-      screenshotBase64,
-      screenshotUrl: providedScreenshotUrl,
-      aiAnalysis,
-    } = req.body;
-
-    if (!orderNumber) {
-      return res.status(400).json({ error: 'Missing orderNumber' });
-    }
-
-    const cleanRef = (upiTransactionRef || aiAnalysis?.extracted_utr || '').trim().toUpperCase();
-
-    // Validate 12-digit UTR if provided
-    if (cleanRef && !/^[A-Za-z0-9]{12}$/.test(cleanRef)) {
-      return res.status(400).json({
-        error: 'Please enter a valid 12-digit alphanumeric UPI Transaction ID / UTR reference number (or leave empty if waiting for AI extraction).',
-      });
-    }
-
-    // Prevent duplicate UTR submissions across all active sessions & memory cache
-    if (cleanRef && recordedUtrMemory.has(cleanRef)) {
-      return res.status(409).json({
-        error: `Duplicate UTR Reference: The 12-digit transaction ID "${cleanRef}" has already been submitted for another order. Each payment requires a unique reference.`,
-      });
-    }
-
-    // Save screenshot locally to public uploads if provided as base64
-    let finalScreenshotUrl = providedScreenshotUrl || '';
-    if (screenshotBase64 && !finalScreenshotUrl.startsWith('/uploads/')) {
-      try {
-        const cleanData = screenshotBase64.replace(/^data:image\/[a-zA-Z+]+;base64,/, '');
-        const filename = `receipt_${orderNumber}_${Date.now()}.png`;
-        const filePath = path.join(UPLOADS_DIR, filename);
-        fs.writeFileSync(filePath, Buffer.from(cleanData, 'base64'));
-        finalScreenshotUrl = `/uploads/screenshots/${filename}`;
-      } catch (saveErr) {
-        console.warn('Could not save screenshot image to disk:', saveErr);
-      }
-    }
-
-    // Determine canonical payment status
-    // Customer submission starts as strictly 'pending_admin_verification' (mandatory anti-fraud protocol)
-    const finalPaymentStatus = 'pending_admin_verification';
-
-    if (supabase) {
-      try {
-        // Prevent duplicate UTR submissions in database
-        if (cleanRef) {
-          const { data: existingRecord } = await supabase
-            .from('payment_records')
-            .select('id, transaction_reference, order_id')
-            .eq('transaction_reference', cleanRef)
-            .maybeSingle();
-
-          if (existingRecord) {
-            recordedUtrMemory.add(cleanRef);
-            return res.status(409).json({
-              error: `Duplicate UTR Reference: The 12-digit transaction ID "${cleanRef}" has already been submitted for another order. Each payment requires a unique reference.`,
-            });
-          }
-        }
-
-        const { data: orderRow } = await supabase
-          .from('orders')
-          .select('id, total_amount')
-          .eq('order_number', orderNumber)
-          .maybeSingle();
-
-        if (orderRow) {
-          // Set order status to pending & payment_status to pending_admin_verification
-          await supabase
-            .from('orders')
-            .update({
-              status: 'pending',
-              payment_status: finalPaymentStatus,
-              payment_method: paymentMethod,
-              transaction_reference: cleanRef || null,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', orderRow.id);
-
-          // Insert payment record with screenshot & AI analysis audit data
-          await supabase.from('payment_records').insert({
-            order_id: orderRow.id,
-            payment_method: paymentMethod,
-            amount: amount || orderRow.total_amount,
-            currency: 'INR',
-            payment_status: finalPaymentStatus,
-            transaction_reference: cleanRef || null,
-            screenshot_url: finalScreenshotUrl || null,
-            ai_analysis: aiAnalysis || null,
-            ai_confidence_score: aiAnalysis?.confidence_score || null,
-            ai_recommendation: aiAnalysis?.recommended_action || null,
-            suspicious_indicators: aiAnalysis?.suspicious_indicators || [],
-            raw_details: {
-              upiTransactionRef: cleanRef,
-              paymentMethod,
-              submittedAt: new Date().toISOString(),
-              screenshotUrl: finalScreenshotUrl,
-              aiAnalysis,
-              status: 'Awaiting Bank Ledger Verification by Administrator',
-              verifiedBy: null,
-              verifiedAt: null,
-            },
-          });
-        }
-      } catch (dbErr) {
-        console.warn('Error saving Universal UPI payment record to Supabase:', dbErr);
-      }
-    }
-
-    if (cleanRef) {
-      recordedUtrMemory.add(cleanRef);
-    }
-
-    return res.json({
-      success: true,
-      paymentStatus: finalPaymentStatus,
-      paymentMethod,
-      transactionReference: cleanRef,
-      screenshotUrl: finalScreenshotUrl,
-      aiAnalysis,
-      message: 'Your payment is submitted and waiting for verification.',
-    });
-  } catch (err: any) {
-    console.error('Exception in record-upi:', err);
-    return res.status(500).json({ error: err.message || 'Failed to record UPI payment' });
-  }
-});
-
-// Backward-compatible record-gpay alias
-app.post('/api/payments/record-gpay', (req: Request, res: Response, next) => {
-  req.body.paymentMethod = req.body.paymentMethod || 'gpay_upi';
-  // Forward to record-upi handler
-  const forwardReq: any = req;
-  const forwardRes: any = res;
-  return app._router.handle(forwardReq, forwardRes, next);
-});
+app.post('/api/payments/record-upi', handleRetiredStandalonePaymentRoute);
+app.post('/api/payments/record-gpay', handleRetiredStandalonePaymentRoute);
 
 // 6. Admin Manual Payment Verification (Authoritative against bank ledger)
 app.post('/api/admin/verify-payment', async (req: Request, res: Response) => {
   try {
-    const { paymentRecordId, orderId, orderNumber, adminEmail, notes } = req.body;
+    const adminDb = (req as any).adminSupabase;
+    const { paymentRecordId, orderId, orderNumber, notes } = req.body;
 
     if (!paymentRecordId && !orderId && !orderNumber) {
       return res.status(400).json({ error: 'Missing paymentRecordId, orderId, or orderNumber' });
     }
 
     let targetOrderId = orderId;
-    if (supabase && orderNumber && !targetOrderId) {
-      try {
-        const { data: ord } = await supabase.from('orders').select('id').eq('order_number', orderNumber).maybeSingle();
-        if (ord) targetOrderId = ord.id;
-      } catch (err) {
-        console.warn('Could not lookup order by orderNumber:', err);
-      }
+    if (adminDb && orderNumber && !targetOrderId) {
+      const { data: ord } = await adminDb.from('orders').select('id').eq('order_number', orderNumber).maybeSingle();
+      if (ord) targetOrderId = ord.id;
     }
 
     const verifiedAt = new Date().toISOString();
-    const verifiedBy = adminEmail || 'Store Administrator';
+    const verifiedBy = (req as any).adminProfile?.email || (req as any).adminUser?.email || 'Store Administrator';
     const auditNotes = notes || 'Verified against merchant bank statement / ledger.';
 
-    if (supabase) {
-      try {
-        let query = supabase.from('payment_records').update({
-          payment_status: 'verified',
-          verified_at: verifiedAt,
-          verified_by: verifiedBy,
-          raw_details: {
-            verifiedAt,
-            verifiedBy,
-            adminNotes: auditNotes,
-          },
-        });
+    if (adminDb) {
+      if (!paymentRecordId && !targetOrderId) {
+        return res.status(404).json({ error: 'Matching order or payment record not found to verify.' });
+      }
 
-        if (paymentRecordId) {
-          query = query.eq('id', paymentRecordId);
-        } else if (targetOrderId) {
-          query = query.eq('order_id', targetOrderId);
+      let query = adminDb.from('payment_records').update({
+        payment_status: 'verified',
+        verified_at: verifiedAt,
+        verified_by: verifiedBy,
+        raw_details: {
+          verifiedAt,
+          verifiedBy,
+          adminNotes: auditNotes,
+        },
+      });
+
+      if (paymentRecordId) {
+        query = query.eq('id', paymentRecordId);
+      } else if (targetOrderId) {
+        query = query.eq('order_id', targetOrderId);
+      }
+
+      const { data: updatedPayRows, error: payErr } = await query.select('id, order_id');
+      if (payErr) {
+        return res.status(400).json({ error: payErr.message || 'Failed to verify payment record' });
+      }
+      if (!updatedPayRows || updatedPayRows.length === 0) {
+        return res.status(404).json({ error: 'No matching payment record found to verify.' });
+      }
+
+      const resolvedOrderId = targetOrderId || updatedPayRows[0]?.order_id;
+      if (resolvedOrderId) {
+        const { data: updatedOrdRows, error: ordErr } = await adminDb
+          .from('orders')
+          .update({
+            status: 'confirmed',
+            payment_status: 'verified',
+            updated_at: verifiedAt,
+          })
+          .eq('id', resolvedOrderId)
+          .select('id');
+        if (ordErr) {
+          return res.status(400).json({ error: ordErr.message || 'Failed to update order verification status' });
         }
-
-        await query;
-
-        // Also update order status to 'confirmed' and payment_status to 'verified'
-        if (targetOrderId) {
-          await supabase
-            .from('orders')
-            .update({
-              status: 'confirmed',
-              payment_status: 'verified',
-              updated_at: verifiedAt,
-            })
-            .eq('id', targetOrderId);
+        if (!updatedOrdRows || updatedOrdRows.length === 0) {
+          return res.status(404).json({ error: 'Associated order record not found during verification.' });
         }
-      } catch (dbErr: any) {
-        console.warn('DB error verifying payment:', dbErr?.message);
       }
     }
 
@@ -1943,58 +2737,69 @@ app.post('/api/admin/verify-payment', async (req: Request, res: Response) => {
 // 7. Admin Reject Payment
 app.post('/api/admin/reject-payment', async (req: Request, res: Response) => {
   try {
-    const { paymentRecordId, orderId, orderNumber, adminEmail, reason } = req.body;
+    const adminDb = (req as any).adminSupabase;
+    const { paymentRecordId, orderId, orderNumber, reason } = req.body;
 
     if (!paymentRecordId && !orderId && !orderNumber) {
       return res.status(400).json({ error: 'Missing paymentRecordId, orderId, or orderNumber' });
     }
 
     let targetOrderId = orderId;
-    if (supabase && orderNumber && !targetOrderId) {
-      try {
-        const { data: ord } = await supabase.from('orders').select('id').eq('order_number', orderNumber).maybeSingle();
-        if (ord) targetOrderId = ord.id;
-      } catch (err) {
-        console.warn('Could not lookup order by orderNumber:', err);
-      }
+    if (adminDb && orderNumber && !targetOrderId) {
+      const { data: ord } = await adminDb.from('orders').select('id').eq('order_number', orderNumber).maybeSingle();
+      if (ord) targetOrderId = ord.id;
     }
 
     const rejectionReason = (reason || 'Payment could not be verified in merchant bank ledger').trim();
     const rejectedAt = new Date().toISOString();
-    const rejectedBy = adminEmail || 'Store Administrator';
+    const rejectedBy = (req as any).adminProfile?.email || (req as any).adminUser?.email || 'Store Administrator';
 
-    if (supabase) {
-      try {
-        let query = supabase.from('payment_records').update({
-          payment_status: 'rejected',
-          rejection_reason: rejectionReason,
-          raw_details: {
-            rejectedAt,
-            rejectedBy,
-            rejectionReason,
-          },
-        });
+    if (adminDb) {
+      if (!paymentRecordId && !targetOrderId) {
+        return res.status(404).json({ error: 'Matching order or payment record not found to reject.' });
+      }
 
-        if (paymentRecordId) {
-          query = query.eq('id', paymentRecordId);
-        } else if (targetOrderId) {
-          query = query.eq('order_id', targetOrderId);
+      let query = adminDb.from('payment_records').update({
+        payment_status: 'rejected',
+        rejection_reason: rejectionReason,
+        raw_details: {
+          rejectedAt,
+          rejectedBy,
+          rejectionReason,
+        },
+      });
+
+      if (paymentRecordId) {
+        query = query.eq('id', paymentRecordId);
+      } else if (targetOrderId) {
+        query = query.eq('order_id', targetOrderId);
+      }
+
+      const { data: updatedPayRows, error: payErr } = await query.select('id, order_id');
+      if (payErr) {
+        return res.status(400).json({ error: payErr.message || 'Failed to reject payment record' });
+      }
+      if (!updatedPayRows || updatedPayRows.length === 0) {
+        return res.status(404).json({ error: 'No matching payment record found to reject.' });
+      }
+
+      const resolvedOrderId = targetOrderId || updatedPayRows[0]?.order_id;
+      if (resolvedOrderId) {
+        const { data: updatedOrdRows, error: ordErr } = await adminDb
+          .from('orders')
+          .update({
+            status: 'cancelled',
+            payment_status: 'rejected',
+            updated_at: rejectedAt,
+          })
+          .eq('id', resolvedOrderId)
+          .select('id');
+        if (ordErr) {
+          return res.status(400).json({ error: ordErr.message || 'Failed to update order rejection status' });
         }
-
-        await query;
-
-        if (targetOrderId) {
-          await supabase
-            .from('orders')
-            .update({
-              status: 'cancelled',
-              payment_status: 'rejected',
-              updated_at: rejectedAt,
-            })
-            .eq('id', targetOrderId);
+        if (!updatedOrdRows || updatedOrdRows.length === 0) {
+          return res.status(404).json({ error: 'Associated order record not found during rejection.' });
         }
-      } catch (dbErr: any) {
-        console.warn('DB error rejecting payment:', dbErr?.message);
       }
     }
 
@@ -2014,16 +2819,17 @@ app.post('/api/admin/reject-payment', async (req: Request, res: Response) => {
 // 8. Admin Request Replacement Screenshot
 app.post('/api/admin/request-new-screenshot', async (req: Request, res: Response) => {
   try {
-    const { paymentRecordId, orderId, orderNumber, adminEmail, reason, message } = req.body;
+    const adminDb = (req as any).adminSupabase;
+    const { paymentRecordId, orderId, orderNumber, reason, message } = req.body;
 
     if (!paymentRecordId && !orderId && !orderNumber) {
       return res.status(400).json({ error: 'Missing paymentRecordId, orderId, or orderNumber' });
     }
 
     let targetOrderId = orderId;
-    if (supabase && orderNumber && !targetOrderId) {
+    if (adminDb && orderNumber && !targetOrderId) {
       try {
-        const { data: ord } = await supabase.from('orders').select('id').eq('order_number', orderNumber).maybeSingle();
+        const { data: ord } = await adminDb.from('orders').select('id').eq('order_number', orderNumber).maybeSingle();
         if (ord) targetOrderId = ord.id;
       } catch (err) {
         console.warn('Could not lookup order by orderNumber:', err);
@@ -2032,14 +2838,15 @@ app.post('/api/admin/request-new-screenshot', async (req: Request, res: Response
 
     const note = (message || reason || 'Uploaded screenshot is blurry or unreadable. Please provide a clear receipt.').trim();
     const requestedAt = new Date().toISOString();
+    const requestedBy = (req as any).adminProfile?.email || (req as any).adminUser?.email || 'Store Administrator';
 
-    if (supabase) {
+    if (adminDb) {
       try {
-        let query = supabase.from('payment_records').update({
+        let query = adminDb.from('payment_records').update({
           payment_status: 'awaiting_payment',
           raw_details: {
             screenshotRequestedAt: requestedAt,
-            requestedBy: adminEmail || 'Store Administrator',
+            requestedBy,
             requestNote: note,
           },
         });
@@ -2206,9 +3013,27 @@ app.post('/api/supabase/verify', async (req: Request, res: Response) => {
   }
 });
 
-// 8. Persist Supabase Credentials to .env and runtime
+// 8. Persist Supabase Credentials to .env and runtime (Admin-protected once configured)
 app.post('/api/supabase/save', async (req: Request, res: Response) => {
   try {
+    const existingUrl = (process.env.VITE_SUPABASE_URL || '').trim();
+    const existingAnonKey = (process.env.VITE_SUPABASE_ANON_KEY || '').trim();
+    if (existingUrl && existingAnonKey) {
+      const verification = await verifySupabaseBearerToken(req);
+      if (verification.errorStatus) {
+        return res.status(verification.errorStatus).json({
+          success: false,
+          message: verification.errorMessage,
+        });
+      }
+      if (verification.profile?.role !== 'admin') {
+        return res.status(403).json({
+          success: false,
+          message: 'Forbidden: Only administrators can modify server Supabase credentials.',
+        });
+      }
+    }
+
     const { url, anonKey } = req.body;
 
     if (!url || !anonKey) {
@@ -2282,17 +3107,18 @@ async function startServer() {
   const publicPath = path.resolve(__dirname, 'public');
   app.use(express.static(publicPath, { dotfiles: 'allow' }));
 
+  let viteServer: any = null;
   if (!isProduction) {
     process.env.DISABLE_HMR = 'true';
     const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
+    viteServer = await createViteServer({
       server: {
         middlewareMode: true,
         hmr: false,
       },
       appType: 'spa',
     });
-    app.use(vite.middlewares);
+    app.use(viteServer.middlewares);
   } else {
     const distPath = path.resolve(__dirname, 'dist');
     app.use(express.static(distPath));
@@ -2301,9 +3127,26 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const httpServer = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Shopcart Full-Stack Server running on port ${PORT}`);
   });
+
+  const shutdown = async () => {
+    try {
+      if (viteServer) {
+        await viteServer.close();
+      }
+    } catch {
+      // ignore close errors during shutdown
+    }
+    httpServer.close(() => {
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(0), 2000).unref();
+  };
+
+  process.once('SIGTERM', shutdown);
+  process.once('SIGINT', shutdown);
 }
 
 startServer().catch((err) => {

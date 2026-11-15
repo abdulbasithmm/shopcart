@@ -77,6 +77,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
   const [liveChatMessage, setLiveChatMessage] = useState('');
   const [liveChatCustomerName, setLiveChatCustomerName] = useState('');
   const [liveChatSent, setLiveChatSent] = useState(false);
+  const [liveChatWaUrl, setLiveChatWaUrl] = useState('');
 
   // Reviews State
   const [reviewsList, setReviewsList] = useState<Review[]>(TESTIMONIALS);
@@ -184,13 +185,10 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
       }
     } catch (err: any) {
       console.warn('Network error posting contact form:', err);
-      const fallbackTicket = `TKT-${Date.now().toString().slice(-6)}`;
-      setSubmissionResult({
-        success: true,
-        ticketId: fallbackTicket,
-        timestamp: new Date().toISOString(),
-      });
-      showToast(`Inquiry logged as #${fallbackTicket}. Routing to ${SUPPORT_EMAIL}.`, 'success');
+      showToast(
+        `Could not reach support server. Please call ${SUPPORT_PHONE} or email ${SUPPORT_EMAIL}.`,
+        'error'
+      );
     } finally {
       setIsSending(false);
     }
@@ -220,10 +218,10 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
       `Hello Shopcart Customer Support,\n\n[Topic: ${topicLabel}]\n${customerGreeting}\nInquiry: ${liveChatMessage.trim()}\n\n(Customer Service Hours: ${SUPPORT_HOURS})`
     );
 
-    // Open WhatsApp Live Chat with prefilled text directly to official support number
-    window.open(`https://wa.me/${SUPPORT_PHONE_CLEAN}?text=${waText}`, '_blank');
+    const waUrl = `https://wa.me/${SUPPORT_PHONE_CLEAN}?text=${waText}`;
+    setLiveChatWaUrl(waUrl);
     setLiveChatSent(true);
-    showToast('Connecting to Shopcart Support Desk on WhatsApp...', 'success');
+    showToast('Live chat message prepared! Click Open WhatsApp Support Desk below.', 'success');
   };
 
   const handleReviewSubmit = (e: React.FormEvent) => {
@@ -906,6 +904,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
                 onClick={() => {
                   setIsLiveChatOpen(false);
                   setLiveChatSent(false);
+                  setLiveChatWaUrl('');
                 }}
                 className="text-slate-400 hover:text-slate-700 p-1 rounded-lg cursor-pointer"
               >
@@ -963,20 +962,42 @@ export const ContactPage: React.FC<ContactPageProps> = ({ onNavigate }) => {
                 />
               </div>
 
+              {liveChatSent && liveChatWaUrl && (
+                <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl space-y-2">
+                  <p className="text-xs font-bold text-[#0b5c37]">
+                    Support message ready! Continue on WhatsApp:
+                  </p>
+                  <a
+                    href={liveChatWaUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-2.5 px-4 bg-[#25D366] hover:bg-[#20ba59] text-white text-xs font-bold rounded-xl shadow-xs transition-colors inline-flex items-center justify-center gap-2"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    <span>Open WhatsApp Support Desk ({SUPPORT_PHONE})</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
+              )}
+
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setIsLiveChatOpen(false)}
+                  onClick={() => {
+                    setIsLiveChatOpen(false);
+                    setLiveChatSent(false);
+                    setLiveChatWaUrl('');
+                  }}
                   className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors cursor-pointer"
                 >
                   Close
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 bg-[#25D366] hover:bg-[#20ba59] text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                  className="px-5 py-2.5 bg-[#0b5c37] hover:bg-[#08482b] text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer inline-flex items-center gap-1.5"
                 >
                   <MessageCircle className="w-4 h-4" />
-                  <span>Connect on WhatsApp Live</span>
+                  <span>Prepare Live Chat</span>
                 </button>
               </div>
             </form>

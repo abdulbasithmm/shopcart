@@ -5,6 +5,7 @@ export interface Product {
   category: string;
   price: number;
   originalPrice: number;
+  gstRate?: number | null;
   rating: number;
   reviewsCount: number;
   inStock: boolean;

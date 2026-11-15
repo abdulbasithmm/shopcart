@@ -48,7 +48,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
   const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState(initialQuery);
   const [minPrice, setMinPrice] = useState(0);
-  const [maxPrice, setMaxPrice] = useState(25000);
+  const [maxPrice, setMaxPrice] = useState(200000);
   const [minRating, setMinRating] = useState(0);
   const [inStockOnly, setInStockOnly] = useState(false);
   const [sortBy, setSortBy] = useState<'popularity' | 'price-low' | 'price-high' | 'rating' | 'newest'>('popularity');
@@ -123,16 +123,30 @@ export const ShopPage: React.FC<ShopPageProps> = ({
         return false;
       }
 
-      // 2. Search Query (Name, Brand, Category, Tags, Description)
+      // 2. Search Query (Name, Brand, Category, Tags, Description + curated quick-nav tokens)
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase().trim();
+        const matchesSpecialToken =
+          ((query === 'deal' || query === 'deals') &&
+            (product.isSpecialOffer || (product.discountPercentage || 0) > 0)) ||
+          (query === 'trending' &&
+            (product.isFeatured || product.isBestSeller || product.rating >= 4.5)) ||
+          ((query === 'bestseller' || query === 'best seller') && product.isBestSeller) ||
+          ((query === 'new' || query === 'new arrival') && product.isNewArrival);
         const matchesName = product.name.toLowerCase().includes(query);
         const matchesBrand = product.brand.toLowerCase().includes(query);
         const matchesCategory = product.category.toLowerCase().includes(query);
         const matchesTags = product.tags.some((t) => t.toLowerCase().includes(query));
         const matchesDesc = product.shortDescription.toLowerCase().includes(query);
 
-        if (!matchesName && !matchesBrand && !matchesCategory && !matchesTags && !matchesDesc) {
+        if (
+          !matchesSpecialToken &&
+          !matchesName &&
+          !matchesBrand &&
+          !matchesCategory &&
+          !matchesTags &&
+          !matchesDesc
+        ) {
           return false;
         }
       }
@@ -181,7 +195,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
       if (bScore !== aScore) return bScore - aScore;
       return b.id.localeCompare(a.id);
     });
-  }, [selectedCategory, searchQuery, selectedBrands, minPrice, maxPrice, minRating, inStockOnly, sortBy]);
+  }, [products, selectedCategory, searchQuery, selectedBrands, minPrice, maxPrice, minRating, inStockOnly, sortBy]);
 
   // Reset page when filters change
   useEffect(() => {
@@ -223,7 +237,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
     setSelectedBrands([]);
     setSearchQuery('');
     setMinPrice(0);
-    setMaxPrice(25000);
+    setMaxPrice(200000);
     setMinRating(0);
     setInStockOnly(false);
     setSortBy('popularity');
@@ -242,7 +256,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
     selectedBrands.length > 0 ||
     searchQuery.trim() !== '' ||
     minPrice > 0 ||
-    maxPrice < 25000 ||
+    maxPrice < 200000 ||
     minRating > 0 ||
     inStockOnly;
 
@@ -482,21 +496,21 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                   Price Range
                 </h4>
                 <span className="text-xs font-extrabold text-[#0b5c37] tabular-nums">
-                  ${minPrice} — {formatPrice(maxPrice)}
+                  {formatPrice(minPrice)} — {formatPrice(maxPrice)}
                 </span>
               </div>
               <input
                 type="range"
                 min="0"
-                max="400"
-                step="10"
+                max="200000"
+                step="500"
                 value={maxPrice}
                 onChange={(e) => setMaxPrice(Number(e.target.value))}
                 className="w-full accent-[#0b5c37] cursor-pointer"
               />
               <div className="flex justify-between text-[11px] text-slate-400 mt-1">
                 <span>₹0</span>
-                <span>₹25,000+</span>
+                <span>₹2,00,000+</span>
               </div>
 
               {/* Quick price bracket pills */}
@@ -505,7 +519,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                   { label: 'Under ₹1,000', min: 0, max: 1000 },
                   { label: '₹1,000 to ₹5,000', min: 1000, max: 5000 },
                   { label: '₹5,000 to ₹15,000', min: 5000, max: 15000 },
-                  { label: '₹15,000 & Above', min: 15000, max: 50000 },
+                  { label: '₹15,000 & Above', min: 15000, max: 200000 },
                 ].map((tier) => (
                   <button
                     key={tier.label}
@@ -1059,8 +1073,8 @@ export const ShopPage: React.FC<ShopPageProps> = ({
                 <input
                   type="range"
                   min="0"
-                  max="400"
-                  step="10"
+                  max="200000"
+                  step="500"
                   value={maxPrice}
                   onChange={(e) => setMaxPrice(Number(e.target.value))}
                   className="w-full accent-[#0b5c37]"

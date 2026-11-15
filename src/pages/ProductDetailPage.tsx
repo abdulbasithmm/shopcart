@@ -34,7 +34,7 @@ import { formatPrice } from '../utils/format';
 import { useCart } from '../context/CartContext';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
-import { fetchProductById } from '../services/productService';
+import { fetchProductById, fetchProducts } from '../services/productService';
 import { fetchReviewsByProductId, submitProductReview, voteReviewHelpful } from '../services/reviewService';
 
 interface ProductDetailPageProps {
@@ -57,13 +57,21 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   }, [productId]);
 
   const [product, setProduct] = useState<Product>(initialProduct);
+  const [catalogProducts, setCatalogProducts] = useState<Product[]>(PRODUCTS);
   const [isFromSupabase, setIsFromSupabase] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
     async function loadProduct() {
-      const res = await fetchProductById(productId);
-      if (isMounted && res.product) {
+      const [res, listRes] = await Promise.all([
+        fetchProductById(productId),
+        fetchProducts().catch(() => null),
+      ]);
+      if (!isMounted) return;
+      if (listRes?.products && listRes.products.length > 0) {
+        setCatalogProducts(listRes.products);
+      }
+      if (res.product) {
         setProduct(res.product);
         setIsFromSupabase(res.isFromSupabase);
         if (res.product.colors && res.product.colors.length > 0) {
@@ -305,17 +313,18 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
 
   // Related products (guaranteed 4 distinct products)
   const relatedProducts = useMemo(() => {
-    const sameCategory = PRODUCTS.filter(
+    const sourcePool = catalogProducts.length > 0 ? catalogProducts : PRODUCTS;
+    const sameCategory = sourcePool.filter(
       (p) => p.category === product.category && p.id !== product.id
     );
     if (sameCategory.length >= 4) {
       return sameCategory.slice(0, 4);
     }
-    const others = PRODUCTS.filter(
+    const others = sourcePool.filter(
       (p) => p.category !== product.category && p.id !== product.id
     );
     return [...sameCategory, ...others].slice(0, 4);
-  }, [product.category, product.id]);
+  }, [catalogProducts, product.category, product.id]);
 
   const isInWish = isInWishlist(product.id);
 
@@ -814,12 +823,14 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
             <div className="space-y-6">
               <h3 className="text-base font-bold text-slate-900">Comprehensive Technical Specifications</h3>
               <div className="border border-slate-200 rounded-2xl overflow-hidden divide-y divide-slate-100 max-w-3xl">
-                {Object.entries(product.specs).map(([specKey, specVal]) => (
-                  <div key={specKey} className="grid grid-cols-1 sm:grid-cols-3 p-4 text-xs">
-                    <span className="font-bold text-slate-500">{specKey}</span>
-                    <span className="sm:col-span-2 text-slate-900 font-semibold">{specVal}</span>
-                  </div>
-                ))}
+                {Object.entries(product.specs || {})
+                  .filter(([specKey]) => !specKey.startsWith('_'))
+                  .map(([specKey, specVal]) => (
+                    <div key={specKey} className="grid grid-cols-1 sm:grid-cols-3 p-4 text-xs">
+                      <span className="font-bold text-slate-500">{specKey}</span>
+                      <span className="sm:col-span-2 text-slate-900 font-semibold">{specVal}</span>
+                    </div>
+                  ))}
                 <div className="grid grid-cols-1 sm:grid-cols-3 p-4 text-xs">
                   <span className="font-bold text-slate-500">Department</span>
                   <span className="sm:col-span-2 text-slate-900 font-semibold">{product.category}</span>

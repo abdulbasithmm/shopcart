@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Smartphone,
   Laptop,
@@ -14,8 +14,10 @@ import {
   ArrowRight,
   Sparkle
 } from 'lucide-react';
-import { PageView } from '../types';
+import { PageView, Product } from '../types';
 import { CATEGORIES, PRODUCTS } from '../data/mockData';
+import { fetchCategories, fetchProducts } from '../services/productService';
+import { ProductImage } from '../components/common/ProductImage';
 import { formatPrice } from '../utils/format';
 
 interface CategoriesPageProps {
@@ -45,9 +47,25 @@ const categoryGradients: Record<string, string> = {
 
 export const CategoriesPage: React.FC<CategoriesPageProps> = ({ onNavigate }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('Electronics');
+  const [products, setProducts] = useState<Product[]>(PRODUCTS);
+  const [categories, setCategories] = useState(CATEGORIES);
 
-  const filteredCategories = CATEGORIES.filter((c) => c.id !== 'all');
-  const activeCategoryProducts = PRODUCTS.filter(
+  useEffect(() => {
+    let mounted = true;
+    Promise.all([fetchCategories(), fetchProducts()])
+      .then(([catsRes, prodsRes]) => {
+        if (!mounted) return;
+        if (catsRes && catsRes.length > 0) setCategories(catsRes);
+        if (prodsRes.products && prodsRes.products.length > 0) setProducts(prodsRes.products);
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const filteredCategories = categories.filter((c) => c.id !== 'all');
+  const activeCategoryProducts = products.filter(
     (p) => selectedCategory === 'all' || p.category.toLowerCase() === selectedCategory.toLowerCase()
   );
 
@@ -58,7 +76,7 @@ export const CategoriesPage: React.FC<CategoriesPageProps> = ({ onNavigate }) =>
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div>
             <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
-              <LayoutGrid className="w-6 h-6 text-[#2874f0]" />
+              <LayoutGrid className="w-6 h-6 text-[#0b5c37]" />
               <span>Explore All Categories</span>
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
@@ -67,7 +85,7 @@ export const CategoriesPage: React.FC<CategoriesPageProps> = ({ onNavigate }) =>
           </div>
           <button
             onClick={() => onNavigate('shop', { category: 'all' })}
-            className="text-xs font-bold text-[#2874f0] hover:text-blue-700 flex items-center gap-1 cursor-pointer bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100"
+            className="text-xs font-bold text-[#0b5c37] hover:text-[#08482b] flex items-center gap-1 cursor-pointer bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200"
           >
             <span>View All Products</span>
             <ChevronRight className="w-4 h-4" />
@@ -80,7 +98,9 @@ export const CategoriesPage: React.FC<CategoriesPageProps> = ({ onNavigate }) =>
         <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3 mb-8">
           {filteredCategories.map((cat) => {
             const isSelected = selectedCategory.toLowerCase() === cat.id.toLowerCase();
-            const styling = categoryGradients[cat.id] || 'from-slate-100 to-slate-200 border-slate-200 text-slate-700';
+            const liveCount = products.filter(
+              (p) => p.category.toLowerCase() === cat.id.toLowerCase()
+            ).length;
 
             return (
               <button
@@ -88,7 +108,7 @@ export const CategoriesPage: React.FC<CategoriesPageProps> = ({ onNavigate }) =>
                 onClick={() => setSelectedCategory(cat.id)}
                 className={`p-3.5 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-2 shadow-2xs group ${
                   isSelected
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-md ring-2 ring-blue-400/30'
+                    ? 'bg-[#0b5c37] text-white border-[#0b5c37] shadow-md ring-2 ring-emerald-500/25'
                     : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-800'
                 }`}
               >
@@ -103,8 +123,8 @@ export const CategoriesPage: React.FC<CategoriesPageProps> = ({ onNavigate }) =>
                   <span className={`text-xs font-bold block ${isSelected ? 'text-white' : 'text-slate-900'}`}>
                     {cat.name}
                   </span>
-                  <span className={`text-[10px] ${isSelected ? 'text-blue-100' : 'text-slate-400'}`}>
-                    {cat.count} items
+                  <span className={`text-[10px] ${isSelected ? 'text-emerald-100' : 'text-slate-400'}`}>
+                    {liveCount || cat.count} items
                   </span>
                 </div>
               </button>
@@ -116,7 +136,7 @@ export const CategoriesPage: React.FC<CategoriesPageProps> = ({ onNavigate }) =>
         <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-blue-100 text-[#2874f0]">
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-[#0b5c37]">
                 Curated Showcase
               </span>
               <span className="text-xs text-slate-400">
@@ -129,7 +149,7 @@ export const CategoriesPage: React.FC<CategoriesPageProps> = ({ onNavigate }) =>
           </div>
           <button
             onClick={() => onNavigate('shop', { category: selectedCategory })}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-[#2874f0] hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-[#0b5c37] hover:bg-[#08482b] text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer"
           >
             <span>Open in Full Shop Filter</span>
             <ArrowRight className="w-4 h-4" />
@@ -145,10 +165,11 @@ export const CategoriesPage: React.FC<CategoriesPageProps> = ({ onNavigate }) =>
               className="bg-white rounded-2xl border border-slate-200 shadow-2xs hover:shadow-md transition-all overflow-hidden flex flex-col cursor-pointer group"
             >
               <div className="relative aspect-4/3 bg-slate-50 p-4 flex items-center justify-center overflow-hidden">
-                <img
-                  src={prod.image || prod.images?.[0] || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=500&auto=format&fit=crop&q=60'}
-                  alt={prod.name}
-                  className="max-h-full max-w-full object-contain group-hover:scale-105 transition-transform duration-300"
+                <ProductImage
+                  product={prod}
+                  size="md"
+                  showBadge={false}
+                  className="max-h-full max-w-full group-hover:scale-105 transition-transform duration-300"
                 />
                 {prod.discountPercentage && (
                   <span className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider shadow-2xs">
@@ -167,7 +188,7 @@ export const CategoriesPage: React.FC<CategoriesPageProps> = ({ onNavigate }) =>
                   <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">
                     {prod.brand}
                   </span>
-                  <h3 className="text-xs font-bold text-slate-900 group-hover:text-[#2874f0] transition-colors line-clamp-2 mt-0.5">
+                  <h3 className="text-xs font-bold text-slate-900 group-hover:text-[#0b5c37] transition-colors line-clamp-2 mt-0.5">
                     {prod.name}
                   </h3>
                 </div>
@@ -182,7 +203,7 @@ export const CategoriesPage: React.FC<CategoriesPageProps> = ({ onNavigate }) =>
                       </span>
                     )}
                   </div>
-                  <span className="text-[11px] font-bold text-[#2874f0] group-hover:translate-x-0.5 transition-transform inline-flex items-center gap-0.5">
+                  <span className="text-[11px] font-bold text-[#0b5c37] group-hover:translate-x-0.5 transition-transform inline-flex items-center gap-0.5">
                     View <ChevronRight className="w-3 h-3" />
                   </span>
                 </div>

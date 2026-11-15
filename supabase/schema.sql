@@ -73,6 +73,35 @@ CREATE TABLE IF NOT EXISTS public.products (
 -- Ensure columns exist if table was already created
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS image_url TEXT;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS images JSONB DEFAULT '[]'::jsonb NOT NULL;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS gst_rate NUMERIC(5, 2);
+
+DO $$
+DECLARE
+    v_has_gst_check BOOLEAN;
+BEGIN
+    SELECT EXISTS (
+        SELECT 1
+        FROM pg_constraint con
+        JOIN pg_class rel ON rel.oid = con.conrelid
+        JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+        JOIN pg_attribute att ON att.attrelid = rel.oid AND att.attnum = ANY (con.conkey)
+        WHERE nsp.nspname = 'public'
+          AND rel.relname = 'products'
+          AND con.contype = 'c'
+          AND con.convalidated = true
+          AND att.attname = 'gst_rate'
+          AND pg_get_constraintdef(con.oid) ~* 'gst_rate\s*>=\s*0'
+          AND pg_get_constraintdef(con.oid) ~* 'gst_rate\s*<=\s*100'
+    ) INTO v_has_gst_check;
+
+    IF NOT v_has_gst_check THEN
+        ALTER TABLE public.products DROP CONSTRAINT IF EXISTS products_gst_rate_check;
+        ALTER TABLE public.products
+            ADD CONSTRAINT products_gst_rate_check
+            CHECK (gst_rate IS NULL OR (gst_rate >= 0 AND gst_rate <= 100));
+    END IF;
+END;
+$$;
 
 -- Notify PostgREST to reload its schema cache immediately
 NOTIFY pgrst, 'reload schema';
@@ -122,6 +151,13 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS saved_addresses JSONB DEFAULT '[]'::jsonb NOT NULL;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS district TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS pin_code TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS house_building TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS street_area TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS landmark TEXT;
 
 -- Trigger to auto-create profile on auth signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -181,7 +217,7 @@ CREATE TABLE IF NOT EXISTS public.orders (
     user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
     guest_email TEXT,
     status TEXT DEFAULT 'order_placed' CHECK (status IN (
-      'order_placed', 'confirmed', 'processing', 'shipped', 'out_for_delivery', 'delivered', 'cancelled', 'refunded',
+      'order_placed', 'confirmed', 'processing', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled', 'returned', 'refunded',
       'pending', 'completed'
     )),
     subtotal NUMERIC(10, 2) NOT NULL CHECK (subtotal >= 0),
@@ -200,9 +236,27 @@ CREATE TABLE IF NOT EXISTS public.orders (
     updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS cancellation_reason TEXT;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS cancelled_by TEXT;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS admin_notes TEXT;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS status_history JSONB DEFAULT '[]'::jsonb NOT NULL;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS is_archived_by_admin BOOLEAN DEFAULT false NOT NULL;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS is_hidden_by_customer BOOLEAN DEFAULT false NOT NULL;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS customer_name TEXT;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS customer_email TEXT;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS customer_phone TEXT;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS payment_method TEXT;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT 'pending_admin_verification';
+
 CREATE INDEX IF NOT EXISTS idx_orders_user_id ON public.orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_order_number ON public.orders(order_number);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_unique_order_number ON public.orders(order_number);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_unique_trimmed_order_number ON public.orders((trim(order_number)));
 CREATE INDEX IF NOT EXISTS idx_orders_tracking_number ON public.orders(tracking_number);
+CREATE INDEX IF NOT EXISTS idx_orders_is_archived ON public.orders(is_archived_by_admin);
+CREATE INDEX IF NOT EXISTS idx_orders_is_hidden ON public.orders(is_hidden_by_customer);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON public.orders(status);
 
 -- Real-time shipment updates table
 CREATE TABLE IF NOT EXISTS public.order_shipment_updates (
@@ -274,6 +328,43 @@ ALTER TABLE public.payment_records DROP CONSTRAINT IF EXISTS payment_records_pay
 
 CREATE INDEX IF NOT EXISTS idx_payment_records_order ON public.payment_records(order_id);
 CREATE INDEX IF NOT EXISTS idx_payment_records_utr ON public.payment_records(transaction_reference);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_records_unique_order_id
+    ON public.payment_records(order_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_records_unique_utr
+    ON public.payment_records ((upper(regexp_replace(trim(transaction_reference), '[\s-]+', '', 'g'))))
+    WHERE transaction_reference IS NOT NULL
+      AND length(regexp_replace(trim(transaction_reference), '[\s-]+', '', 'g')) > 0;
+
+CREATE OR REPLACE FUNCTION public.normalize_and_validate_payment_utr()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_norm TEXT;
+BEGIN
+    v_norm := NULLIF(upper(regexp_replace(trim(COALESCE(NEW.transaction_reference, '')), '[\s-]+', '', 'g')), '');
+    NEW.transaction_reference := v_norm;
+
+    IF v_norm IS NULL THEN
+        RAISE EXCEPTION 'UPI transaction_reference (UTR) is required and cannot be empty or cleared.'
+            USING ERRCODE = '22023';
+    END IF;
+
+    IF v_norm !~ '^[0-9A-Z]{12}$' THEN
+        RAISE EXCEPTION 'Invalid UPI UTR reference (%): must be a 12-character alphanumeric UTR.', v_norm
+            USING ERRCODE = '22023';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_normalize_payment_utr ON public.payment_records;
+CREATE TRIGGER trg_normalize_payment_utr
+    BEFORE INSERT OR UPDATE OF transaction_reference ON public.payment_records
+    FOR EACH ROW
+    EXECUTE FUNCTION public.normalize_and_validate_payment_utr();
 
 -- ==============================================================================
 -- 9b. MERCHANT PAYMENT SETTINGS TABLE (Configurable by Admin)
@@ -285,13 +376,26 @@ CREATE TABLE IF NOT EXISTS public.merchant_payment_settings (
     merchant_upi_number TEXT DEFAULT '+91 98765 43210',
     qr_image_url TEXT DEFAULT '/assets/aistudio/qr_eeef5752.jpeg',
     enable_dynamic_qr BOOLEAN DEFAULT true,
-    instructions TEXT DEFAULT 'Scan the merchant QR code with Google Pay, PhonePe, Paytm, BHIM, or any UPI app. After paying, upload the screenshot and 12-digit UTR reference.',
+    instructions TEXT DEFAULT 'Scan the merchant QR code with Google Pay, PhonePe, Paytm, BHIM, or any UPI app. After paying, upload the screenshot and 12-character alphanumeric UTR reference.',
     updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 INSERT INTO public.merchant_payment_settings (id, merchant_upi_id, merchant_name, merchant_upi_number, qr_image_url, enable_dynamic_qr)
 VALUES ('default', 'shopcart.merchant@okaxis', 'Shopcart Online Store', '+91 98765 43210', '/assets/aistudio/qr_eeef5752.jpeg', true)
 ON CONFLICT (id) DO NOTHING;
+
+ALTER TABLE public.merchant_payment_settings ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public can read merchant payment settings" ON public.merchant_payment_settings;
+CREATE POLICY "Public can read merchant payment settings" ON public.merchant_payment_settings
+    FOR SELECT
+    USING (true);
+
+DROP POLICY IF EXISTS "Admins can manage merchant payment settings" ON public.merchant_payment_settings;
+CREATE POLICY "Admins can manage merchant payment settings" ON public.merchant_payment_settings
+    FOR ALL TO authenticated
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
 
 -- ==============================================================================
 -- 10. PRODUCT REVIEWS TABLE
@@ -331,38 +435,148 @@ CREATE INDEX IF NOT EXISTS idx_wishlist_product_id ON public.wishlist(product_id
 CREATE INDEX IF NOT EXISTS idx_wishlist_created_at ON public.wishlist(created_at DESC);
 
 -- ==============================================================================
--- 12. SAFE INVENTORY DEDUCTION FUNCTION
+-- 12. SAFE & AUTHORIZED INVENTORY DEDUCTION (SERVER-SIDE / SERVICE_ROLE ONLY)
 -- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.inventory_deductions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    order_id UUID REFERENCES public.orders(id) ON DELETE SET NULL,
+    order_number TEXT NOT NULL,
+    product_id TEXT REFERENCES public.products(id) ON DELETE SET NULL,
+    audited_product_id TEXT NOT NULL,
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
+    UNIQUE (order_number, audited_product_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_inventory_deductions_order_id ON public.inventory_deductions(order_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_deductions_order_number ON public.inventory_deductions(order_number);
+CREATE INDEX IF NOT EXISTS idx_inventory_deductions_product_id ON public.inventory_deductions(product_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_deductions_audited_product_id ON public.inventory_deductions(audited_product_id);
+
+ALTER TABLE public.inventory_deductions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Admins can view inventory deductions" ON public.inventory_deductions;
+CREATE POLICY "Admins can view inventory deductions" ON public.inventory_deductions
+    FOR SELECT TO authenticated
+    USING (public.is_admin());
+
+REVOKE ALL ON TABLE public.inventory_deductions FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON TABLE public.inventory_deductions TO authenticated;
+GRANT ALL ON TABLE public.inventory_deductions TO service_role;
+
 CREATE OR REPLACE FUNCTION public.deduct_product_inventory(
     p_product_id TEXT,
-    p_quantity INTEGER
+    p_quantity INTEGER,
+    p_order_number TEXT DEFAULT NULL,
+    p_order_id UUID DEFAULT NULL
 )
-RETURNS BOOLEAN AS $$
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
 DECLARE
+    v_product_id TEXT;
+    v_order_number TEXT;
+    v_order_id UUID;
+    v_existing_order_number TEXT;
     current_stock INTEGER;
+    v_deduction_id UUID;
 BEGIN
-    -- Select with row-level lock
+    -- 1. Enforce server-side execution only
+    IF current_user NOT IN ('postgres', 'supabase_admin', 'service_role')
+       AND COALESCE(auth.role(), '') <> 'service_role' THEN
+        RAISE EXCEPTION 'Unauthorized: deduct_product_inventory can only be executed by authorized server-side workflows.';
+    END IF;
+
+    -- 2. Validate required product_id, positive integer quantity, and valid order_number
+    v_product_id := NULLIF(trim(COALESCE(p_product_id, '')), '');
+    IF v_product_id IS NULL THEN
+        RAISE EXCEPTION 'Invalid product_id: product_id is required.';
+    END IF;
+
+    IF p_quantity IS NULL OR p_quantity <= 0 THEN
+        RAISE EXCEPTION 'Invalid quantity (%): deduction quantity must be greater than zero.', p_quantity;
+    END IF;
+
+    v_order_number := NULLIF(trim(COALESCE(p_order_number, '')), '');
+    IF v_order_number IS NULL OR length(v_order_number) < 3 THEN
+        RAISE EXCEPTION 'Invalid order_number: a valid order_number (min 3 characters) is required for idempotent inventory deduction.';
+    END IF;
+
+    -- 3. Strictly validate p_order_id when supplied; reject nonexistent or mismatched order IDs
+    IF p_order_id IS NOT NULL THEN
+        SELECT o.order_number INTO v_existing_order_number
+        FROM public.orders o
+        WHERE o.id = p_order_id;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Invalid p_order_id (%): referenced order does not exist in public.orders.', p_order_id;
+        END IF;
+
+        IF v_existing_order_number IS DISTINCT FROM v_order_number THEN
+            RAISE EXCEPTION 'Order mismatch: p_order_id (%) belongs to order_number "%", not "%".', p_order_id, v_existing_order_number, v_order_number;
+        END IF;
+
+        v_order_id := p_order_id;
+    ELSE
+        SELECT o.id INTO v_order_id
+        FROM public.orders o
+        WHERE o.order_number = v_order_number
+        LIMIT 1;
+    END IF;
+
+    -- 4. Lock inventory row first to serialize concurrent deductions for this product
     SELECT stock_count INTO current_stock
     FROM public.inventory
-    WHERE product_id = p_product_id
+    WHERE product_id = v_product_id
     FOR UPDATE;
 
     IF NOT FOUND THEN
-        RAISE EXCEPTION 'Product with ID % not found in inventory', p_product_id;
+        RAISE EXCEPTION 'Product with ID % not found in inventory', v_product_id;
     END IF;
 
-    IF current_stock < p_quantity THEN
-        RETURN FALSE; -- Insufficient stock
+    -- 5. Prevent duplicate deduction for the same order_number + audited_product_id
+    IF EXISTS (
+        SELECT 1 FROM public.inventory_deductions
+        WHERE order_number = v_order_number
+          AND audited_product_id = v_product_id
+    ) THEN
+        RETURN FALSE;
     END IF;
 
+    -- 6. Prevent negative stock
+    IF current_stock < p_quantity OR (current_stock - p_quantity) < 0 THEN
+        RETURN FALSE;
+    END IF;
+
+    -- 7. Perform atomic inventory update BEFORE recording audit row
     UPDATE public.inventory
     SET stock_count = stock_count - p_quantity,
         updated_at = timezone('utc'::text, now())
-    WHERE product_id = p_product_id;
+    WHERE product_id = v_product_id
+      AND stock_count >= p_quantity;
+
+    IF NOT FOUND THEN
+        RETURN FALSE;
+    END IF;
+
+    -- 8. Record idempotency audit entry; conflict triggers rollback of UPDATE
+    INSERT INTO public.inventory_deductions (order_id, order_number, product_id, audited_product_id, quantity)
+    VALUES (v_order_id, v_order_number, v_product_id, v_product_id, p_quantity)
+    ON CONFLICT (order_number, audited_product_id) DO NOTHING
+    RETURNING id INTO v_deduction_id;
+
+    IF v_deduction_id IS NULL THEN
+        RAISE EXCEPTION 'Concurrent duplicate inventory deduction detected for order % and product %; rolling back.', v_order_number, v_product_id;
+    END IF;
 
     RETURN TRUE;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
+
+REVOKE ALL ON FUNCTION public.deduct_product_inventory(TEXT, INTEGER, TEXT, UUID) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.deduct_product_inventory(TEXT, INTEGER, TEXT, UUID) TO service_role;
 
 -- ==============================================================================
 -- 11. ROW LEVEL SECURITY (RLS) POLICIES
@@ -577,6 +791,7 @@ CREATE POLICY "Admins can manage all cart items" ON public.cart_items
 
 -- ------------------------------------------------------------------------------
 -- 7. Orders RLS: Customers view own orders, Admins view & manage all
+-- (Order writes route strictly server-side via /api/orders/create & service_role)
 -- ------------------------------------------------------------------------------
 DROP POLICY IF EXISTS "Users can view own orders" ON public.orders;
 CREATE POLICY "Users can view own orders" ON public.orders
@@ -589,9 +804,7 @@ CREATE POLICY "Admins can view all orders" ON public.orders
     USING (public.is_admin());
 
 DROP POLICY IF EXISTS "Anyone can place order" ON public.orders;
-CREATE POLICY "Anyone can place order" ON public.orders
-    FOR INSERT
-    WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+DROP POLICY IF EXISTS "Users can update own orders" ON public.orders;
 
 DROP POLICY IF EXISTS "Admins can update orders" ON public.orders;
 CREATE POLICY "Admins can update orders" ON public.orders
@@ -603,6 +816,8 @@ DROP POLICY IF EXISTS "Admins can delete orders" ON public.orders;
 CREATE POLICY "Admins can delete orders" ON public.orders
     FOR DELETE TO authenticated
     USING (public.is_admin());
+
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.orders FROM PUBLIC, anon;
 
 -- ------------------------------------------------------------------------------
 -- 8. Order Shipment Updates RLS: Customers view own, Admins manage all
@@ -630,7 +845,7 @@ CREATE POLICY "Admins can manage order shipment updates" ON public.order_shipmen
     WITH CHECK (public.is_admin());
 
 -- ------------------------------------------------------------------------------
--- 9. Order Items RLS: Customers view own, checkout insert, Admins manage
+-- 9. Order Items RLS: Customers view own, Admins & server service_role manage
 -- ------------------------------------------------------------------------------
 DROP POLICY IF EXISTS "Users can view own order items" ON public.order_items;
 CREATE POLICY "Users can view own order items" ON public.order_items
@@ -649,15 +864,6 @@ CREATE POLICY "Admins can view all order items" ON public.order_items
     USING (public.is_admin());
 
 DROP POLICY IF EXISTS "Anyone can insert order items with order" ON public.order_items;
-CREATE POLICY "Anyone can insert order items with order" ON public.order_items
-    FOR INSERT
-    WITH CHECK (
-        EXISTS (
-            SELECT 1 FROM public.orders
-            WHERE orders.id = order_items.order_id
-              AND (orders.user_id = auth.uid() OR orders.user_id IS NULL)
-        )
-    );
 
 DROP POLICY IF EXISTS "Admins can manage order items" ON public.order_items;
 CREATE POLICY "Admins can manage order items" ON public.order_items
@@ -665,8 +871,10 @@ CREATE POLICY "Admins can manage order items" ON public.order_items
     USING (public.is_admin())
     WITH CHECK (public.is_admin());
 
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.order_items FROM PUBLIC, anon;
+
 -- ------------------------------------------------------------------------------
--- 10. Payment Records RLS: Customers view own, Admins manage & verify payments
+-- 10. Payment Records RLS: Customers view own, Admins & server service_role manage
 -- ------------------------------------------------------------------------------
 DROP POLICY IF EXISTS "Users can view own payment records" ON public.payment_records;
 CREATE POLICY "Users can view own payment records" ON public.payment_records
@@ -685,22 +893,28 @@ CREATE POLICY "Admins can view all payment records" ON public.payment_records
     USING (public.is_admin());
 
 DROP POLICY IF EXISTS "Anyone can record payment during checkout" ON public.payment_records;
-CREATE POLICY "Anyone can record payment during checkout" ON public.payment_records
-    FOR INSERT
-    WITH CHECK (
-        EXISTS (
-            SELECT 1 FROM public.orders
-            WHERE orders.id = payment_records.order_id
-              AND (orders.user_id = auth.uid() OR orders.user_id IS NULL)
-        )
-    );
 
--- Only administrators can verify, modify or manage payment records
+-- Only administrators (and backend service_role) can insert, verify, or modify payment records
 DROP POLICY IF EXISTS "Admins can manage payment records" ON public.payment_records;
 CREATE POLICY "Admins can manage payment records" ON public.payment_records
     FOR ALL TO authenticated
     USING (public.is_admin())
     WITH CHECK (public.is_admin());
+
+REVOKE ALL ON TABLE public.payment_records FROM PUBLIC, anon;
+REVOKE ALL ON TABLE public.order_shipment_updates FROM PUBLIC, anon;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.orders FROM PUBLIC, anon, authenticated;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.order_items FROM PUBLIC, anon, authenticated;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.payment_records FROM PUBLIC, anon, authenticated;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.order_shipment_updates FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON TABLE public.orders TO authenticated;
+GRANT SELECT ON TABLE public.order_items TO authenticated;
+GRANT SELECT ON TABLE public.payment_records TO authenticated;
+GRANT SELECT ON TABLE public.order_shipment_updates TO authenticated;
+GRANT ALL ON TABLE public.orders TO service_role;
+GRANT ALL ON TABLE public.order_items TO service_role;
+GRANT ALL ON TABLE public.payment_records TO service_role;
+GRANT ALL ON TABLE public.order_shipment_updates TO service_role;
 
 -- ------------------------------------------------------------------------------
 -- 11. Product Reviews RLS: Public can view, Authenticated customers can submit

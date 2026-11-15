@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Play,
   Pause,
@@ -14,8 +14,10 @@ import {
   Eye,
   CheckCircle2
 } from 'lucide-react';
-import { PageView } from '../types';
+import { PageView, Product } from '../types';
 import { PRODUCTS } from '../data/mockData';
+import { fetchProducts } from '../services/productService';
+import { ProductImage } from '../components/common/ProductImage';
 import { formatPrice } from '../utils/format';
 import { useCart } from '../context/CartContext';
 import { useToast } from '../context/ToastContext';
@@ -93,11 +95,29 @@ export const PlayPage: React.FC<PlayPageProps> = ({ onNavigate }) => {
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
   const [likedReels, setLikedReels] = useState<Record<string, boolean>>({});
+  const [products, setProducts] = useState<Product[]>(PRODUCTS);
   const { addToCart } = useCart();
   const { showToast } = useToast();
 
+  useEffect(() => {
+    let mounted = true;
+    fetchProducts()
+      .then((res) => {
+        if (mounted && res.products && res.products.length > 0) {
+          setProducts(res.products);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const currentReel = REELS[activeReelIndex];
-  const associatedProduct = PRODUCTS.find((p) => p.id === currentReel.productId) || PRODUCTS[0];
+  const associatedProduct =
+    products.find((p) => p.id === currentReel.productId) ||
+    products[activeReelIndex % products.length] ||
+    PRODUCTS[0];
   const isLiked = !!likedReels[currentReel.id];
 
   const handleToggleLike = () => {
@@ -137,14 +157,15 @@ export const PlayPage: React.FC<PlayPageProps> = ({ onNavigate }) => {
           className={`absolute inset-0 bg-gradient-to-b ${currentReel.videoPlaceholderBg} transition-all duration-700`}
         >
           {/* Subtle animated particles & glow */}
-          <div className="absolute inset-0 opacity-20 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-blue-400 via-transparent to-transparent animate-pulse" />
+          <div className="absolute inset-0 opacity-20 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-emerald-400 via-transparent to-transparent animate-pulse" />
           
           {/* Product Hero Backdrop Image */}
           <div className="absolute inset-0 flex items-center justify-center p-12 opacity-35">
-            <img
-              src={associatedProduct.image || associatedProduct.images?.[0]}
-              alt={associatedProduct.name}
-              className="max-h-[70%] max-w-[70%] object-contain filter drop-shadow-[0_20px_30px_rgba(0,0,0,0.8)]"
+            <ProductImage
+              product={associatedProduct}
+              size="lg"
+              showBadge={false}
+              className="max-h-[70%] max-w-[70%] filter drop-shadow-[0_20px_30px_rgba(0,0,0,0.8)]"
             />
           </div>
         </div>
@@ -235,12 +256,12 @@ export const PlayPage: React.FC<PlayPageProps> = ({ onNavigate }) => {
             <img
               src={currentReel.creatorAvatar}
               alt={currentReel.creatorName}
-              className="w-9 h-9 rounded-full object-cover border-2 border-[#2874f0]"
+              className="w-9 h-9 rounded-full object-cover border-2 border-[#0b5c37]"
             />
             <div>
               <div className="flex items-center gap-1">
                 <span className="text-xs font-bold text-white">{currentReel.creatorName}</span>
-                <CheckCircle2 className="w-3.5 h-3.5 text-blue-400 fill-blue-400/20" />
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400/20" />
               </div>
               <span className="text-[10px] text-slate-300 font-mono">{currentReel.badge}</span>
             </div>
@@ -262,15 +283,16 @@ export const PlayPage: React.FC<PlayPageProps> = ({ onNavigate }) => {
               onClick={() => onNavigate('product', { productId: associatedProduct.id })}
               className="flex items-center gap-2.5 min-w-0 cursor-pointer flex-1"
             >
-              <div className="w-11 h-11 rounded-xl bg-white p-1 flex items-center justify-center shrink-0">
-                <img
-                  src={associatedProduct.image || associatedProduct.images?.[0]}
-                  alt={associatedProduct.name}
-                  className="max-h-full max-w-full object-contain"
+              <div className="w-11 h-11 rounded-xl bg-white p-1 flex items-center justify-center shrink-0 overflow-hidden">
+                <ProductImage
+                  product={associatedProduct}
+                  size="sm"
+                  showBadge={false}
+                  className="max-h-full max-w-full"
                 />
               </div>
               <div className="min-w-0">
-                <span className="text-[10px] uppercase font-mono text-blue-300 tracking-wider block">
+                <span className="text-[10px] uppercase font-mono text-emerald-300 tracking-wider block">
                   Featured Product
                 </span>
                 <h4 className="text-xs font-bold text-white truncate">
@@ -292,7 +314,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ onNavigate }) => {
             <div className="flex items-center gap-1.5 shrink-0">
               <button
                 onClick={handleAddToCart}
-                className="px-3 py-2 bg-[#2874f0] hover:bg-blue-600 text-white rounded-xl text-xs font-bold shadow-md transition-colors cursor-pointer flex items-center gap-1"
+                className="px-3 py-2 bg-[#0b5c37] hover:bg-[#08482b] text-white rounded-xl text-xs font-bold shadow-md transition-colors cursor-pointer flex items-center gap-1"
               >
                 <ShoppingBag className="w-3.5 h-3.5" />
                 <span>Add</span>

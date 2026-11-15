@@ -65,7 +65,7 @@ import { PageView, Product, Order, OrderStatus, ShipmentUpdate, MerchantPaymentS
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { PRODUCTS, CATEGORIES } from '../data/mockData';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { supabase, isSupabaseConfigured, getAuthHeaders } from '../lib/supabase';
 import { formatPrice } from '../utils/format';
 import {
   createAdminProduct,
@@ -279,8 +279,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     name: '',
     brand: '',
     category: 'Electronics',
-    price: 99.99,
-    originalPrice: 129.99,
+    price: 1999,
+    originalPrice: 2499,
+    gstRate: '' as string | number,
     discountPercentage: 23,
     stockCount: 15,
     visualType: 'headphones',
@@ -945,11 +946,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     const auditNotes = adminNotes.trim() || 'Verified against merchant bank statement.';
 
     try {
-      // 1. Call server-side verification endpoint
-      try {
-        await fetch('/api/admin/verify-payment', {
+      if (isSupabaseConfigured()) {
+        // Authoritative server-side verification endpoint (service_role)
+        const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+        const res = await fetch('/api/admin/verify-payment', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({
             orderId: verifyingOrder.id,
             paymentRecordId: verifyingOrder.payment_records?.[0]?.id,
@@ -957,34 +959,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({
             notes: auditNotes,
           }),
         });
-      } catch (apiErr) {
-        console.warn('API verify-payment warning:', apiErr);
-      }
-
-      // 2. Direct Supabase verification
-      if (isSupabaseConfigured()) {
-        await supabase
-          .from('orders')
-          .update({
-            payment_status: 'verified',
-            status: 'confirmed',
-            updated_at: verifiedAt,
-          })
-          .eq('id', verifyingOrder.id);
-
-        await supabase
-          .from('payment_records')
-          .update({
-            payment_status: 'verified',
-            verified_at: verifiedAt,
-            verified_by: verifiedBy,
-            raw_details: {
-              verifiedAt,
-              verifiedBy,
-              notes: auditNotes,
-            },
-          })
-          .eq('order_id', verifyingOrder.id);
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(json?.error || `Server verification failed (HTTP ${res.status})`);
+        }
       } else {
         const local = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
         const updated = local.map((o: any) => {
@@ -1033,27 +1011,29 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     if (!confirmed) return;
 
     try {
-      // 1. Call backend status endpoint
-      await fetch(`/api/admin/orders/${orderId}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status: 'refunded',
-          note: 'Order refunded by administrator',
-          location: 'Shopcart Accounts & Audit',
-        }),
-      });
-
-      // 2. Direct Supabase update if configured
       if (isSupabaseConfigured()) {
-        await supabase
-          .from('orders')
-          .update({ status: 'refunded', updated_at: new Date().toISOString() })
-          .eq('id', orderId);
-        await supabase
-          .from('payment_records')
-          .update({ payment_status: 'refunded', rejection_reason: 'Refunded by administrator' })
-          .eq('order_id', orderId);
+        const statusHeaders = await getAuthHeaders({ 'Content-Type': 'application/json' });
+        const res = await fetch(`/api/admin/orders/${orderId}/status`, {
+          method: 'PATCH',
+          headers: statusHeaders,
+          body: JSON.stringify({
+            status: 'refunded',
+            note: 'Order refunded by administrator',
+            location: 'Shopcart Accounts & Audit',
+          }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(json?.error || `Failed to refund order (HTTP ${res.status})`);
+        }
+      } else {
+        const local = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
+        const updated = local.map((o: any) =>
+          o.id === orderId || o.order_number === orderId
+            ? { ...o, status: 'refunded', paymentStatus: 'refunded' }
+            : o
+        );
+        localStorage.setItem('shopcart_orders', JSON.stringify(updated));
       }
 
       showToast(`Order #${orderNumber || orderId} marked as Refunded`, 'success');
@@ -1081,6 +1061,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       return;
     }
 
+    const parsedGstRate =
+      prodForm.gstRate === '' || prodForm.gstRate === null || prodForm.gstRate === undefined
+        ? null
+        : Number(prodForm.gstRate);
+
+    if (parsedGstRate === null || !Number.isFinite(parsedGstRate) || parsedGstRate < 0 || parsedGstRate > 100) {
+      showToast('Please select an explicit GST slab (0%, 5%, 12%, 18%, or 28%) before saving this product.', 'error');
+      return;
+    }
+
     try {
       const cleanImages = prodImages.filter(Boolean);
       const res = await createAdminProduct(
@@ -1090,6 +1080,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           category: prodForm.category,
           price: Number(prodForm.price),
           originalPrice: Number(prodForm.originalPrice),
+          gstRate: parsedGstRate !== null && Number.isFinite(parsedGstRate) ? parsedGstRate : null,
           discountPercentage: Number(prodForm.discountPercentage),
           badge: prodForm.badge,
           shortDescription: prodForm.shortDescription || 'Curated premium product by Shop Cart.',
@@ -1110,8 +1101,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           name: '',
           brand: '',
           category: 'Electronics',
-          price: 99.99,
-          originalPrice: 129.99,
+          price: 1999,
+          originalPrice: 2499,
+          gstRate: '',
           discountPercentage: 23,
           stockCount: 15,
           visualType: 'headphones',
@@ -1128,8 +1120,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           name: '',
           brand: '',
           category: 'Electronics',
-          price: 99.99,
-          originalPrice: 129.99,
+          price: 1999,
+          originalPrice: 2499,
+          gstRate: '',
           discountPercentage: 23,
           stockCount: 15,
           visualType: 'headphones',
@@ -1151,6 +1144,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     e.preventDefault();
     if (!editingProduct) return;
 
+    const parsedEditGstRate =
+      editingProduct.gstRate === undefined || editingProduct.gstRate === null
+        ? null
+        : Number(editingProduct.gstRate);
+
+    if (parsedEditGstRate === null || !Number.isFinite(parsedEditGstRate) || parsedEditGstRate < 0 || parsedEditGstRate > 100) {
+      showToast('Please select an explicit GST slab (0%, 5%, 12%, 18%, or 28%) for this product.', 'error');
+      return;
+    }
+
     try {
       const cleanImages = editingProductImages.filter(Boolean);
       const res = await updateAdminProduct(
@@ -1161,6 +1164,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           category: editingProduct.category,
           price: Number(editingProduct.price),
           originalPrice: Number(editingProduct.originalPrice),
+          gstRate: parsedEditGstRate,
           discountPercentage: Number(editingProduct.discountPercentage),
           badge: editingProduct.badge,
           shortDescription: editingProduct.shortDescription,
@@ -1348,11 +1352,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     const rejectedBy = user?.email || 'admin@shopcart.com';
 
     try {
-      // 1. Call server-side rejection endpoint
-      try {
-        await fetch('/api/admin/reject-payment', {
+      if (isSupabaseConfigured()) {
+        // Authoritative server-side rejection endpoint (service_role)
+        const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+        const res = await fetch('/api/admin/reject-payment', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({
             orderId: targetOrder.id,
             paymentRecordId: targetOrder.payment_records?.[0]?.id,
@@ -1360,32 +1365,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({
             reason: reasonText,
           }),
         });
-      } catch (apiErr) {
-        console.warn('API reject-payment warning:', apiErr);
-      }
-
-      // 2. Direct Supabase update
-      if (isSupabaseConfigured()) {
-        await supabase
-          .from('orders')
-          .update({
-            status: 'cancelled',
-            payment_status: 'rejected',
-            updated_at: rejectedAt,
-          })
-          .eq('id', targetOrder.id);
-
-        await supabase
-          .from('payment_records')
-          .update({
-            payment_status: 'rejected',
-            raw_details: {
-              rejectedAt,
-              rejectedBy,
-              rejectionReason: reasonText,
-            },
-          })
-          .eq('order_id', targetOrder.id);
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(json?.error || `Payment rejection failed (HTTP ${res.status})`);
+        }
       } else {
         const local = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
         const updated = local.map((o: any) => {
@@ -1427,9 +1410,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     e.preventDefault();
     setIsSavingMerchantSettings(true);
     try {
+      const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
       const res = await fetch('/api/admin/merchant-settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(merchantSettingsForm),
       });
       const data = await res.json();
@@ -1452,9 +1436,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     if (!requestingScreenshotOrder) return;
     setIsSendingScreenshotRequest(true);
     try {
+      const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
       const res = await fetch('/api/admin/request-new-screenshot', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           orderNumber: requestingScreenshotOrder.order_number,
           orderId: requestingScreenshotOrder.id,
@@ -4458,6 +4443,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                     <span className="text-[10px] text-amber-700 font-mono">Staff &amp; Ledger only</span>
                   </div>
                   <textarea
+                    key={selectedOrderDetails.id || selectedOrderDetails.order_number}
                     defaultValue={selectedOrderDetails.admin_notes || ''}
                     id={`admin-notes-${selectedOrderDetails.id}`}
                     rows={2}
@@ -5562,6 +5548,28 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                   </select>
                 </div>
 
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">GST Slab (%) *</label>
+                  <select
+                    required
+                    value={prodForm.gstRate === '' || prodForm.gstRate === null ? '' : String(prodForm.gstRate)}
+                    onChange={(e) =>
+                      setProdForm({
+                        ...prodForm,
+                        gstRate: e.target.value === '' ? '' : Number(e.target.value),
+                      })
+                    }
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-[#0b5c37] cursor-pointer"
+                  >
+                    <option value="">Select GST Slab (Required)</option>
+                    <option value="0">0% (Exempt / Essential)</option>
+                    <option value="5">5% GST</option>
+                    <option value="12">12% GST</option>
+                    <option value="18">18% GST</option>
+                    <option value="28">28% GST</option>
+                  </select>
+                </div>
+
                 <div className="sm:col-span-2">
                   <label className="block text-slate-700 font-bold mb-1">Short Description</label>
                   <input
@@ -5705,6 +5713,32 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                     }
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-[#0b5c37] font-mono focus:bg-white"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">GST Slab (%) *</label>
+                  <select
+                    required
+                    value={
+                      editingProduct.gstRate === undefined || editingProduct.gstRate === null
+                        ? ''
+                        : String(editingProduct.gstRate)
+                    }
+                    onChange={(e) =>
+                      setEditingProduct({
+                        ...editingProduct,
+                        gstRate: e.target.value === '' ? null : Number(e.target.value),
+                      })
+                    }
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-[#0b5c37] cursor-pointer"
+                  >
+                    <option value="">Select GST Slab (Required)</option>
+                    <option value="0">0% (Exempt / Essential)</option>
+                    <option value="5">5% GST</option>
+                    <option value="12">12% GST</option>
+                    <option value="18">18% GST</option>
+                    <option value="28">28% GST</option>
+                  </select>
                 </div>
               </div>
 
@@ -6085,7 +6119,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                       {viewingCustomer.shipping_address.city || ''}{viewingCustomer.shipping_address.state ? `, ${viewingCustomer.shipping_address.state}` : ''}{' '}
                       {viewingCustomer.shipping_address.zipCode || viewingCustomer.shipping_address.postalCode || ''}
                     </p>
-                    <p className="text-slate-600">{viewingCustomer.shipping_address.country || 'United States'}</p>
+                    <p className="text-slate-600">{viewingCustomer.shipping_address.country || 'India'}</p>
                   </>
                 ) : (
                   <p className="text-slate-400 italic">No saved address in public.profiles yet.</p>

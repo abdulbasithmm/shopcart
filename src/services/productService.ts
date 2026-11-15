@@ -11,6 +11,10 @@ export function mapSupabaseProductToDomain(row: any, inventoryCount?: number): P
     category: row.category_name || row.category_id,
     price: Number(row.price),
     originalPrice: Number(row.original_price),
+    gstRate:
+      row.gst_rate !== null && row.gst_rate !== undefined && Number.isFinite(Number(row.gst_rate))
+        ? Number(row.gst_rate)
+        : undefined,
     rating: Number(row.rating || 5.0),
     reviewsCount: Number(row.reviews_count || 0),
     inStock: inventoryCount !== undefined ? inventoryCount > 0 : true,
@@ -360,31 +364,19 @@ export async function uploadProductImage(
   }
 }
 
-/**
- * Admin: Add a new product to Supabase with full 4-image gallery support
- */
-export async function createAdminProduct(
-  productData: Partial<Product>,
-  stock = 10
-): Promise<{ success: boolean; product?: Product; error?: string }> {
-  const prodId = productData.id || `eko-prod-${Date.now()}`;
-  const images = Array.isArray(productData.images) ? productData.images.filter(Boolean) : [];
-  const mainImage = images[0] || productData.image || null;
-
+async function verifyAdminSession(): Promise<{ authorized: boolean; error?: string }> {
   if (!isSupabaseConfigured()) {
     return {
-      success: false,
+      authorized: false,
       error: 'Supabase database is not configured. Please verify VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.',
     };
   }
-
-  // 1. Enforce authenticated administrator session
   try {
     const { data: { session }, error: sessionErr } = await supabase.auth.getSession();
     if (sessionErr || !session?.user) {
       return {
-        success: false,
-        error: 'Unauthorized: A valid authenticated administrator session is required to create products.',
+        authorized: false,
+        error: 'Unauthorized: A valid authenticated administrator session is required.',
       };
     }
 
@@ -396,15 +388,34 @@ export async function createAdminProduct(
 
     if (!profileData || profileData.role !== 'admin') {
       return {
-        success: false,
+        authorized: false,
         error: 'Unauthorized: Account does not have administrator privileges in public.profiles.',
       };
     }
+    return { authorized: true };
   } catch (authCheckErr: any) {
     return {
-      success: false,
+      authorized: false,
       error: authCheckErr.message || 'Failed to verify administrator authentication session.',
     };
+  }
+}
+
+/**
+ * Admin: Add a new product to Supabase with full 4-image gallery support
+ */
+export async function createAdminProduct(
+  productData: Partial<Product>,
+  stock = 10
+): Promise<{ success: boolean; product?: Product; error?: string }> {
+  const prodId = productData.id || `eko-prod-${Date.now()}`;
+  const images = Array.isArray(productData.images) ? productData.images.filter(Boolean) : [];
+  const mainImage = images[0] || productData.image || null;
+
+  // 1. Enforce authenticated administrator session
+  const authCheck = await verifyAdminSession();
+  if (!authCheck.authorized) {
+    return { success: false, error: authCheck.error };
   }
 
   try {
@@ -416,6 +427,9 @@ export async function createAdminProduct(
       category_name: productData.category || 'Electronics',
       price: productData.price,
       original_price: productData.originalPrice || productData.price,
+      ...(productData.gstRate !== undefined && productData.gstRate !== null
+        ? { gst_rate: Number(productData.gstRate) }
+        : {}),
       rating: 5.0,
       reviews_count: 0,
       is_active: true,
@@ -450,17 +464,22 @@ export async function createAdminProduct(
       insertedRow = primaryData;
     }
 
-    // Handle "Could not find the 'images' column of 'products' in the schema cache"
-    if (prodErr && prodErr.message && (prodErr.message.toLowerCase().includes("'images' column") || (prodErr as any).code === 'PGRST204')) {
-      console.warn("PostgREST schema cache missing 'images' column. Triggering schema reload & applying resilient fallback...");
-      
+    // Handle missing optional columns ('images' or 'gst_rate') in PostgREST schema cache
+    if (
+      prodErr &&
+      prodErr.message &&
+      (prodErr.message.toLowerCase().includes("'images' column") ||
+        prodErr.message.toLowerCase().includes("'gst_rate' column") ||
+        (prodErr as any).code === 'PGRST204')
+    ) {
+      console.warn('PostgREST schema cache missing optional column on products. Retrying with resilient fallback...');
+
       try {
         await supabase.rpc('refresh_schema_cache');
       } catch {
         // ignore if RPC not yet created
       }
 
-      // Retry with images column in case reload immediately registered
       const retryRes = await supabase
         .from('products')
         .insert(productRow)
@@ -470,14 +489,18 @@ export async function createAdminProduct(
         insertedRow = retryRes.data;
         prodErr = null;
       } else {
-        // Fallback: preserve all 4 gallery images by embedding them in specs._gallery_images and image_url
         const fallbackRow = { ...productRow };
-        delete fallbackRow.images;
-        fallbackRow.image_url = mainImage;
-        fallbackRow.specs = {
-          ...(fallbackRow.specs || {}),
-          _gallery_images: images,
-        };
+        if (retryRes.error.message?.toLowerCase().includes('images')) {
+          delete fallbackRow.images;
+          fallbackRow.image_url = mainImage;
+          fallbackRow.specs = {
+            ...(fallbackRow.specs || {}),
+            _gallery_images: images,
+          };
+        }
+        if (retryRes.error.message?.toLowerCase().includes('gst_rate')) {
+          delete fallbackRow.gst_rate;
+        }
 
         const fallbackRes = await supabase
           .from('products')
@@ -488,7 +511,21 @@ export async function createAdminProduct(
           insertedRow = fallbackRes.data;
           prodErr = null;
         } else {
-          prodErr = fallbackRes.error;
+          // Strip both optional columns if both were missing
+          const minimalFallbackRow = { ...fallbackRow };
+          delete minimalFallbackRow.images;
+          delete minimalFallbackRow.gst_rate;
+          const minimalRes = await supabase
+            .from('products')
+            .insert(minimalFallbackRow)
+            .select('*, inventory(stock_count)')
+            .maybeSingle();
+          if (!minimalRes.error) {
+            insertedRow = minimalRes.data;
+            prodErr = null;
+          } else {
+            prodErr = minimalRes.error;
+          }
         }
       }
     }
@@ -528,8 +565,9 @@ export async function updateAdminProduct(
   updates: Partial<Product>,
   stock?: number
 ): Promise<{ success: boolean; product?: Product; error?: string }> {
-  if (!isSupabaseConfigured()) {
-    return { success: false, error: 'Database is not connected.' };
+  const authCheck = await verifyAdminSession();
+  if (!authCheck.authorized) {
+    return { success: false, error: authCheck.error || 'Database is not connected.' };
   }
 
   try {
@@ -539,6 +577,9 @@ export async function updateAdminProduct(
     if (updates.category !== undefined) payload.category_name = updates.category;
     if (updates.price !== undefined) payload.price = updates.price;
     if (updates.originalPrice !== undefined) payload.original_price = updates.originalPrice;
+    if (updates.gstRate !== undefined) {
+      payload.gst_rate = updates.gstRate === null ? null : Number(updates.gstRate);
+    }
     if (updates.discountPercentage !== undefined) payload.discount_percentage = updates.discountPercentage;
     if (updates.badge !== undefined) payload.badge = updates.badge;
     if (updates.shortDescription !== undefined) payload.short_description = updates.shortDescription;
@@ -562,10 +603,16 @@ export async function updateAdminProduct(
       updatedRow = primaryUpdated;
     }
 
-    // Handle "Could not find the 'images' column of 'products' in the schema cache" during update
-    if (error && error.message && (error.message.toLowerCase().includes("'images' column") || (error as any).code === 'PGRST204')) {
-      console.warn("PostgREST schema cache missing 'images' column during update. Applying resilient fallback...");
-      
+    // Handle missing optional columns ('images' or 'gst_rate') in PostgREST schema cache during update
+    if (
+      error &&
+      error.message &&
+      (error.message.toLowerCase().includes("'images' column") ||
+        error.message.toLowerCase().includes("'gst_rate' column") ||
+        (error as any).code === 'PGRST204')
+    ) {
+      console.warn('PostgREST schema cache missing optional column during update. Applying resilient fallback...');
+
       try {
         await supabase.rpc('refresh_schema_cache');
       } catch {
@@ -583,13 +630,18 @@ export async function updateAdminProduct(
         error = null;
       } else {
         const fallbackPayload = { ...payload };
-        delete fallbackPayload.images;
-        fallbackPayload.image_url = (updates.images && updates.images.filter(Boolean)[0]) || null;
-        if (updates.images) {
-          fallbackPayload.specs = {
-            ...(updates.specs || {}),
-            _gallery_images: updates.images.filter(Boolean),
-          };
+        if (retryRes.error.message?.toLowerCase().includes('images')) {
+          delete fallbackPayload.images;
+          fallbackPayload.image_url = (updates.images && updates.images.filter(Boolean)[0]) || null;
+          if (updates.images) {
+            fallbackPayload.specs = {
+              ...(updates.specs || {}),
+              _gallery_images: updates.images.filter(Boolean),
+            };
+          }
+        }
+        if (retryRes.error.message?.toLowerCase().includes('gst_rate')) {
+          delete fallbackPayload.gst_rate;
         }
         const fallbackRes = await supabase
           .from('products')
@@ -601,7 +653,21 @@ export async function updateAdminProduct(
           updatedRow = fallbackRes.data;
           error = null;
         } else {
-          error = fallbackRes.error;
+          const minimalPayload = { ...fallbackPayload };
+          delete minimalPayload.images;
+          delete minimalPayload.gst_rate;
+          const minimalRes = await supabase
+            .from('products')
+            .update(minimalPayload)
+            .eq('id', productId)
+            .select('*, inventory(stock_count)')
+            .maybeSingle();
+          if (!minimalRes.error) {
+            updatedRow = minimalRes.data;
+            error = null;
+          } else {
+            error = minimalRes.error;
+          }
         }
       }
     }
@@ -667,6 +733,11 @@ export async function deleteAdminProduct(productId: string): Promise<{ success: 
     return { success: true };
   }
 
+  const authCheck = await verifyAdminSession();
+  if (!authCheck.authorized) {
+    return { success: false, error: authCheck.error };
+  }
+
   try {
     try {
       await supabase.from('inventory').delete().eq('product_id', productId);
@@ -687,6 +758,10 @@ export async function deleteAdminProduct(productId: string): Promise<{ success: 
  * Admin: Update stock count directly
  */
 export async function updateAdminStock(productId: string, stockCount: number): Promise<{ success: boolean; error?: string }> {
+  if (stockCount < 0 || !Number.isFinite(stockCount)) {
+    return { success: false, error: 'Stock count cannot be negative.' };
+  }
+
   if (!isSupabaseConfigured()) {
     const prod = PRODUCTS.find((p) => p.id === productId);
     if (prod) {
@@ -696,10 +771,15 @@ export async function updateAdminStock(productId: string, stockCount: number): P
     return { success: true };
   }
 
+  const authCheck = await verifyAdminSession();
+  if (!authCheck.authorized) {
+    return { success: false, error: authCheck.error };
+  }
+
   try {
     const { error } = await supabase
       .from('inventory')
-      .update({ stock_count: stockCount, updated_at: new Date().toISOString() })
+      .update({ stock_count: Math.floor(stockCount), updated_at: new Date().toISOString() })
       .eq('product_id', productId);
 
     if (error) return { success: false, error: error.message };

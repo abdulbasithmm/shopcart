@@ -581,8 +581,8 @@ export interface FAQItem {
 
 export const FAQ_ITEMS: FAQItem[] = [
   {
-    question: 'How fast is delivery and do you offer Cash on Delivery (COD)?',
-    answer: 'Orders shipped across India are delivered within 24 to 48 hours for metro locations with Shop Cart Prime. Cash on Delivery is supported for all eligible PIN codes up to ₹50,000.',
+    question: 'How fast is delivery across India?',
+    answer: 'Orders shipped across India are delivered within 24 to 48 hours for metro locations and 3 to 5 business days nationwide. Express delivery is FREE on all orders over ₹499.',
   },
   {
     question: 'What is the return and replacement policy?',
@@ -598,7 +598,7 @@ export const FAQ_ITEMS: FAQItem[] = [
   },
   {
     question: 'Which payment methods are accepted?',
-    answer: 'We exclusively accept Google Pay (UPI) and PhonePe (UPI) payments. Payments are secured and verified with your 12-digit transaction reference (UTR).',
+    answer: 'We accept Universal UPI payments including Google Pay, PhonePe, Paytm, BHIM, Cred, and all UPI applications. Every payment is secured and verified with your payment screenshot and 12-digit UTR transaction reference.',
   },
 ];
 

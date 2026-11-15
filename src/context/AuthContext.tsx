@@ -29,13 +29,13 @@ const DEMO_CUSTOMER: User = {
   avatar: 'AM',
   role: 'customer',
   emailConfirmed: true,
-  phone: '+1 (555) 349-8291',
+  phone: '+91 98765 43210',
   address: {
-    street: '742 Evergreen Terrace',
-    city: 'Seattle',
-    state: 'WA',
-    zipCode: '98101',
-    country: 'United States',
+    street: '42 Indiranagar 100 Feet Road',
+    city: 'Bengaluru',
+    state: 'Karnataka',
+    zipCode: '560038',
+    country: 'India',
   },
 };
 
@@ -46,13 +46,13 @@ const DEMO_ADMIN: User = {
   avatar: 'SC',
   role: 'admin',
   emailConfirmed: true,
-  phone: '+1 (555) 901-2384',
+  phone: '+91 94966 60968',
   address: {
-    street: '100 Enterprise Way',
-    city: 'San Francisco',
-    state: 'CA',
-    zipCode: '94105',
-    country: 'United States',
+    street: 'Shopcart Hub, Bypass Road',
+    city: 'Kondotty, Malappuram',
+    state: 'Kerala',
+    zipCode: '673638',
+    country: 'India',
   },
 };
 
@@ -64,7 +64,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(() => {
     try {
       const saved = localStorage.getItem('shopcart_user');
-      return saved ? JSON.parse(saved) : null;
+      if (!saved) return null;
+      const parsed = JSON.parse(saved);
+      if (isSupabase && parsed?.id?.startsWith('usr-demo')) {
+        localStorage.removeItem('shopcart_user');
+        return null;
+      }
+      return parsed;
     } catch {
       return null;
     }
@@ -400,6 +406,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const quickDemoLogin = (asAdmin = false) => {
+    if (isSupabase && asAdmin) {
+      return;
+    }
     setUser(asAdmin ? DEMO_ADMIN : DEMO_CUSTOMER);
   };
 
@@ -414,8 +423,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsPasswordRecovery(false);
   };
 
-  // Strict role check: user is admin if role is verified 'admin'
-  const isAdmin = user?.role === 'admin';
+  // Strict role check: user is admin only if role is verified 'admin' (and never a demo account when Supabase is live)
+  const isAdmin = user?.role === 'admin' && (!isSupabase || !user.id.startsWith('usr-demo'));
 
   return (
     <AuthContext.Provider

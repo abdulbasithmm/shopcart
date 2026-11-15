@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ShoppingBag,
   Trash2,
@@ -21,6 +21,7 @@ import { PageView, CartItem, Product } from '../types';
 import { useCart } from '../context/CartContext';
 import { ProductImage } from '../components/common/ProductImage';
 import { PRODUCTS } from '../data/mockData';
+import { fetchProducts } from '../services/productService';
 import { formatPrice } from '../utils/format';
 
 interface CartPageProps {
@@ -42,6 +43,8 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
     discountAmount,
     shippingFee,
     taxAmount,
+    hasUnconfiguredGst,
+    unconfiguredGstProducts,
     total,
     coupon,
     applyCoupon,
@@ -78,7 +81,21 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
   };
 
   // Recommended products for empty state and recommendations row
-  const recommendedProducts = PRODUCTS.slice(0, 4);
+  const [recommendedProducts, setRecommendedProducts] = useState<Product[]>(PRODUCTS.slice(0, 4));
+
+  useEffect(() => {
+    let mounted = true;
+    fetchProducts()
+      .then((res) => {
+        if (mounted && res.products && res.products.length > 0) {
+          setRecommendedProducts(res.products.slice(0, 4));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 bg-white min-h-[calc(100vh-280px)]">
@@ -730,17 +747,27 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
                     {shippingFee === 0 ? (
                       <strong className="text-emerald-600 font-bold">FREE</strong>
                     ) : (
-                      `$${shippingFee.toFixed(2)}`
+                      formatPrice(shippingFee)
                     )}
                   </span>
                 </div>
 
                 <div className="flex justify-between text-slate-600">
-                  <span>Estimated Sales Tax (8%)</span>
+                  <span>Estimated GST / Tax</span>
                   <span className="font-semibold text-slate-900 tabular-nums">
-                    {formatPrice(taxAmount)}
+                    {hasUnconfiguredGst ? (
+                      <span className="text-amber-700 font-bold">Requires GST Config</span>
+                    ) : (
+                      formatPrice(taxAmount)
+                    )}
                   </span>
                 </div>
+
+                {hasUnconfiguredGst && (
+                  <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900">
+                    GST rate is not yet configured for: <strong>{unconfiguredGstProducts.join(', ')}</strong>. An administrator must assign a valid GST slab before checkout.
+                  </div>
+                )}
 
                 <div className="flex justify-between items-baseline pt-4 border-t border-slate-200 text-slate-900 font-extrabold text-base">
                   <span>Grand Total</span>
@@ -749,7 +776,7 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
                       {formatPrice(total)}
                     </span>
                     <span className="text-[10px] text-slate-400 font-normal">
-                      Includes tax and shipping
+                      {hasUnconfiguredGst ? 'Excludes unconfigured product GST' : 'Includes tax and shipping'}
                     </span>
                   </div>
                 </div>
@@ -758,7 +785,8 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
               {/* Checkout CTA Button */}
               <button
                 onClick={() => onNavigate('checkout')}
-                className="w-full py-4 bg-[#0b5c37] hover:bg-[#08482b] text-white text-sm font-extrabold rounded-2xl transition-all shadow-lg shadow-emerald-900/10 flex items-center justify-center gap-2 group cursor-pointer"
+                disabled={hasUnconfiguredGst}
+                className="w-full py-4 bg-[#0b5c37] hover:bg-[#08482b] disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-extrabold rounded-2xl transition-all shadow-lg shadow-emerald-900/10 flex items-center justify-center gap-2 group cursor-pointer"
               >
                 <span>Proceed to Checkout</span>
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
@@ -780,10 +808,12 @@ export const CartPage: React.FC<CartPageProps> = ({ onNavigate }) => {
                 </div>
               </div>
 
-              {/* Supported Payment Methods (Exclusively Google Pay & PhonePe UPI) */}
-              <div className="pt-2 border-t border-slate-100 flex items-center justify-center gap-2 text-slate-700 text-[11px] font-bold">
-                <span className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-200">Google Pay (UPI)</span>
-                <span className="px-2.5 py-1 rounded-lg bg-purple-50 text-purple-700 border border-purple-200">PhonePe (UPI)</span>
+              {/* Supported Payment Methods (Universal UPI) */}
+              <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-center gap-1.5 text-slate-700 text-[10px] font-bold">
+                <span className="px-2 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-200">Google Pay</span>
+                <span className="px-2 py-1 rounded-lg bg-purple-50 text-purple-700 border border-purple-200">PhonePe</span>
+                <span className="px-2 py-1 rounded-lg bg-sky-50 text-sky-700 border border-sky-200">Paytm</span>
+                <span className="px-2 py-1 rounded-lg bg-emerald-50 text-[#0b5c37] border border-emerald-200">BHIM &amp; All UPI</span>
               </div>
             </div>
           </div>

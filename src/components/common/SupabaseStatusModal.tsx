@@ -30,7 +30,8 @@ import {
   SUPABASE_ANON_KEY,
   setRuntimeSupabaseConfig,
   clearRuntimeSupabaseConfig,
-  supabase
+  supabase,
+  getAuthHeaders
 } from '../../lib/supabase';
 import { refreshSupabaseSchemaCache } from '../../services/productService';
 import { useToast } from '../../context/ToastContext';
@@ -173,11 +174,12 @@ export const SupabaseStatusModal: React.FC<SupabaseStatusModalProps> = ({ isOpen
       return;
     }
 
-    // 2. Persist to server .env if backend is running
+    // 2. Persist to server .env if backend is running (authenticated admin only)
     try {
+      const authHeaders = await getAuthHeaders({ 'Content-Type': 'application/json' });
       await fetch('/api/supabase/save', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders,
         body: JSON.stringify({ url: targetUrl, anonKey: targetKey }),
       });
     } catch {

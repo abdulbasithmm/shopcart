@@ -18,8 +18,9 @@ import {
 } from 'lucide-react';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
-import { PageView } from '../../types';
+import { PageView, Product } from '../../types';
 import { PRODUCTS, CATEGORIES } from '../../data/mockData';
+import { fetchProducts } from '../../services/productService';
 import { AmazonLogo } from './AmazonLogo';
 import { formatPrice } from '../../utils/format';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -44,9 +45,25 @@ export const Header: React.FC<HeaderProps> = ({
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isLangMenuOpen, setIsLangMenuOpen] = useState(false);
+  const [catalogProducts, setCatalogProducts] = useState<Product[]>(PRODUCTS);
 
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const langMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    fetchProducts()
+      .then((res) => {
+        if (mounted && res.products && res.products.length > 0) {
+          setCatalogProducts(res.products);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -55,6 +72,9 @@ export const Header: React.FC<HeaderProps> = ({
       }
       if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
         setIsUserMenuOpen(false);
+      }
+      if (langMenuRef.current && !langMenuRef.current.contains(e.target as Node)) {
+        setIsLangMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -69,7 +89,7 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   const filteredSuggestions = searchQuery.trim()
-    ? PRODUCTS.filter(
+    ? catalogProducts.filter(
         (p) =>
           p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
           p.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -225,7 +245,7 @@ export const Header: React.FC<HeaderProps> = ({
             <PWAInstallButton variant="header" />
 
             {/* Language / Country Selector: Indian Flag EN */}
-            <div className="relative hidden lg:block">
+            <div ref={langMenuRef} className="relative hidden lg:block">
               <button
                 onClick={() => setIsLangMenuOpen(!isLangMenuOpen)}
                 className="flex items-center gap-1.5 p-1.5 hover:bg-slate-100 rounded-md transition-colors cursor-pointer text-xs font-bold"
@@ -234,6 +254,16 @@ export const Header: React.FC<HeaderProps> = ({
                 <span>EN</span>
                 <ChevronDown className="w-3 h-3 text-slate-500" />
               </button>
+              {isLangMenuOpen && (
+                <div className="absolute right-0 top-full mt-2 w-52 bg-white rounded-xl shadow-xl border border-slate-200 p-3 z-50 text-xs text-slate-700 space-y-1.5">
+                  <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                    <span>🇮🇳</span>
+                    <span>Shopcart India</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500">Language: English (EN)</p>
+                  <p className="text-[11px] text-slate-500">Currency: Indian Rupee (₹ INR)</p>
+                </div>
+              )}
             </div>
 
             {/* Hello, Sign in / Account & Lists */}
@@ -381,7 +411,7 @@ export const Header: React.FC<HeaderProps> = ({
             <span>All</span>
           </button>
 
-          <button onClick={() => onNavigate('shop', { category: 'Groceries' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer py-1">
+          <button onClick={() => onNavigate('shop', { category: 'Home & Kitchen' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer py-1">
             Fresh
           </button>
           <button onClick={() => onNavigate('shop', { category: 'Electronics' })} className="hover:text-[#0b5c37] transition-colors cursor-pointer py-1">

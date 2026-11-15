@@ -1,5 +1,5 @@
 import { CartItem, User, Order, OrderStatus, ShipmentUpdate, PaymentStatus, AIScreenshotAnalysis } from '../types';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { supabase, isSupabaseConfigured, getAuthHeaders } from '../lib/supabase';
 import {
   normalizeOrderStatus,
   createInitialShipmentUpdates,
@@ -17,6 +17,7 @@ export interface CreateOrderParams {
   taxAmount: number;
   totalAmount: number;
   couponCode?: string | null;
+  shippingSpeed?: 'standard' | 'express';
   shippingAddress: {
     fullName: string;
     street: string;
@@ -49,41 +50,46 @@ export interface OrderResult {
   isStoredInSupabase: boolean;
   trackingNumber?: string;
   estimatedDeliveryDate?: string;
+  screenshotUrl?: string | null;
+  aiAnalysis?: AIScreenshotAnalysis | null;
+  pricing?: {
+    subtotal: number;
+    discountAmount: number;
+    shippingFee: number;
+    taxAmount: number;
+    totalAmount: number;
+    couponCode?: string | null;
+    shippingSpeed?: 'standard' | 'express';
+  };
 }
 
 /**
- * Creates order, order_items, payment record, initial tracking details, and safely updates inventory
+ * Creates order strictly via the authoritative backend API (/api/orders/create)
+ * which validates product prices, coupons, shipping, taxes, customer/address details,
+ * UTR uniqueness, and executes the atomic create_complete_order RPC on Supabase.
  */
 export async function createOrder(params: CreateOrderParams): Promise<OrderResult> {
-  const isConnected = isSupabaseConfigured();
+  const initialStatus: OrderStatus = 'order_placed';
+  const enforcedPaymentStatus: PaymentStatus = 'pending_admin_verification';
 
-  // Initial order status based on verified payment
-  const initialStatus: OrderStatus =
-    params.paymentStatus === 'verified' ? 'confirmed' : 'order_placed';
-
-  // Calculate default estimated delivery date: 4 days from now
   const estDeliveryDate = new Date();
-  estDeliveryDate.setDate(estDeliveryDate.getDate() + 4);
-  const estimatedDeliveryISO = estDeliveryDate.toISOString();
-
-  // Generate unique tracking number (e.g. SC-TRK-7849201948)
-  const trackingNumber = `SC-TRK-${Math.floor(1000000000 + Math.random() * 9000000000)}`;
+  estDeliveryDate.setDate(estDeliveryDate.getDate() + (params.shippingSpeed === 'express' ? 2 : 4));
+  const fallbackEstimatedISO = estDeliveryDate.toISOString();
+  const fallbackTrackingNumber = `SC-TRK-${Math.floor(1000000000 + Math.random() * 9000000000)}`;
   const carrier = 'Shop Cart Express';
 
-  // Generate initial shipment milestones
-  const initialShipmentUpdates = createInitialShipmentUpdates(
-    new Date(),
-    params.paymentStatus === 'verified'
-  );
+  const normalizedUtr = (params.transactionReference || '').replace(/[\s-]+/g, '').trim().toUpperCase();
+  const initialShipmentUpdates = createInitialShipmentUpdates(new Date(), false);
 
-  // 1. Primary path: Call Secure Backend Order Creation API
   try {
+    const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
     const res = await fetch('/api/orders/create', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         orderNumber: params.orderNumber,
-        userId: params.user?.id && !params.user.id.startsWith('usr-') ? params.user.id : null,
+        status: initialStatus,
+        paymentStatus: enforcedPaymentStatus,
         customerName: params.shippingAddress.fullName,
         customerEmail: params.guestEmail || params.shippingAddress.email || params.user?.email || '',
         customerPhone: params.shippingAddress.phone || params.user?.phone || '',
@@ -95,6 +101,7 @@ export async function createOrder(params: CreateOrderParams): Promise<OrderResul
         landmark: params.shippingAddress.landmark || '',
         deliveryInstructions: params.shippingAddress.deliveryInstructions || params.customerNotes || '',
         country: params.shippingAddress.country || 'India',
+        shippingSpeed: params.shippingSpeed || 'standard',
         cartItems: params.cart.map((item) => ({
           productId: item.product.id,
           productName: item.product.name,
@@ -111,384 +118,81 @@ export async function createOrder(params: CreateOrderParams): Promise<OrderResul
           shippingFee: params.shippingFee,
           taxAmount: params.taxAmount,
           totalAmount: params.totalAmount,
-          couponCode: params.couponCode,
+          couponCode: params.couponCode || null,
+          shippingSpeed: params.shippingSpeed || 'standard',
         },
         paymentMethod: params.paymentMethod,
-        transactionReference: params.transactionReference,
+        transactionReference: normalizedUtr,
         screenshotBase64: params.screenshotUrl?.startsWith('data:') ? params.screenshotUrl : undefined,
         screenshotUrl: !params.screenshotUrl?.startsWith('data:') ? params.screenshotUrl : undefined,
-        aiAnalysis: params.aiAnalysis,
         customerNotes: params.customerNotes,
       }),
     });
 
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success) {
-        // Cache locally for instant availability
-        try {
-          const localOrders: Order[] = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
-          const newOrder: Order = {
-            id: data.orderId || `ord-${Date.now()}`,
-            order_number: params.orderNumber,
-            user_id: params.user?.id || null,
-            guest_email: params.guestEmail || params.shippingAddress.email || null,
-            customer_name: params.shippingAddress.fullName,
-            customer_email: params.guestEmail || params.shippingAddress.email || null,
-            customer_phone: params.shippingAddress.phone,
-            status: initialStatus,
-            subtotal: params.subtotal,
-            discount_amount: params.discountAmount,
-            shipping_fee: params.shippingFee,
-            tax_amount: params.taxAmount,
-            total_amount: params.totalAmount,
-            coupon_code: params.couponCode || null,
-            shipping_address: params.shippingAddress,
-            customer_notes: params.customerNotes || null,
-            tracking_number: data.trackingNumber || trackingNumber,
-            carrier: data.carrier || carrier,
-            estimated_delivery_date: data.estimatedDeliveryDate || estimatedDeliveryISO,
-            shipment_updates: initialShipmentUpdates,
-            paymentMethod: params.paymentMethod,
-            paymentStatus: params.paymentStatus,
-            transactionReference: params.transactionReference || null,
-            screenshotUrl: params.screenshotUrl || null,
-            aiAnalysis: params.aiAnalysis || null,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            order_items: params.cart.map((item) => ({
-              product_id: item.product.id,
-              product_name: item.product.name,
-              product_image: item.product.image || item.product.images?.[0] || null,
-              unit_price: item.product.price,
-              quantity: item.quantity,
-              total_price: Number((item.product.price * item.quantity).toFixed(2)),
-              line_total: Number((item.product.price * item.quantity).toFixed(2)),
-              selected_color: item.selectedColor || null,
-              selected_size: item.selectedSize || null,
-              product: item.product,
-            })),
-            payment_records: [
-              {
-                id: `pay-${Date.now()}`,
-                payment_method: params.paymentMethod,
-                amount: params.totalAmount,
-                currency: 'INR',
-                payment_status: params.paymentStatus,
-                transaction_reference: params.transactionReference || null,
-                screenshot_url: params.screenshotUrl || null,
-                ai_analysis: params.aiAnalysis || null,
-                ai_confidence_score: params.aiAnalysis?.confidence_score || null,
-                ai_recommendation: params.aiAnalysis?.recommended_action || null,
-                suspicious_indicators: params.aiAnalysis?.suspicious_indicators || [],
-                created_at: new Date().toISOString(),
-              },
-            ],
-          };
-          localOrders.unshift(newOrder);
-          localStorage.setItem('shopcart_orders', JSON.stringify(localOrders));
-        } catch {
-          // Non-fatal
-        }
-
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(
-            new CustomEvent('shopcart-orders-updated', {
-              detail: { orderNumber: params.orderNumber, orderId: data.orderId },
-            })
-          );
-        }
-
-        return {
-          success: true,
-          orderId: data.orderId,
-          orderNumber: params.orderNumber,
-          isStoredInSupabase: data.isStoredInSupabase ?? true,
-          trackingNumber: data.trackingNumber || trackingNumber,
-          estimatedDeliveryDate: data.estimatedDeliveryDate || estimatedDeliveryISO,
-        };
-      }
-    } else {
-      const errData = await res.json().catch(() => ({}));
-      if (errData.error) {
-        throw new Error(errData.error);
-      }
-    }
-  } catch (apiErr: any) {
-    console.warn('Backend order creation endpoint warning, falling back to direct client client:', apiErr?.message);
-    if (apiErr?.message && apiErr.message.includes('Duplicate UTR')) {
-      throw apiErr;
-    }
-  }
-
-  try {
-    // Attempt 2: Try atomic PostgreSQL RPC create_complete_order if available
-    try {
-      const { data: rpcRes, error: rpcErr } = await supabase.rpc('create_complete_order', {
-        p_order: {
-          order_number: params.orderNumber,
-          user_id: params.user?.id && !params.user.id.startsWith('usr-') ? params.user.id : null,
-          guest_email: params.guestEmail || params.shippingAddress.email || null,
-          customer_name: params.shippingAddress.fullName,
-          customer_email: params.guestEmail || params.shippingAddress.email || null,
-          customer_phone: params.shippingAddress.phone,
-          status: initialStatus,
-          subtotal: params.subtotal,
-          discount_amount: params.discountAmount,
-          shipping_fee: params.shippingFee,
-          tax_amount: params.taxAmount,
-          total_amount: params.totalAmount,
-          coupon_code: params.couponCode || null,
-          shipping_address: params.shippingAddress,
-          customer_notes: params.customerNotes || null,
-          tracking_number: trackingNumber,
-          carrier: carrier,
-          estimated_delivery_date: estimatedDeliveryISO,
-          shipment_updates: initialShipmentUpdates,
-        },
-        p_items: params.cart.map((item) => ({
-          product_id: item.product.id,
-          product_name: item.product.name,
-          unit_price: item.product.price,
-          quantity: item.quantity,
-          total_price: Number((item.product.price * item.quantity).toFixed(2)),
-          selected_color: item.selectedColor || null,
-          selected_size: item.selectedSize || null,
-        })),
-        p_payment: {
-          payment_method: params.paymentMethod,
-          payment_status: params.paymentStatus,
-          transaction_reference: params.transactionReference || null,
-          screenshot_url: params.screenshotUrl || null,
-          ai_analysis: params.aiAnalysis || null,
-          ai_confidence_score: params.aiAnalysis?.confidence_score || null,
-          ai_recommendation: params.aiAnalysis?.recommended_action || null,
-          suspicious_indicators: params.aiAnalysis?.suspicious_indicators || [],
-        },
-      });
-
-      if (!rpcErr && rpcRes && rpcRes.success) {
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(
-            new CustomEvent('shopcart-orders-updated', {
-              detail: { orderNumber: params.orderNumber, orderId: rpcRes.order_id },
-            })
-          );
-        }
-        return {
-          success: true,
-          orderId: rpcRes.order_id,
-          orderNumber: params.orderNumber,
-          isStoredInSupabase: true,
-          trackingNumber,
-          estimatedDeliveryDate: estimatedDeliveryISO,
-        };
-      }
-    } catch {
-      // Non-fatal, fall back to direct inserts
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.success) {
+      return {
+        success: false,
+        orderNumber: params.orderNumber,
+        errorMessage: data?.error || `Order submission rejected (HTTP ${res.status}). Please verify your order details and retry.`,
+        isStoredInSupabase: false,
+      };
     }
 
-    // Attempt 3: Direct insert into orders table
-    const orderInsertPayload: any = {
-      order_number: params.orderNumber,
-      user_id: params.user?.id && !params.user.id.startsWith('usr-') ? params.user.id : null,
-      guest_email: params.guestEmail || params.shippingAddress.email || null,
-      customer_name: params.shippingAddress.fullName,
-      customer_email: params.guestEmail || params.shippingAddress.email || null,
-      customer_phone: params.shippingAddress.phone,
-      status: initialStatus,
-      subtotal: params.subtotal,
-      discount_amount: params.discountAmount,
-      shipping_fee: params.shippingFee,
-      tax_amount: params.taxAmount,
-      total_amount: params.totalAmount,
-      coupon_code: params.couponCode || null,
-      shipping_address: params.shippingAddress as any,
-      customer_notes: params.customerNotes || null,
-      tracking_number: trackingNumber,
-      carrier: carrier,
-      estimated_delivery_date: estimatedDeliveryISO,
-      shipment_updates: initialShipmentUpdates as any,
-      status_history: [
-        {
-          status: initialStatus,
-          changedAt: new Date().toISOString(),
-          changedBy: 'Customer',
-          note: 'Order placed',
-        },
-      ],
-      payment_method: params.paymentMethod,
-      payment_status: params.paymentStatus,
-      is_archived_by_admin: false,
-      is_hidden_by_customer: false,
+    const authoritativePricing = {
+      subtotal: Number(data.pricing?.subtotal ?? params.subtotal),
+      discountAmount: Number(data.pricing?.discountAmount ?? params.discountAmount),
+      shippingFee: Number(data.pricing?.shippingFee ?? params.shippingFee),
+      taxAmount: Number(data.pricing?.taxAmount ?? params.taxAmount),
+      totalAmount: Number(data.pricing?.totalAmount ?? params.totalAmount),
+      couponCode: data.pricing?.couponCode ?? params.couponCode ?? null,
+      shippingSpeed: (data.pricing?.shippingSpeed ?? params.shippingSpeed ?? 'standard') as 'standard' | 'express',
     };
 
-    let { data: orderData, error: orderErr } = await supabase
-      .from('orders')
-      .insert(orderInsertPayload)
-      .select('id')
-      .single();
+    const resolvedOrderId = data.orderId || `ord-${Date.now()}`;
+    const resolvedTracking = data.trackingNumber || fallbackTrackingNumber;
+    const resolvedDeliveryISO = data.estimatedDeliveryDate || fallbackEstimatedISO;
+    const serverAiAnalysis: AIScreenshotAnalysis | null = data.aiAnalysis || null;
+    const resolvedScreenshotUrl: string | null = data.screenshotUrl || params.screenshotUrl || null;
 
-    // Fallback without extended columns if schema cache not reloaded
-    if (orderErr) {
-      console.warn('Primary orders insert error, attempting base columns:', orderErr.message);
-      const basePayload = {
-        order_number: params.orderNumber,
-        user_id: params.user?.id && !params.user.id.startsWith('usr-') ? params.user.id : null,
-        guest_email: params.guestEmail || params.shippingAddress.email || null,
-        status: initialStatus,
-        subtotal: params.subtotal,
-        discount_amount: params.discountAmount,
-        shipping_fee: params.shippingFee,
-        tax_amount: params.taxAmount,
-        total_amount: params.totalAmount,
-        coupon_code: params.couponCode || null,
-        shipping_address: params.shippingAddress as any,
-        customer_notes: params.customerNotes || null,
-        tracking_number: trackingNumber,
-        carrier: carrier,
-        estimated_delivery_date: estimatedDeliveryISO,
-        shipment_updates: initialShipmentUpdates as any,
-      };
-
-      const fallback = await supabase
-        .from('orders')
-        .insert(basePayload)
-        .select('id')
-        .single();
-
-      if (!fallback.error && fallback.data) {
-        orderData = fallback.data;
-        orderErr = null;
-      } else {
-        throw new Error(fallback.error?.message || orderErr.message);
-      }
-    }
-
-    if (orderErr || !orderData) {
-      console.error('Failed to insert order in Supabase:', orderErr);
-      throw new Error((orderErr as any)?.message || 'Failed to create order record in Supabase');
-    }
-
-
-    const orderId = orderData.id;
-
-    // 2. Insert order items
-    const orderItemsRows = params.cart.map((item) => ({
-      order_id: orderId,
-      product_id: item.product.id,
-      product_name: item.product.name,
-      unit_price: item.product.price,
-      quantity: item.quantity,
-      total_price: Number((item.product.price * item.quantity).toFixed(2)),
-      selected_color: item.selectedColor || null,
-      selected_size: item.selectedSize || null,
-    }));
-
-    const { error: itemsErr } = await supabase.from('order_items').insert(orderItemsRows);
-    if (itemsErr) {
-      console.warn('Failed to insert order items:', itemsErr.message);
-    }
-
-    // 3. Insert payment record
-    const { error: paymentErr } = await supabase.from('payment_records').insert({
-      order_id: orderId,
-      payment_method: params.paymentMethod,
-      amount: params.totalAmount,
-      currency: 'INR',
-      payment_status: params.paymentStatus,
-      transaction_reference: params.transactionReference || null,
-      screenshot_url: params.screenshotUrl || null,
-      ai_analysis: params.aiAnalysis || null,
-      ai_confidence_score: params.aiAnalysis?.confidence_score ?? null,
-      ai_recommendation: params.aiAnalysis?.recommended_action || null,
-      suspicious_indicators: params.aiAnalysis?.suspicious_indicators || [],
-      raw_details: {
-        recordedAt: new Date().toISOString(),
-        paymentMethodName: params.paymentMethod,
-        aiAnalysis: params.aiAnalysis || null,
-      },
-    });
-
-    if (paymentErr) {
-      console.warn('Failed to record payment in Supabase:', paymentErr.message);
-    }
-
-    // 4. Also insert into order_shipment_updates table if available
-    try {
-      const shipmentRows = initialShipmentUpdates.map((u) => ({
-        order_id: orderId,
-        status: u.status,
-        title: u.title,
-        description: u.description || null,
-        location: u.location || null,
-        created_at: u.timestamp,
-      }));
-      await supabase.from('order_shipment_updates').insert(shipmentRows);
-    } catch {
-      // Table may be optional if using JSONB column
-    }
-
-    // 5. Safely deduct product inventory
-    for (const item of params.cart) {
-      try {
-        const { error: rpcErr } = await supabase.rpc('deduct_product_inventory', {
-          p_product_id: item.product.id,
-          p_quantity: item.quantity,
-        });
-
-        if (rpcErr) {
-          const { data: currentInv } = await supabase
-            .from('inventory')
-            .select('stock_count')
-            .eq('product_id', item.product.id)
-            .single();
-
-          if (currentInv) {
-            const nextStock = Math.max(0, currentInv.stock_count - item.quantity);
-            await supabase
-              .from('inventory')
-              .update({ stock_count: nextStock, updated_at: new Date().toISOString() })
-              .eq('product_id', item.product.id);
-          }
-        }
-      } catch (invErr) {
-        console.warn(`Could not update inventory for ${item.product.id}:`, invErr);
-      }
-    }
-
-    // Mirror order locally for immediate responsiveness
     try {
       const localOrders: Order[] = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
-      const newOrderRecord: Order = {
-        id: orderId,
+      const newOrder: Order = {
+        id: resolvedOrderId,
         order_number: params.orderNumber,
         user_id: params.user?.id || null,
-        guest_email: params.guestEmail || params.shippingAddress.fullName || null,
+        guest_email: params.user?.id ? null : (params.guestEmail || params.shippingAddress.email || null),
+        customer_name: params.shippingAddress.fullName,
+        customer_email: params.guestEmail || params.shippingAddress.email || null,
+        customer_phone: params.shippingAddress.phone,
         status: initialStatus,
-        subtotal: params.subtotal,
-        discount_amount: params.discountAmount,
-        shipping_fee: params.shippingFee,
-        tax_amount: params.taxAmount,
-        total_amount: params.totalAmount,
-        coupon_code: params.couponCode || null,
+        subtotal: authoritativePricing.subtotal,
+        discount_amount: authoritativePricing.discountAmount,
+        shipping_fee: authoritativePricing.shippingFee,
+        tax_amount: authoritativePricing.taxAmount,
+        total_amount: authoritativePricing.totalAmount,
+        coupon_code: authoritativePricing.couponCode,
         shipping_address: params.shippingAddress,
         customer_notes: params.customerNotes || null,
-        tracking_number: trackingNumber,
-        carrier: carrier,
-        estimated_delivery_date: estimatedDeliveryISO,
+        tracking_number: resolvedTracking,
+        carrier: data.carrier || carrier,
+        estimated_delivery_date: resolvedDeliveryISO,
         shipment_updates: initialShipmentUpdates,
         paymentMethod: params.paymentMethod,
-        paymentStatus: params.paymentStatus,
-        transactionReference: params.transactionReference || null,
+        paymentStatus: enforcedPaymentStatus,
+        transactionReference: data.transactionReference || normalizedUtr || null,
+        screenshotUrl: resolvedScreenshotUrl,
+        aiAnalysis: serverAiAnalysis,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         order_items: params.cart.map((item) => ({
           product_id: item.product.id,
           product_name: item.product.name,
+          product_image: item.product.image || item.product.images?.[0] || null,
           unit_price: item.product.price,
           quantity: item.quantity,
           total_price: Number((item.product.price * item.quantity).toFixed(2)),
+          line_total: Number((item.product.price * item.quantity).toFixed(2)),
           selected_color: item.selectedColor || null,
           selected_size: item.selectedSize || null,
           product: item.product,
@@ -497,35 +201,51 @@ export async function createOrder(params: CreateOrderParams): Promise<OrderResul
           {
             id: `pay-${Date.now()}`,
             payment_method: params.paymentMethod,
-            amount: params.totalAmount,
+            amount: authoritativePricing.totalAmount,
             currency: 'INR',
-            payment_status: params.paymentStatus,
-            transaction_reference: params.transactionReference || null,
+            payment_status: enforcedPaymentStatus,
+            transaction_reference: data.transactionReference || normalizedUtr || null,
+            screenshot_url: resolvedScreenshotUrl,
+            ai_analysis: serverAiAnalysis,
+            ai_confidence_score: serverAiAnalysis?.confidence_score ?? null,
+            ai_recommendation: serverAiAnalysis?.recommended_action || null,
+            suspicious_indicators: serverAiAnalysis?.suspicious_indicators || [],
             created_at: new Date().toISOString(),
           },
         ],
       };
       const filtered = localOrders.filter((o) => o.order_number !== params.orderNumber);
-      filtered.unshift(newOrderRecord);
+      filtered.unshift(newOrder);
       localStorage.setItem('shopcart_orders', JSON.stringify(filtered));
     } catch {
-      // Ignore storage error
+      // Non-fatal local mirror error
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('shopcart-orders-updated', {
+          detail: { orderNumber: params.orderNumber, orderId: resolvedOrderId },
+        })
+      );
     }
 
     return {
       success: true,
-      orderId,
+      orderId: resolvedOrderId,
       orderNumber: params.orderNumber,
-      isStoredInSupabase: true,
-      trackingNumber,
-      estimatedDeliveryDate: estimatedDeliveryISO,
+      isStoredInSupabase: data.isStoredInSupabase ?? true,
+      trackingNumber: resolvedTracking,
+      estimatedDeliveryDate: resolvedDeliveryISO,
+      screenshotUrl: resolvedScreenshotUrl,
+      aiAnalysis: serverAiAnalysis,
+      pricing: authoritativePricing,
     };
   } catch (err: any) {
-    console.error('Error during checkout order placement:', err);
+    console.error('Error during secure backend order placement:', err);
     return {
       success: false,
       orderNumber: params.orderNumber,
-      errorMessage: err.message || 'Order creation failed',
+      errorMessage: err?.message || 'Unable to reach order creation service. Please try again.',
       isStoredInSupabase: false,
     };
   }
@@ -545,7 +265,10 @@ export async function fetchUserOrders(
 
   // 1. Try Backend API
   try {
-    const res = await fetch(`/api/orders/customer/${userId}?includeHidden=${includeHidden}`);
+    const headers = await getAuthHeaders();
+    const res = await fetch(`/api/orders/customer/${userId}?includeHidden=${includeHidden}`, {
+      headers,
+    });
     if (res.ok) {
       const json = await res.json();
       if (json.success && Array.isArray(json.orders)) {
@@ -630,7 +353,10 @@ export async function fetchAllAdminOrders(options?: { includeArchived?: boolean 
 
   // 1. Primary path: Fetch from server-authoritative Admin Orders endpoint
   try {
-    const res = await fetch(`/api/admin/orders?includeArchived=${includeArchived}`);
+    const headers = await getAuthHeaders();
+    const res = await fetch(`/api/admin/orders?includeArchived=${includeArchived}`, {
+      headers,
+    });
     if (res.ok) {
       const json = await res.json();
       if (json.success && Array.isArray(json.orders)) {
@@ -865,11 +591,16 @@ export async function updateOrderStatus(
     note: options?.cancellationReason || options?.adminNotes || options?.customDescription || undefined,
   };
 
-  // 1. Try Backend API
+  const isConnected = isSupabaseConfigured() && orderId && !orderId.startsWith('local-');
+
+  // 1. Server-mediated Admin API Update (uses service_role on backend)
+  let serverOk = false;
+  let serverErrorMessage = '';
   try {
+    const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
     const res = await fetch(`/api/admin/orders/${orderId}/status`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         status: newStatus,
         note: options?.customDescription || options?.cancellationReason,
@@ -878,11 +609,21 @@ export async function updateOrderStatus(
         adminNotes: options?.adminNotes,
       }),
     });
+    const json = await res.json().catch(() => ({}));
     if (res.ok) {
-      // Backend updated successfully
+      serverOk = true;
+    } else {
+      serverErrorMessage = json?.error || `Server returned HTTP ${res.status}`;
     }
-  } catch {
-    // Non-fatal if backend endpoint is unavailable
+  } catch (err: any) {
+    serverErrorMessage = err?.message || 'Network error updating order status';
+  }
+
+  if (isConnected && !serverOk) {
+    return {
+      success: false,
+      message: serverErrorMessage || 'Failed to update order status on server',
+    };
   }
 
   // 2. Local Storage Mirror
@@ -918,80 +659,10 @@ export async function updateOrderStatus(
     // Non-fatal
   }
 
-  const isConnected = isSupabaseConfigured() && orderId && !orderId.startsWith('local-');
-  if (!isConnected) {
-    return { success: true, message: `Status updated to ${meta.label}` };
-  }
-
-  // 3. Supabase Direct Update
-  try {
-    const { data: currentOrder } = await supabase
-      .from('orders')
-      .select('shipment_updates, status_history, admin_notes')
-      .eq('id', orderId)
-      .maybeSingle();
-
-    const existingUpdates: ShipmentUpdate[] = Array.isArray(currentOrder?.shipment_updates)
-      ? currentOrder.shipment_updates
-      : [];
-    const mergedUpdates = [newUpdate, ...existingUpdates];
-
-    const existingHistory = Array.isArray(currentOrder?.status_history)
-      ? currentOrder.status_history
-      : [];
-    const mergedHistory = [newHistoryItem, ...existingHistory];
-
-    const payload: any = {
-      status: newStatus,
-      shipment_updates: mergedUpdates as any,
-      status_history: mergedHistory as any,
-      updated_at: timestamp,
-    };
-
-    if (options?.adminNotes !== undefined) {
-      payload.admin_notes = options.adminNotes;
-    }
-
-    if (newStatus === 'cancelled') {
-      payload.cancellation_reason = options?.cancellationReason || 'Cancelled by Administrator';
-      payload.cancelled_at = timestamp;
-      payload.cancelled_by = options?.cancelledBy || 'admin';
-    }
-
-    const { data: updatedData, error: updateErr } = await supabase
-      .from('orders')
-      .update(payload)
-      .eq('id', orderId)
-      .select('*, order_items(*), payment_records(*)')
-      .maybeSingle();
-
-    if (updateErr) {
-      console.warn('Direct Supabase update warning:', updateErr.message);
-    }
-
-    // Optional table insert
-    try {
-      await supabase.from('order_shipment_updates').insert({
-        order_id: orderId,
-        status: newStatus,
-        title: newUpdate.title,
-        description: newUpdate.description,
-        location: newUpdate.location,
-        created_at: newUpdate.timestamp,
-      });
-    } catch {
-      // Ignored
-    }
-
-    return {
-      success: true,
-      message: `Status updated to ${meta.label} in database`,
-      updatedOrder: updatedData ? normalizeOrderRecord(updatedData) : undefined,
-    };
-  } catch (err: any) {
-    console.error('Error updating order status in Supabase:', err);
-    return { success: false, message: err.message || 'Failed to update order status' };
-  }
+  return {
+    success: true,
+    message: isConnected ? `Status updated to ${meta.label} in database` : `Status updated to ${meta.label}`,
+  };
 }
 
 /**
@@ -1024,16 +695,33 @@ export async function archiveAdminOrder(
   archive = true
 ): Promise<{ success: boolean; message: string }> {
   const timestamp = new Date().toISOString();
+  const isConnected = isSupabaseConfigured() && orderId && !orderId.startsWith('local-');
 
-  // 1. Try Backend API
+  // 1. Server-mediated Admin API Update
+  let serverOk = false;
+  let serverError = '';
   try {
-    await fetch(`/api/admin/orders/${orderId}/archive`, {
+    const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+    const res = await fetch(`/api/admin/orders/${orderId}/archive`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ archive }),
     });
-  } catch {
-    // Non-fatal
+    const json = await res.json().catch(() => ({}));
+    if (res.ok) {
+      serverOk = true;
+    } else {
+      serverError = json?.error || `Server returned HTTP ${res.status}`;
+    }
+  } catch (err: any) {
+    serverError = err?.message || 'Network error updating archive status';
+  }
+
+  if (isConnected && !serverOk) {
+    return {
+      success: false,
+      message: serverError || 'Failed to update order archive state on server.',
+    };
   }
 
   // 2. Update local storage mirror
@@ -1057,21 +745,6 @@ export async function archiveAdminOrder(
     // Non-fatal
   }
 
-  // 3. Update Supabase
-  if (isSupabaseConfigured() && orderId && !orderId.startsWith('local-')) {
-    try {
-      await supabase
-        .from('orders')
-        .update({
-          is_archived_by_admin: Boolean(archive),
-          updated_at: timestamp,
-        })
-        .eq('id', orderId);
-    } catch (err: any) {
-      console.warn('Supabase archive warning:', err?.message);
-    }
-  }
-
   return {
     success: true,
     message: archive
@@ -1081,7 +754,7 @@ export async function archiveAdminOrder(
 }
 
 /**
- * Customer: Request cancellation for an eligible order
+ * Customer: Request cancellation for an eligible order (server-mediated)
  */
 export async function requestCustomerCancellation(
   orderId: string,
@@ -1095,89 +768,98 @@ export async function requestCustomerCancellation(
     return { success: false, message: 'Please provide a cancellation reason.' };
   }
 
-  const timestamp = new Date().toISOString();
-
-  // 1. Try Backend API
   try {
+    const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
     const res = await fetch(`/api/orders/${orderId}/cancel`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cancellationReason, userId }),
+      headers,
+      body: JSON.stringify({ cancellationReason: cancellationReason.trim(), userId }),
     });
-    if (res.ok) {
-      const data = await res.json();
-      return { success: true, message: data.message || 'Order cancelled successfully.' };
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        success: false,
+        message: data?.error || 'Unable to cancel order. Please sign in and try again.',
+      };
     }
-  } catch {
-    // Fall back to direct
-  }
 
-  // 2. Direct Supabase / local update
-  return updateOrderStatus(orderId, 'cancelled', {
-    cancellationReason: cancellationReason.trim(),
-    cancelledBy: 'customer',
-    customTitle: 'Cancellation Requested by Customer',
-    customDescription: cancellationReason.trim(),
-  });
+    const timestamp = new Date().toISOString();
+    try {
+      const local: Order[] = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
+      const nextOrders = local.map((ord) =>
+        ord.id === orderId || ord.order_number === orderId
+          ? {
+              ...ord,
+              status: 'cancelled' as OrderStatus,
+              cancellation_reason: cancellationReason.trim(),
+              cancelled_at: timestamp,
+              cancelled_by: 'customer' as const,
+              updated_at: timestamp,
+            }
+          : ord
+      );
+      localStorage.setItem('shopcart_orders', JSON.stringify(nextOrders));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('shopcart-orders-updated', { detail: { orderId, status: 'cancelled' } }));
+      }
+    } catch {
+      // Non-fatal
+    }
+
+    return { success: true, message: data.message || 'Order cancelled successfully.' };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: err?.message || 'Network error requesting order cancellation.',
+    };
+  }
 }
 
 /**
- * Customer: Hide a cancelled/refunded order from their order history
+ * Customer: Hide a cancelled/refunded order from their order history (server-mediated)
  */
 export async function hideCustomerOrder(
   orderId: string,
   userId?: string
 ): Promise<{ success: boolean; message: string }> {
-  const timestamp = new Date().toISOString();
-
-  // 1. Try Backend API
   try {
-    await fetch(`/api/orders/${orderId}/hide`, {
+    const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+    const res = await fetch(`/api/orders/${orderId}/hide`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ userId }),
     });
-  } catch {
-    // Non-fatal
-  }
-
-  // 2. Update local storage mirror
-  try {
-    const local: Order[] = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
-    const nextOrders = local.map((ord) => {
-      if (ord.id === orderId || ord.order_number === orderId) {
-        return {
-          ...ord,
-          is_hidden_by_customer: true,
-          updated_at: timestamp,
-        };
-      }
-      return ord;
-    });
-    localStorage.setItem('shopcart_orders', JSON.stringify(nextOrders));
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('shopcart-orders-updated', { detail: { orderId, hidden: true } }));
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        success: false,
+        message: data?.error || 'Unable to hide order from history. Please sign in and try again.',
+      };
     }
-  } catch {
-    // Non-fatal
-  }
 
-  // 3. Update Supabase
-  if (isSupabaseConfigured() && orderId && !orderId.startsWith('local-')) {
+    const timestamp = new Date().toISOString();
     try {
-      await supabase
-        .from('orders')
-        .update({
-          is_hidden_by_customer: true,
-          updated_at: timestamp,
-        })
-        .eq('id', orderId);
-    } catch (err: any) {
-      console.warn('Supabase hide order warning:', err?.message);
+      const local: Order[] = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
+      const nextOrders = local.map((ord) =>
+        ord.id === orderId || ord.order_number === orderId
+          ? { ...ord, is_hidden_by_customer: true, updated_at: timestamp }
+          : ord
+      );
+      localStorage.setItem('shopcart_orders', JSON.stringify(nextOrders));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('shopcart-orders-updated', { detail: { orderId, hidden: true } }));
+      }
+    } catch {
+      // Non-fatal
     }
-  }
 
-  return { success: true, message: 'Order hidden from your order history.' };
+    return { success: true, message: data.message || 'Order hidden from your order history.' };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: err?.message || 'Network error updating order visibility.',
+    };
+  }
 }
 
 
@@ -1194,43 +876,48 @@ export async function updateOrderTracking(
 ): Promise<{ success: boolean; message: string }> {
   const isConnected = isSupabaseConfigured() && orderId && !orderId.startsWith('local-');
 
-  if (!isConnected) {
+  if (isConnected) {
     try {
-      const local: Order[] = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
-      const updated = local.map((o) => {
-        if (o.id === orderId || o.order_number === orderId) {
-          return {
-            ...o,
-            tracking_number: params.trackingNumber.trim(),
-            carrier: params.carrier.trim(),
-            estimated_delivery_date: params.estimatedDeliveryDate || o.estimated_delivery_date,
-            updated_at: new Date().toISOString(),
-          };
-        }
-        return o;
+      const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+      const res = await fetch(`/api/admin/orders/${orderId}/shipping`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({
+          trackingNumber: params.trackingNumber.trim(),
+          carrier: params.carrier.trim(),
+          estimatedDeliveryDate: params.estimatedDeliveryDate || null,
+        }),
       });
-      localStorage.setItem('shopcart_orders', JSON.stringify(updated));
-      return { success: true, message: 'Tracking information saved locally.' };
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { success: false, message: json?.error || `Failed to update tracking (HTTP ${res.status})` };
+      }
     } catch (err: any) {
-      return { success: false, message: err.message || 'Failed to update tracking' };
+      return { success: false, message: err?.message || 'Network error updating tracking' };
     }
   }
 
   try {
-    const { error } = await supabase
-      .from('orders')
-      .update({
-        tracking_number: params.trackingNumber.trim(),
-        carrier: params.carrier.trim(),
-        estimated_delivery_date: params.estimatedDeliveryDate || null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', orderId);
-
-    if (error) throw error;
-    return { success: true, message: 'Tracking and delivery estimate saved in Supabase.' };
+    const local: Order[] = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
+    const updated = local.map((o) => {
+      if (o.id === orderId || o.order_number === orderId) {
+        return {
+          ...o,
+          tracking_number: params.trackingNumber.trim(),
+          carrier: params.carrier.trim(),
+          estimated_delivery_date: params.estimatedDeliveryDate || o.estimated_delivery_date,
+          updated_at: new Date().toISOString(),
+        };
+      }
+      return o;
+    });
+    localStorage.setItem('shopcart_orders', JSON.stringify(updated));
+    return {
+      success: true,
+      message: isConnected ? 'Tracking and delivery estimate saved in Supabase.' : 'Tracking information saved locally.',
+    };
   } catch (err: any) {
-    return { success: false, message: err.message || 'Failed to update tracking in Supabase' };
+    return { success: false, message: err.message || 'Failed to update tracking' };
   }
 }
 
@@ -1247,7 +934,7 @@ export async function addShipmentUpdate(
     timestamp?: string;
   }
 ): Promise<{ success: boolean; message: string; update?: ShipmentUpdate }> {
-  const newEvt: ShipmentUpdate = {
+  let newEvt: ShipmentUpdate = {
     id: `evt-${Date.now()}`,
     status: update.status,
     title: update.title.trim(),
@@ -1258,68 +945,53 @@ export async function addShipmentUpdate(
 
   const isConnected = isSupabaseConfigured() && orderId && !orderId.startsWith('local-');
 
-  if (!isConnected) {
+  if (isConnected) {
     try {
-      const local: Order[] = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
-      const updated = local.map((o) => {
-        if (o.id === orderId || o.order_number === orderId) {
-          const updates = [...(o.shipment_updates || []), newEvt];
-          return {
-            ...o,
-            status: update.status,
-            shipment_updates: updates,
-            updated_at: new Date().toISOString(),
-          };
-        }
-        return o;
+      const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+      const res = await fetch(`/api/admin/orders/${orderId}/shipment-updates`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          status: update.status,
+          title: newEvt.title,
+          location: newEvt.location,
+          description: newEvt.description,
+          timestamp: newEvt.timestamp,
+        }),
       });
-      localStorage.setItem('shopcart_orders', JSON.stringify(updated));
-      return { success: true, message: 'Shipment update posted.', update: newEvt };
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { success: false, message: json?.error || `Failed to publish shipment update (HTTP ${res.status})` };
+      }
+      if (json.update) {
+        newEvt = json.update;
+      }
     } catch (err: any) {
-      return { success: false, message: err.message || 'Failed to post update' };
+      return { success: false, message: err?.message || 'Network error publishing shipment update' };
     }
   }
 
   try {
-    // 1. Fetch current shipment_updates
-    const { data: currentOrder } = await supabase
-      .from('orders')
-      .select('shipment_updates')
-      .eq('id', orderId)
-      .single();
-
-    const existingUpdates: ShipmentUpdate[] = Array.isArray(currentOrder?.shipment_updates)
-      ? currentOrder.shipment_updates
-      : [];
-    const merged = [...existingUpdates, newEvt];
-
-    const { error } = await supabase
-      .from('orders')
-      .update({
-        status: update.status,
-        shipment_updates: merged as any,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', orderId);
-
-    if (error) throw error;
-
-    // Optional table insert
-    try {
-      await supabase.from('order_shipment_updates').insert({
-        order_id: orderId,
-        status: update.status,
-        title: newEvt.title,
-        description: newEvt.description,
-        location: newEvt.location,
-        created_at: newEvt.timestamp,
-      });
-    } catch {
-      // Ignored
-    }
-
-    return { success: true, message: 'Shipment update published to Supabase!', update: newEvt };
+    const local: Order[] = JSON.parse(localStorage.getItem('shopcart_orders') || '[]');
+    const updated = local.map((o) => {
+      if (o.id === orderId || o.order_number === orderId) {
+        const updates = [...(o.shipment_updates || []), newEvt];
+        return {
+          ...o,
+          status: update.status,
+          shipment_updates: updates,
+          updated_at: new Date().toISOString(),
+        };
+      }
+      return o;
+    });
+    localStorage.setItem('shopcart_orders', JSON.stringify(updated));
+    return {
+      success: true,
+      message: isConnected ? 'Shipment update published to Supabase!' : 'Shipment update posted.',
+      update: newEvt,
+    };
   } catch (err: any) {
-    return { success: false, message: err.message || 'Failed to publish shipment update' };
+    return { success: false, message: err.message || 'Failed to post update' };
   }
 }

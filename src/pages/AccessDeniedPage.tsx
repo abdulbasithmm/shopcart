@@ -13,14 +13,14 @@ import {
 import { PageView } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { isSupabaseConfigured } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 interface AccessDeniedPageProps {
   onNavigate: (page: PageView) => void;
 }
 
 export const AccessDeniedPage: React.FC<AccessDeniedPageProps> = ({ onNavigate }) => {
-  const { user, isAuthenticated, logout, quickDemoLogin } = useAuth();
+  const { user, isAuthenticated, logout } = useAuth();
   const { showToast } = useToast();
 
   const handleSignOut = async () => {
@@ -31,12 +31,6 @@ export const AccessDeniedPage: React.FC<AccessDeniedPageProps> = ({ onNavigate }
     } catch (err: any) {
       showToast(err.message || 'Error signing out', 'error');
     }
-  };
-
-  const handleDemoAdmin = () => {
-    quickDemoLogin(true);
-    showToast('Authenticated as Administrator (Sarah Connor)', 'success');
-    onNavigate('admin');
   };
 
   return (

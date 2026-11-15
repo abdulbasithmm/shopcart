@@ -109,13 +109,13 @@ export interface CompletedOrderState {
 }
 
 const COUNTRIES = [
+  'India',
   'United States',
   'Canada',
   'United Kingdom',
   'Australia',
   'Germany',
   'France',
-  'India',
   'Japan',
   'Singapore',
   'United Arab Emirates',
@@ -129,6 +129,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     discountAmount,
     shippingFee,
     taxAmount,
+    hasUnconfiguredGst,
+    unconfiguredGstProducts,
     total,
     coupon,
     applyCoupon,
@@ -224,7 +226,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
   const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
   const [shippingSpeed, setShippingSpeed] = useState<'standard' | 'express'>('standard');
 
-  const computedShippingFee = shippingSpeed === 'express' ? shippingFee + 15 : shippingFee;
+  const computedShippingFee = shippingSpeed === 'express' ? shippingFee + 99 : shippingFee;
   const finalPayableTotal = Math.max(0, subtotal - discountAmount + computedShippingFee + taxAmount);
 
   // Dynamic Order UPI URI and Dynamic QR URL
@@ -290,9 +292,9 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
               ...prev,
               upiTransactionRef: data.analysis.extracted_utr,
             }));
-            showToast(`Auto-recognized 12-digit UTR: ${data.analysis.extracted_utr}`, 'success');
+            showToast(`Auto-recognized 12-character UTR: ${data.analysis.extracted_utr}`, 'success');
           } else {
-            showToast('Receipt uploaded. Please verify or enter your 12-digit UTR.', 'info');
+            showToast('Receipt uploaded. Please verify or enter your 12-character alphanumeric UTR.', 'info');
           }
         } else if (data.error) {
           setAiAnalysisError(data.error);
@@ -433,12 +435,12 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
       errs.pinCode = 'Please enter a valid 6-digit Indian postal PIN code (e.g. 560001)';
     }
 
-    // 12-digit UPI UTR Reference validation
+    // 12-character alphanumeric UPI UTR Reference validation
     const cleanUtr = (data.upiTransactionRef || '').replace(/[\s-]/g, '').trim();
     if (!cleanUtr) {
-      errs.upiTransactionRef = '12-digit UPI Transaction Reference (UTR) is required to verify payment';
+      errs.upiTransactionRef = '12-character alphanumeric UPI Transaction Reference (UTR) is required to verify payment';
     } else if (cleanUtr.length !== 12 || !/^[0-9A-Za-z]{12}$/.test(cleanUtr)) {
-      errs.upiTransactionRef = 'Please enter a valid 12-digit alphanumeric UPI UTR reference (e.g. 431029482910)';
+      errs.upiTransactionRef = 'Please enter a valid 12-character alphanumeric UPI UTR reference (e.g. 431029482910)';
     }
 
     return errs;
@@ -497,8 +499,13 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
     const validationErrors = validateForm(formData);
     setErrors(validationErrors);
 
+    if (hasUnconfiguredGst) {
+      showToast(`Checkout unavailable: GST slab is not configured for ${unconfiguredGstProducts.join(', ')}.`, 'error');
+      return;
+    }
+
     if (Object.keys(validationErrors).length > 0) {
-      showToast('Please complete all required delivery fields and enter a valid 12-digit UPI UTR.', 'error');
+      showToast('Please complete all required delivery fields and enter a valid 12-character alphanumeric UPI UTR.', 'error');
       return;
     }
 
@@ -519,6 +526,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         taxAmount,
         totalAmount: finalPayableTotal,
         couponCode: coupon ? coupon.code : undefined,
+        shippingSpeed,
         shippingAddress: {
           fullName: formData.fullName.trim(),
           phone: cleanPhone,
@@ -540,7 +548,6 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         paymentStatus: 'pending_admin_verification',
         transactionReference: cleanRef,
         screenshotUrl: screenshotPreview || undefined,
-        aiAnalysis: aiAnalysis || undefined,
       });
 
       if (!orderRes.success) {
@@ -555,12 +562,12 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
         paymentMethod: formData.paymentMethod,
         paymentStatus: 'pending_admin_verification',
         transactionReference: cleanRef,
-        totalAmount: finalPayableTotal,
+        totalAmount: orderRes.pricing?.totalAmount ?? finalPayableTotal,
         items: [...cart],
         isStoredInSupabase: orderRes.isStoredInSupabase,
         verifiedAt: new Date().toLocaleTimeString(),
-        screenshotUrl: screenshotPreview || null,
-        aiAnalysis: aiAnalysis || null,
+        screenshotUrl: orderRes.screenshotUrl || screenshotPreview || null,
+        aiAnalysis: orderRes.aiAnalysis || null,
       });
 
       // Save address to customer profile if requested
@@ -739,7 +746,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                     value={formData.fullName}
                     onChange={(e) => handleFieldChange('fullName', e.target.value)}
                     onBlur={() => handleBlur('fullName')}
-                    placeholder="e.g. Jordan Hayes"
+                    placeholder="e.g. Aarav Sharma"
                     className={`w-full px-3.5 py-2.5 text-xs bg-slate-50 border rounded-lg transition-colors focus:outline-none focus:bg-white focus:ring-2 ${
                       errors.fullName && touched.fullName
                         ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/30'
@@ -763,7 +770,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                     value={formData.email}
                     onChange={(e) => handleFieldChange('email', e.target.value)}
                     onBlur={() => handleBlur('email')}
-                    placeholder="jordan@example.com"
+                    placeholder="aarav@example.in"
                     className={`w-full px-3.5 py-2.5 text-xs bg-slate-50 border rounded-lg transition-colors focus:outline-none focus:bg-white focus:ring-2 ${
                       errors.email && touched.email
                         ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/30'
@@ -787,7 +794,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                     value={formData.phone}
                     onChange={(e) => handleFieldChange('phone', e.target.value)}
                     onBlur={() => handleBlur('phone')}
-                    placeholder="+1 (555) 234-5678"
+                    placeholder="9876543210"
                     className={`w-full px-3.5 py-2.5 text-xs bg-slate-50 border rounded-lg transition-colors focus:outline-none focus:bg-white focus:ring-2 ${
                       errors.phone && touched.phone
                         ? 'border-rose-300 focus:ring-rose-200 bg-rose-50/30'
@@ -1300,7 +1307,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                       </div>
                     </div>
                     <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 self-start sm:self-auto">
-                      Powered by Gemini 3.8 Flash
+                      Powered by Gemini 4 Hydrogen
                     </span>
                   </div>
 
@@ -1369,7 +1376,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                           <RefreshCw className="w-5 h-5 text-[#0b5c37] animate-spin shrink-0" />
                           <div>
                             <p className="font-bold text-emerald-900">
-                              Gemini 3.8 Flash AI Analyzing Receipt Authenticity...
+                              Gemini 4 Hydrogen AI Analyzing Receipt Authenticity...
                             </p>
                             <p className="text-[11px] text-emerald-800 mt-0.5">
                               Extracting 12-digit UTR, checking payment status, comparing paid amount (₹{finalPayableTotal.toFixed(2)}), and scanning for pixel tampering.
@@ -1490,12 +1497,24 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                   </p>
                 </div>
 
+                {hasUnconfiguredGst && (
+                  <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-900 space-y-1">
+                    <div className="font-bold flex items-center gap-1.5">
+                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>GST Rate Configuration Required</span>
+                    </div>
+                    <p className="text-[11px] leading-relaxed">
+                      Commercial checkout cannot be completed until an administrator configures the GST slab for: <strong>{unconfiguredGstProducts.join(', ')}</strong>.
+                    </p>
+                  </div>
+                )}
+
                 {/* Submit Payment Details Button */}
                 <form onSubmit={handleUPIOrderSubmit}>
                   <button
                     type="submit"
-                    disabled={isSubmitting}
-                    className="w-full py-3.5 bg-[#0b5c37] hover:bg-[#08482b] disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    disabled={isSubmitting || hasUnconfiguredGst}
+                    className="w-full py-3.5 bg-[#0b5c37] hover:bg-[#08482b] disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
                     {isSubmitting ? (
                       <>
@@ -1630,13 +1649,19 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                 <div className="flex justify-between items-center">
                   <span>Shipping Fee</span>
                   <span className="font-semibold text-slate-900 tabular-nums">
-                    {computedShippingFee === 0 ? <span className="text-emerald-600 font-bold">FREE</span> : `$${computedShippingFee.toFixed(2)}`}
+                    {computedShippingFee === 0 ? <span className="text-emerald-600 font-bold">FREE</span> : formatPrice(computedShippingFee)}
                   </span>
                 </div>
 
                 <div className="flex justify-between items-center">
-                  <span>Estimated Tax (8%)</span>
-                  <span className="font-semibold text-slate-900 tabular-nums">{formatPrice(taxAmount)}</span>
+                  <span>Estimated GST / Tax</span>
+                  <span className="font-semibold text-slate-900 tabular-nums">
+                    {hasUnconfiguredGst ? (
+                      <span className="text-rose-700 font-bold">GST Config Required</span>
+                    ) : (
+                      formatPrice(taxAmount)
+                    )}
+                  </span>
                 </div>
 
                 <div className="pt-3 border-t border-slate-200 flex justify-between items-baseline">
@@ -1645,7 +1670,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                     <span className="text-[11px] text-slate-400">Currency: INR (₹)</span>
                   </div>
                   <span className="text-2xl font-black text-[#0b5c37] tabular-nums">
-                    ${finalPayableTotal.toFixed(2)}
+                    {formatPrice(finalPayableTotal)}
                   </span>
                 </div>
               </div>
